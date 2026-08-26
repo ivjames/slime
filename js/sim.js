@@ -54,36 +54,87 @@ var GW = 420, GH = 260, NCELL = GW * GH;   // internal grid resolution
 var MAXA = 14000;                          // hard agent ceiling (typed array size)
 var DT = 1 / 60;                           // fixed sim timestep
 
-var SENS_D = 7.0;      // sensor distance, cells
-var SENS_A = 0.44;     // sensor half-angle, rad (~25 deg)
-var TURN   = 0.42;     // max turn per step, rad
-var SPEED  = 0.62;     // cells per step
+/* Motion + trail are the Jones (2010) lattice-forming regime, in grid cells:
+   a 45 deg rotation toward the better sensor, one cell of travel per step, a
+   fat deposit onto a field that decays a few percent a frame and is blurred
+   once a frame. Every one of these matters for reticulation — the previous
+   values (a 0.62-cell step, a 0.34 deposit onto a 0.962 decay) smeared the
+   field into one blob instead of resolving veins.
 
-var DEPOSIT   = 0.34;  // trail laid per agent per step
-var TRAIL_MAX = 6.0;
-var DECAY     = 0.962; // per-frame trail decay
+   The one deliberate departure is the sensor offset: Jones' ~9 cells sets the
+   mesh scale, and 9 on a dish only 420x260 leaves room for about six tubes
+   and no holes at all. Five halves the vein width and buys a mesh of
+   twenty-to-fifty cells, which is what reads as physarum at this size. */
+var SENS_D = 5.0;      // sensor distance, cells
+var SENS_A = 0.40;     // sensor half-angle, rad (~23 deg)
+var TURN   = 0.79;     // rotation per step toward the better sensor, rad (45 deg)
+var SPEED  = 1.0;      // cells per step
+var JITTER = 0.11;     // random heading jitter per step — the probing of the front
+/* Sensor noise, and the reason it exists. The turn is decided by COMPARING
+   three samples, so a field's weight changes nothing where it is the only
+   field present — an arbitrarily faint food gradient still wins every
+   comparison and still produces a dead-straight run at the flake. Noise of
+   this size is the scale below which a gradient is only a statistical bias:
+   the trail in a real vein (tens) is read exactly, the food gradient (~0.5
+   per sensor step) merely tilts the odds, and an agent out on clean agar with
+   nothing to sense random-walks instead of flying off in a straight line. */
+var SENS_NOISE = 1.5;
+/* Cytoplasm creep. An agent standing on established trail is inside the
+   plasmodium and travels at full speed; one that has wandered out onto clean
+   agar is a probing tip with no cytoplasm behind it and crawls. Without this
+   the population is a gas: it expands ballistically to the dish walls in ten
+   seconds, ends up at a fraction of a percent per cell, and a network cannot
+   form at that density however well the sensors are tuned. With it the front
+   advances only as fast as trail can be laid behind it, which is what a
+   growing plasmodium actually looks like. */
+var VOID_SPEED = 0.05; // fraction of full speed out on bare agar
+var SPEED_REF  = 20.0; // trail level that buys full speed
+var CUE_FLOW   = 0.95; // and a player cue buys it outright
 
-var FOODW = 15.0;      // weight of the static food attractant
-var CUEW  = 9.0;       // weight of the player's growth cue
-var RETW  = 10.0;      // weight of the player's retract field
-var WALL_PEN = -900;   // sensed cost of a wall cell
+var DEPOSIT   = 5.0;   // trail laid per agent per step
+var TRAIL_MAX = 90.0;
+var DECAY     = 0.945; // per-frame trail decay
+/* Side weight of the separable blur run once a frame. It sets how fat a vein
+   can get: the classic 3x3 mean smears a one-cell tube out to six or seven,
+   which on a 420x260 dish leaves room for about six tubes and no mesh at all. */
+var DIFF      = 0.10;
+var TRAIL_VIS = 46.0;  // trail value that renders as a fully lit tube
+
+/* Food is a WEAK bias, not the field the organism follows. It used to be
+   worth 15x a normalised attractant against a trail that maxed out at 6, so
+   every agent in the dish pointed at the nearest flake from birth and the
+   culture flew there as a single filament. The lattice only appears when the
+   agent's own trail is the dominant sensed term; food supplies a slow drift
+   at the front, and gets its real pull only inside a flake's own aura. */
+var FOODW = 2.6;       // weight of the static food attractant
+var CUEW  = 26.0;      // weight of the player's growth cue
+var RETW  = 30.0;      // weight of the player's retract field
+var WALL_PEN = -9000;  // sensed cost of a wall cell
 
 var CUE_DECAY = 0.905; // player fields dissipate after release
-/* Brush radius. This has to be MUCH larger than the 7-cell sensor reach: a cue
+/* Brush radius. This has to be MUCH larger than the sensor reach: a cue
    is only sensed inside its own footprint, so a small brush laid even 25 cells
    off the slime edge is invisible to it and the front never moves. The radius
    is the range at which the player can lead the organism. */
 var CUE_R = 52;
 
-var HAZ_HEAT = 1.15;   // repulsion of a heat zone
-var HAZ_QUIN = 0.72;   // repulsion of a quinine zone (scaled by 1 - habituation)
+var HAZ_HEAT = 9.0;    // repulsion of a heat zone
+var HAZ_QUIN = 5.2;    // repulsion of a quinine zone (scaled by 1 - habituation)
 
 var SPENT_FOOD = 0.30; // an engulfed node's remaining pull (a refuge, not a beacon)
-var SPENT_FALL = 60;   // and only over this reach, so spent food cannot outbid fresh
-var MAX_ENGULF_RATE = 1 / 120; // a node takes >= 2s to consume however big the front
-var ENGULF_SOFT = 45;  // density gate: a trickle of agents barely counts
-var ENGULF_DECAY = 0.0045; // an abandoned node re-forms: commit, or lose the ground
-var LUT_SCALE = 52;    // trail value -> gradient index multiplier
+var SPENT_FALL = 34;   // and only over this reach, so spent food cannot outbid fresh
+var MAX_ENGULF_RATE = 1 / 200; // a node takes >= 3.3s to consume however big the front
+/* Half-rate front, as a fraction of the node's own area. Blocked agents count
+   as contact, which roughly doubled the hits a jammed front reports — but
+   simply doubling this to compensate is wrong, and measurably so. A cued front
+   is dense and jams, an idle one is sparse and is limited by how long it takes
+   to arrive at all, so this constant prices ACTIVE play almost alone: at 0.26
+   EXP-01 ran 100s led against 114s untouched, erasing the point of the
+   controls, where at 0.13 it is nearer 70s against 105s. The two dishes that
+   came out genuinely too quick are corrected by their own `engulf` multiplier
+   instead, which is the knob meant for per-dish pacing. */
+var ENGULF_SOFT = 0.13;
+var ENGULF_DECAY = 0.0022; // an abandoned node re-forms: commit, or lose the ground
 
 /* ------------------------------------------------------------
    2. the five experiments
@@ -106,7 +157,7 @@ var EXPERIMENTS = [
       { x: 386, y: 224, r: 13, label: 'flake d' }
     ],
     walls: [], hazards: [],
-    start: 900, cap: 5200, sustain: 1500, grow: 150, starve: 28, grace: 26,
+    start: 4500, cap: 11000, sustain: 3200, grow: 300, starve: 40, grace: 40, engulf: 1.6,
     timeLimit: 0, hab: false, shocks: false,
     script: [
       { t: 1.5, hi: true, text: 'hold the pointer on the agar — the front flows toward the cue.' },
@@ -141,8 +192,8 @@ var EXPERIMENTS = [
       [98, 100, 44, 7], [258, 170, 54, 7]
     ]),
     hazards: [],
-    start: 950, cap: 5200, sustain: 2000, grow: 150, starve: 22, grace: 58,
-    timeLimit: 280, hab: false, shocks: false,
+    start: 5000, cap: 11000, sustain: 5800, grow: 320, starve: 11, grace: 260, reach: 260, engulf: 1.7,
+    timeLimit: 700, hab: false, shocks: false,
     script: [
       { t: 2, hi: true, text: 'walls. the agar has been cut into corridors.' },
       { t: 12, text: 'dead ends cost cytoplasm. retract out of them.' }
@@ -177,8 +228,8 @@ var EXPERIMENTS = [
       { x: 46, y: 84, r: 10, label: 'kofu' }
     ],
     walls: [], hazards: [],
-    start: 1000, cap: 6400, sustain: 900, grow: 170, starve: 26, grace: 30,
-    timeLimit: 320, hab: false, shocks: false,
+    start: 4200, cap: 12000, sustain: 1500, grow: 340, starve: 44, grace: 45, engulf: 12.0,
+    timeLimit: 340, hab: false, shocks: false,
     script: [
       { t: 2, hi: true, text: 'nine depots. the dish is the wrong shape for a city and you do not care.' },
       { t: 15, text: 'links that carry nothing are being thinned out.' }
@@ -211,8 +262,8 @@ var EXPERIMENTS = [
       { type: 'q', x: 150, y: 0, w: 32, h: GH },
       { type: 'q', x: 246, y: 0, w: 32, h: GH }
     ],
-    start: 1200, cap: 5400, sustain: 1700, grow: 155, starve: 20, grace: 42,
-    timeLimit: 330, hab: true, shocks: false,
+    start: 5000, cap: 11000, sustain: 3900, grow: 320, starve: 18, grace: 130, reach: 290,
+    timeLimit: 440, hab: true, shocks: false,
     script: [
       { t: 2, hi: true, text: 'two purple strips. everything past them smells like dinner.' },
       { t: 8, hi: true, text: 'hold a cue across the strip to push the front through it.' },
@@ -245,7 +296,7 @@ var EXPERIMENTS = [
       { x: 210, y: 222, r: 12, label: 'flake S' }
     ],
     walls: [], hazards: [],
-    start: 1100, cap: 5800, sustain: 1300, grow: 160, starve: 26, grace: 28,
+    start: 4200, cap: 11500, sustain: 2100, grow: 320, starve: 44, grace: 40,
     timeLimit: 0, hab: false, shocks: true,
     /* the win needs the flakes AND enough cycles outlasted for the anticipation
        to have somewhere to show — see the finish() gate */
@@ -282,6 +333,20 @@ var retF  = new Float32Array(NCELL);
 var wallM = new Uint8Array(NCELL);
 var hazM  = new Uint8Array(NCELL);     // 0 none, 1 heat, 2 quinine
 var nodeAt = new Int16Array(NCELL);    // cell -> node index, -1 for none
+/* One agent per cell. Without it the whole population collapses into whichever
+   vein is currently strongest and the network is a single rope; with it a
+   saturated tube spills sideways, which is exactly how the mesh gets its holes
+   and how the front stays a fan rather than a beam.
+
+   COUNTS, not a flag. Placement (inoculation, growth) can still put two agents
+   in one cell, and with a flag the first of them to leave cleared the cell for
+   everyone — the exclusion quietly eroded exactly where the population is
+   densest, which is where it does the work. Counts also mean every path that
+   removes an agent has to decrement: the death branch below does, and the
+   whole grid is restamped from real positions at the top of every step, so
+   spawnAgent/killRandom (which run after the agent loop) cannot leave it
+   drifted for more than the rest of the frame. */
+var occ = new Uint16Array(NCELL);
 
 var ax = new Float32Array(MAXA);
 var ay = new Float32Array(MAXA);
@@ -290,13 +355,29 @@ var nAgents = 0;
 
 /* colour lookup for the slime body: faint olive -> yellow -> white hot */
 var LUT = new Uint8Array(256 * 3);
+/* Trail -> LUT index, gamma 0.45. Linear mapping is what made the lattice
+   invisible: a vein carrying a tenth of a trunk's traffic landed three steps
+   above black, so the mesh was simulated and never seen. The gamma lifts the
+   low decade into the olive range, which is where the fine veins live. */
+var GAMN = 2048;
+var GAM = new Uint8Array(GAMN);
+var GAM_SCALE = (GAMN - 1) / TRAIL_MAX;
+(function buildGamma() {
+  for (var j = 0; j < GAMN; j++) {
+    var t = (j / GAM_SCALE) / TRAIL_VIS;
+    if (t > 1) t = 1;
+    var v = Math.pow(t, 0.45) * 255;
+    GAM[j] = v > 255 ? 255 : (v | 0);
+  }
+})();
 (function buildLUT() {
   var stops = [
     [0.00,   0,   0,   0],
-    [0.10,  20,  24,   9],
-    [0.28,  72,  70,  20],
-    [0.52, 148, 134,  36],
-    [0.76, 218, 202,  72],
+    [0.05,  16,  18,   8],
+    [0.14,  38,  40,  14],
+    [0.30,  84,  80,  22],
+    [0.54, 152, 138,  38],
+    [0.78, 220, 204,  74],
     [1.00, 255, 246, 190]
   ];
   for (var i = 0; i < 256; i++) {
@@ -430,8 +511,17 @@ function buildFood() {
   /* Chemotaxis reach, in cells of open agar. This is the game's main dial: it
      is how far the organism can find food BY ITSELF. Set it wide and the dish
      solves itself with no player at all; this is short enough that only the
-     nearest flake is smellable and everything beyond has to be led there. */
-  var e = S.exp, FALL = 95;
+     nearest flake is smellable and everything beyond has to be led there.
+     Read it together with FOODW: reach says where food is felt at all, FOODW
+     says how loudly against the agent's own trail, and it is deliberately
+     quiet — the front should brush into food, not be aimed at it. */
+  /* Per-dish reach, because the dishes ask different questions. The default is
+     short: the flake has to be brushed into, not homed in on. EXP-02 and EXP-04
+     are premised on the food being smelled from across the plate — the maze is
+     only a maze if there is something to head for, and the bitter bridge's own
+     script says everything past the strips smells like dinner — so those two
+     widen it and put the difficulty in the walls and the quinine instead. */
+  var e = S.exp, FALL = e.reach || 34;
   foodF.fill(0);
   for (var ni = 0; ni < e.nodes.length; ni++) {
     var dm = nodeDist[ni];
@@ -475,19 +565,37 @@ function rebuildStatic() {
 function inoculate(e) {
   nAgents = 0;
   var n = Math.min(e.start, MAXA);
-  var R = 9;
-  var guard = 0;
-  while (nAgents < n && guard < n * 40) {
-    guard++;
-    var a = Math.random() * Math.PI * 2;
-    var d = Math.sqrt(Math.random()) * R;
-    var x = e.inoc.x + Math.cos(a) * d;
-    var y = e.inoc.y + Math.sin(a) * d;
-    if (x < 1 || y < 1 || x >= GW - 1 || y >= GH - 1) continue;
-    if (wallM[(y | 0) * GW + (x | 0)]) continue;
-    ax[nAgents] = x; ay[nAgents] = y;
-    ah[nAgents] = Math.random() * Math.PI * 2;
-    nAgents++;
+  /* The drop fills outward from the inoculation point through CONNECTED open
+     agar, one agent per cell in breadth-first order. A plain disk of the
+     needed radius would cross maze walls and seed agents in corridors the
+     culture has never reached (EXP-02's radius spans two baffles); a
+     flood-fill cannot start anywhere it could not physically flow. In an
+     open dish the fill IS the disk, so nothing changes there. */
+  occ.fill(0);
+  var seen = new Uint8Array(GW * GH);
+  var q = new Int32Array(GW * GH);
+  var qh = 0, qt = 0;
+  var s = (e.inoc.y | 0) * GW + (e.inoc.x | 0);
+  q[qt++] = s; seen[s] = 1;
+  while (qh < qt && nAgents < n) {
+    var ci = q[qh++];
+    var cx = ci % GW, cy = (ci / GW) | 0;
+    if (cx < 1 || cy < 1 || cx >= GW - 1 || cy >= GH - 1 || wallM[ci]) continue;
+    /* jitter clear of the cell edges so Float32 rounding cannot carry the
+       stored position into a neighbouring cell (see the movement fround note) */
+    ax[nAgents] = cx + 0.05 + Math.random() * 0.9;
+    ay[nAgents] = cy + 0.05 + Math.random() * 0.9;
+    var si = (ay[nAgents] | 0) * GW + (ax[nAgents] | 0);
+    if (!wallM[si] && !occ[si]) {
+      occ[si] = 1;
+      ah[nAgents] = Math.random() * Math.PI * 2;
+      nAgents++;
+    }
+    var w = ci - 1, ee = ci + 1, nn = ci - GW, ss2 = ci + GW;
+    if (!seen[w]) { seen[w] = 1; q[qt++] = w; }
+    if (!seen[ee]) { seen[ee] = 1; q[qt++] = ee; }
+    if (!seen[nn]) { seen[nn] = 1; q[qt++] = nn; }
+    if (!seen[ss2]) { seen[ss2] = 1; q[qt++] = ss2; }
   }
 }
 
@@ -498,7 +606,10 @@ function spawnAgent() {
   for (var t = 0; t < 3; t++) {
     var k = (Math.random() * nAgents) | 0;
     var ci = ((ay[k] | 0) * GW + (ax[k] | 0));
-    var v = foodF[ci];
+    /* new cytoplasm appears where the food is and where the player is asking
+       for it, so holding a cue thickens that part of the network rather than
+       only steering the tips that happen to be inside the brush */
+    var v = foodF[ci] + cueF[ci] * 0.8;
     if (v > bestV) { bestV = v; best = k; }
   }
   if (best < 0) return;
@@ -506,8 +617,13 @@ function spawnAgent() {
     var nx = ax[best] + (Math.random() - 0.5) * 8;
     var ny = ay[best] + (Math.random() - 0.5) * 8;
     if (nx < 1 || ny < 1 || nx >= GW - 1 || ny >= GH - 1) continue;
-    if (wallM[(ny | 0) * GW + (nx | 0)]) continue;
     ax[nAgents] = nx; ay[nAgents] = ny;
+    var ni2 = (ay[nAgents] | 0) * GW + (ax[nAgents] | 0);
+    /* respect the exclusion at birth too: a spawn landing on top of a sibling
+       is a stack the movement rule then has to unpick, and near a flake (where
+       growth is busiest) that is precisely where the mesh wants room */
+    if (wallM[ni2] || occ[ni2]) continue;
+    occ[ni2]++;
     ah[nAgents] = Math.random() * Math.PI * 2;
     nAgents++;
     return;
@@ -517,6 +633,8 @@ function spawnAgent() {
 function killRandom() {
   if (nAgents <= 0) return;
   var k = (Math.random() * nAgents) | 0;
+  var ci = (ay[k] | 0) * GW + (ax[k] | 0);
+  if (occ[ci]) occ[ci]--;          /* every removal path decrements */
   nAgents--;
   ax[k] = ax[nAgents]; ay[k] = ay[nAgents]; ah[k] = ah[nAgents];
 }
@@ -533,24 +651,25 @@ function sense(x, y) {
    ------------------------------------------------------------ */
 function diffuseTrail() {
   var x, y, i, row;
-  /* horizontal 1-2-1 into tmpF */
+  var sw = DIFF, cw = 1 - 2 * DIFF;
+  /* horizontal blur into tmpF */
   for (y = 0; y < GH; y++) {
     row = y * GW;
     for (x = 0; x < GW; x++) {
       i = row + x;
       var l = x > 0 ? trail[i - 1] : trail[i];
       var r = x < GW - 1 ? trail[i + 1] : trail[i];
-      tmpF[i] = 0.25 * l + 0.5 * trail[i] + 0.25 * r;
+      tmpF[i] = sw * l + cw * trail[i] + sw * r;
     }
   }
-  /* vertical 1-2-1 back into trail, with decay, and player fields decayed too */
+  /* vertical blur back into trail, with decay, and player fields decayed too */
   for (y = 0; y < GH; y++) {
     row = y * GW;
     var up = y > 0 ? row - GW : row;
     var dn = y < GH - 1 ? row + GW : row;
     for (x = 0; x < GW; x++) {
       i = row + x;
-      var v = (0.25 * tmpF[up + x] + 0.5 * tmpF[i] + 0.25 * tmpF[dn + x]) * DECAY;
+      var v = (sw * tmpF[up + x] + cw * tmpF[i] + sw * tmpF[dn + x]) * DECAY;
       trail[i] = wallM[i] ? 0 : (v < 0.0016 ? 0 : v);
       if (cueF[i] > 0) { var c = cueF[i] * CUE_DECAY; cueF[i] = c < 0.002 ? 0 : c; }
       if (retF[i] > 0) { var q = retF[i] * CUE_DECAY; retF[i] = q < 0.002 ? 0 : q; }
@@ -596,9 +715,20 @@ function step() {
 
   var shockOn = S.shockActive;
   var shockDmg = e.shock ? e.shock.dmg : 0;
-  var quinDmg = 0.050 * (1 - S.hab);
+  /* Halved for the same reason as ENGULF_SOFT: an agent wedged in the strip
+     used to be immune because it had not moved, and it was those stalled
+     agents that racked up the contact time habituation is built from. Now
+     they take the damage, so at the old rate the front was culled at the
+     bitter edge before it could learn anything — which is the one outcome
+     this dish must not have. */
+  var quinDmg = 0.011 * (1 - S.hab);
   var heatDmg = 0.010;
   var inQuin = 0;
+
+  /* restamp the occupancy counts for this step from where the agents actually
+     are — the one line that guarantees the counts cannot drift across frames */
+  occ.fill(0);
+  for (k = 0; k < nAgents; k++) occ[(ay[k] | 0) * GW + (ax[k] | 0)]++;
 
   k = 0;
   while (k < nAgents) {
@@ -609,40 +739,74 @@ function step() {
     var hl = h - SENS_A, hr = h + SENS_A;
     var L = sense(x + Math.cos(hl) * SENS_D, y + Math.sin(hl) * SENS_D);
     var R = sense(x + Math.cos(hr) * SENS_D, y + Math.sin(hr) * SENS_D);
+    F += (Math.random() - 0.5) * SENS_NOISE;
+    L += (Math.random() - 0.5) * SENS_NOISE;
+    R += (Math.random() - 0.5) * SENS_NOISE;
 
-    if (F >= L && F >= R) {
-      h += (Math.random() - 0.5) * 0.95;
+    /* Jones' rule, exactly: hold the heading when the middle sensor is best,
+       turn one rotation-angle toward the better flank otherwise, and turn a
+       random way when the middle is worst. The old code randomised the
+       straight-ahead case by +/- 27 degrees, which destroys the persistence a
+       trail needs to be followed at all — no persistence, no veins. */
+    if (F > L && F > R) {
+      /* straight on */
+    } else if (F < L && F < R) {
+      h += (Math.random() < 0.5 ? -TURN : TURN);
     } else if (L > R) {
-      h -= TURN * (0.55 + Math.random() * 0.75);
+      h -= TURN;
     } else if (R > L) {
-      h += TURN * (0.55 + Math.random() * 0.75);
+      h += TURN;
+    }
+    h += (Math.random() - 0.5) * JITTER;
+
+    var oldIdx = (y | 0) * GW + (x | 0);
+    /* Speed is how much cytoplasm is behind the tip: established trail, or the
+       player shoving it there. A cue does not merely aim the front, it makes it
+       flow — which is the difference between leading the culture and watching
+       it explore. */
+    var lt = trail[oldIdx] / SPEED_REF;
+    var lc = cueF[oldIdx] * CUE_FLOW;
+    if (lc > lt) lt = lc;
+    var spd = stepSpeed * (lt >= 1 ? 1 : VOID_SPEED + (1 - VOID_SPEED) * lt);
+    /* round to Float32 before anything reads a cell from it: ax/ay are
+       Float32Arrays, so an unrounded double a hair under an integer can test
+       one cell and then store into the next, leaving the occupancy grid
+       reserving a cell the agent is not standing in */
+    var nx = Math.fround(x + Math.cos(h) * spd);
+    var ny = Math.fround(y + Math.sin(h) * spd);
+    var idx = -1;
+    var blocked = (nx < 1 || ny < 1 || nx >= GW - 1 || ny >= GH - 1);
+    if (!blocked) {
+      idx = (ny | 0) * GW + (nx | 0);
+      if (wallM[idx] || (idx !== oldIdx && occ[idx])) blocked = true;
+    }
+
+    /* Where this agent ends the step, moved or not. A blocked agent used to
+       skip everything below — it did not count toward engulfing the flake it
+       was standing on, did not taste the quinine it was sitting in, and was
+       immune to the dry shock. In a saturated tube most agents are blocked
+       most frames, so an agent's fate turned on whether it happened to move
+       rather than on where it was. It stays put with a fresh heading, and
+       everything the cell does to it still happens; only the trail deposit is
+       movement-only, since a stalled agent pumping trail into one cell piles
+       up against walls and inside junctions and fattens them into blobs. */
+    var cell;
+    if (blocked) {
+      ah[k] = Math.random() * Math.PI * 2;
+      cell = oldIdx;
     } else {
-      h += (Math.random() - 0.5) * TURN * 2;
+      ax[k] = nx; ay[k] = ny; ah[k] = h;
+      if (idx !== oldIdx) { occ[oldIdx]--; occ[idx]++; }
+      cell = idx;
+      var tv = trail[cell];
+      if (tv < TRAIL_MAX) trail[cell] = tv + stepDeposit;
     }
 
-    var nx = x + Math.cos(h) * stepSpeed;
-    var ny = y + Math.sin(h) * stepSpeed;
-
-    if (nx < 1 || ny < 1 || nx >= GW - 1 || ny >= GH - 1 ||
-        wallM[(ny | 0) * GW + (nx | 0)]) {
-      /* blocked: stay put, pick a fresh heading */
-      h = Math.random() * Math.PI * 2;
-      ah[k] = h;
-      k++;
-      continue;
-    }
-
-    ax[k] = nx; ay[k] = ny; ah[k] = h;
-
-    var idx = (ny | 0) * GW + (nx | 0);
-    var tv = trail[idx];
-    if (tv < TRAIL_MAX) trail[idx] = tv + stepDeposit;
-
-    var ni = nodeAt[idx];
+    var ni = nodeAt[cell];
     if (ni >= 0) nodeHits[ni]++;
 
     var dead = false;
-    var hz = hazM[idx];
+    var hz = hazM[cell];
     if (hz === 2) {
       inQuin++;
       if (quinDmg > 0 && Math.random() < quinDmg) dead = true;
@@ -655,6 +819,7 @@ function step() {
     }
 
     if (dead) {
+      if (occ[cell]) occ[cell]--;
       nAgents--;
       ax[k] = ax[nAgents]; ay[k] = ay[nAgents]; ah[k] = ah[nAgents];
       continue;
@@ -685,13 +850,15 @@ function step() {
       continue;
     }
     var nd = e.nodes[i];
-    var req = 40 * nd.r * nd.r;
-    var gain = hits / req;
-    if (gain > MAX_ENGULF_RATE) gain = MAX_ENGULF_RATE;
-    /* Density gate. Engulfing needs the front actually delivered onto the
-       flake, so a stray handful crawls while a real front is quick — a smooth
-       curve rather than a threshold, which a thin corridor front cannot clear. */
-    S.nodeProg[i] = clamp(S.nodeProg[i] + gain * (hits / (hits + ENGULF_SOFT)), 0, 1);
+    /* One saturating curve, scaled to the flake's own area: a front covering
+       most of it engulfs at the cap, a thin one crawls, a stray handful barely
+       registers. The old form divided by r-squared as well, which made a
+       corridor-width front on a big flake take a minute and a half — an
+       exploring lattice delivers fewer agents per cell than the old single
+       blob did, and the maze became unwinnable on that alone. */
+    var soft = ENGULF_SOFT * Math.PI * nd.r * nd.r * (e.engulf || 1);
+    var gain = MAX_ENGULF_RATE * (hits / (hits + soft));
+    S.nodeProg[i] = clamp(S.nodeProg[i] + gain, 0, 1);
     if (S.nodeProg[i] >= 1) {
       S.nodeDone[i] = true;
       S.engulfed++;
@@ -804,10 +971,10 @@ function paintField() {
       if (hz === 1) { r += 38; g += 20; b += 9; }
       else if (hz === 2) { r += 27; g += 12; b += 40; }
       var t = trail[i];
-      if (t > 0.02) {
-        var li = (t * LUT_SCALE) | 0;
-        if (li > 255) li = 255;
-        var o = li * 3;
+      if (t > 0.004) {
+        var gi = (t * GAM_SCALE) | 0;
+        if (gi >= GAMN) gi = GAMN - 1;
+        var o = GAM[gi] * 3;
         r += LUT[o]; g += LUT[o + 1]; b += LUT[o + 2];
         if (r > 255) r = 255;
         if (g > 255) g = 255;
@@ -1025,7 +1192,9 @@ function updateHUD() {
   var bar = $('h-massbar');
   bar.style.width = pct.toFixed(1) + '%';
   var mwrap = bar.parentNode.parentNode;
-  if (nAgents < 380) {
+  /* scaled to the dish's own ceiling: biomass now runs in the thousands,
+     so a fixed few-hundred tripwire never fired before the culture was dead */
+  if (nAgents < e.cap * 0.09) {
     if (mwrap.className.indexOf('crit') < 0) mwrap.className = 'meter mass crit';
   } else if (mwrap.className.indexOf('crit') >= 0) {
     mwrap.className = 'meter mass';
@@ -1068,7 +1237,7 @@ function noteText(e) {
   if (e.hab && S.hab >= 0.99) return 'quinine: noted, ignored';
   if (S.engulfed === 0 && S.simT > e.grace) return 'starving — nothing engulfed';
   if (S.engulfed === 0) return 'grace period — ' + Math.max(0, Math.ceil(e.grace - S.simT)) + 's of reserves';
-  if (nAgents < 500) return 'cytoplasm critically low';
+  if (nAgents < e.cap * 0.12) return 'cytoplasm critically low';
   return S.engulfed + ' of ' + e.nodes.length + ' engulfed · biomass holding';
 }
 
@@ -1175,6 +1344,10 @@ function openBrief(i) {
    15. run lifecycle
    ------------------------------------------------------------ */
 var raf = 0, lastTs = 0, acc = 0;
+/* Sim-time multiplier. 1 in play; the harness winds it up to watch ninety
+   seconds of network form in nine. It scales the step budget with it, so the
+   clock, the shock schedule and every rate stay in sim time. */
+var TURBO = 1;
 
 function startRun(i) {
   var e = EXPERIMENTS[i];
@@ -1314,11 +1487,13 @@ function frame(ts) {
   if (dt > 0.25) dt = 0.25;
 
   if (S.running && !S.paused) {
-    if (ptr.down) paintBrush(ptr.gx, ptr.gy, ptr.mode);
-    acc += dt;
-    var steps = 0;
-    while (acc >= DT && steps < 4 && S.running) { step(); acc -= DT; steps++; }
-    if (acc > DT * 4) acc = 0;
+    acc += dt * TURBO;
+    var steps = 0, budget = 4 * TURBO;
+    while (acc >= DT && steps < budget && S.running) {
+      if (ptr.down) paintBrush(ptr.gx, ptr.gy, ptr.mode);
+      step(); acc -= DT; steps++;
+    }
+    if (acc > DT * budget) acc = 0;
   } else {
     acc = 0;
   }
@@ -1486,7 +1661,24 @@ function init() {
       for (var k = 0; k < nAgents; k += 5) { sx += ax[k]; sy += ay[k]; c++; }
       return { x: sx / c, y: sy / c };
     },
-    grid: function () { return { w: GW, h: GH }; }
+    grid: function () { return { w: GW, h: GH }; },
+    /* a copy of the trail field, for measuring the network from outside */
+    trail: function () { return Float32Array.prototype.slice.call(trail); },
+    trailMax: function () { return TRAIL_MAX; },
+    /* the one writable handle: sim seconds per real second, for the harness */
+    turbo: function (n) {
+      if (n != null) TURBO = clamp(Math.round(n) || 1, 1, 24);
+      return TURBO;
+    },
+    start: function (i) { startRun(clamp(i | 0, 0, EXPERIMENTS.length - 1)); },
+    experiments: function () {
+      var out = [];
+      for (var i = 0; i < EXPERIMENTS.length; i++) {
+        out.push({ code: EXPERIMENTS[i].code, name: EXPERIMENTS[i].name,
+                   nodes: EXPERIMENTS[i].nodes.length });
+      }
+      return out;
+    }
   };
 }
 
