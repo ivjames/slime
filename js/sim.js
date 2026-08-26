@@ -192,8 +192,8 @@ var EXPERIMENTS = [
       [98, 100, 44, 7], [258, 170, 54, 7]
     ]),
     hazards: [],
-    start: 5000, cap: 11000, sustain: 5800, grow: 320, starve: 26, grace: 110, reach: 260, engulf: 1.7,
-    timeLimit: 400, hab: false, shocks: false,
+    start: 5000, cap: 11000, sustain: 5800, grow: 320, starve: 11, grace: 260, reach: 260, engulf: 1.7,
+    timeLimit: 700, hab: false, shocks: false,
     script: [
       { t: 2, hi: true, text: 'walls. the agar has been cut into corridors.' },
       { t: 12, text: 'dead ends cost cytoplasm. retract out of them.' }
@@ -565,31 +565,37 @@ function rebuildStatic() {
 function inoculate(e) {
   nAgents = 0;
   var n = Math.min(e.start, MAXA);
-  /* the inoculum is a dense drop, not an overfull one: one agent per cell is
-     enforced from the first frame, so a fixed 9-cell radius holding a thousand
-     agents would spend its first second exploding outward to find room */
-  var R = clamp(Math.sqrt(n / (Math.PI * 0.42)), 8, 64);
-  var guard = 0;
-  /* place into the occupancy grid, one per cell, so the drop starts in the
-     same state the movement rule maintains rather than with a stack to unpick */
+  /* The drop fills outward from the inoculation point through CONNECTED open
+     agar, one agent per cell in breadth-first order. A plain disk of the
+     needed radius would cross maze walls and seed agents in corridors the
+     culture has never reached (EXP-02's radius spans two baffles); a
+     flood-fill cannot start anywhere it could not physically flow. In an
+     open dish the fill IS the disk, so nothing changes there. */
   occ.fill(0);
-  while (nAgents < n && guard < n * 40) {
-    guard++;
-    var a = Math.random() * Math.PI * 2;
-    var d = Math.sqrt(Math.random()) * R;
-    var x = e.inoc.x + Math.cos(a) * d;
-    var y = e.inoc.y + Math.sin(a) * d;
-    if (x < 1 || y < 1 || x >= GW - 1 || y >= GH - 1) continue;
-    /* stamp the cell the STORED position resolves to. Float32 rounds the
-       double on the way into the array, so a coordinate a hair under an
-       integer can land one cell over — stamping from x/y instead would leave
-       the grid disagreeing with the agent it was stamped for. */
-    ax[nAgents] = x; ay[nAgents] = y;
-    var ci = (ay[nAgents] | 0) * GW + (ax[nAgents] | 0);
-    if (wallM[ci] || occ[ci]) continue;
-    occ[ci] = 1;
-    ah[nAgents] = Math.random() * Math.PI * 2;
-    nAgents++;
+  var seen = new Uint8Array(GW * GH);
+  var q = new Int32Array(GW * GH);
+  var qh = 0, qt = 0;
+  var s = (e.inoc.y | 0) * GW + (e.inoc.x | 0);
+  q[qt++] = s; seen[s] = 1;
+  while (qh < qt && nAgents < n) {
+    var ci = q[qh++];
+    var cx = ci % GW, cy = (ci / GW) | 0;
+    if (cx < 1 || cy < 1 || cx >= GW - 1 || cy >= GH - 1 || wallM[ci]) continue;
+    /* jitter clear of the cell edges so Float32 rounding cannot carry the
+       stored position into a neighbouring cell (see the movement fround note) */
+    ax[nAgents] = cx + 0.05 + Math.random() * 0.9;
+    ay[nAgents] = cy + 0.05 + Math.random() * 0.9;
+    var si = (ay[nAgents] | 0) * GW + (ax[nAgents] | 0);
+    if (!wallM[si] && !occ[si]) {
+      occ[si] = 1;
+      ah[nAgents] = Math.random() * Math.PI * 2;
+      nAgents++;
+    }
+    var w = ci - 1, ee = ci + 1, nn = ci - GW, ss2 = ci + GW;
+    if (!seen[w]) { seen[w] = 1; q[qt++] = w; }
+    if (!seen[ee]) { seen[ee] = 1; q[qt++] = ee; }
+    if (!seen[nn]) { seen[nn] = 1; q[qt++] = nn; }
+    if (!seen[ss2]) { seen[ss2] = 1; q[qt++] = ss2; }
   }
 }
 
