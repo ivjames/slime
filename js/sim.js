@@ -29,6 +29,24 @@ function fmtNum(n) {
 }
 function pick(arr) { return arr[(Math.random() * arr.length) | 0]; }
 
+/* Coarse pointer = phone/tablet. Feature-tested, never UA-sniffed: the media
+   query answers for the primary pointer, the touch-point count catches a
+   touchscreen the query calls fine. Latched on, so a laptop that is both
+   keeps its mouse copy until a finger actually lands (see markTouch). */
+var TOUCH = false;
+function detectCoarse() {
+  try {
+    if (window.matchMedia && window.matchMedia('(pointer: coarse)').matches) return true;
+  } catch (err) { /* no matchMedia — fall through to the touch-point test */ }
+  if (navigator && (navigator.maxTouchPoints | 0) > 0) return true;
+  return ('ontouchstart' in window);
+}
+function markTouch() {
+  if (TOUCH) return;
+  TOUCH = true;
+  document.body.classList.add('touch');
+}
+
 /* ------------------------------------------------------------
    1. simulation constants
    ------------------------------------------------------------ */
@@ -92,7 +110,8 @@ var EXPERIMENTS = [
     timeLimit: 0, hab: false, shocks: false,
     script: [
       { t: 1.5, hi: true, text: 'hold the pointer on the agar — the front flows toward the cue.' },
-      { t: 6, hi: true, text: 'right-click or shift pulls cytoplasm back out of a region.' },
+      { t: 6, hi: true, text: 'right-click or shift pulls cytoplasm back out of a region.',
+        textTouch: 'the RETRACT pad — or a second finger — pulls cytoplasm back out of a region.' },
       { t: 14, text: 'the dish is very quiet. there is sugar in it somewhere.' }
     ],
     ambient: [
@@ -213,7 +232,7 @@ var EXPERIMENTS = [
     code: 'EXP-05', name: 'THE FORECAST',
     blurb: 'The dish dries on a schedule. The interesting part is noticing the schedule.',
     brief: 'Saigusa, 2008. Every twenty-five seconds the air is pulled dry and you shrink. Do it enough times and something in you begins to slow down just before the next one arrives, which is either anticipation or an extremely good coincidence. Engulfed agar holds moisture — sit on it.',
-    obj: 'Engulf every flake and outlast the dry cycles.',
+    obj: 'Engulf every flake and outlast at least three dry cycles.',
     objShort: 'FLAKES',
     chips: [['', 'dry shock every ~25 s'], ['', 'desiccation damage'], ['ok', 'engulfed agar = refuge']],
     inoc: { x: 210, y: 130 },
@@ -228,6 +247,9 @@ var EXPERIMENTS = [
     walls: [], hazards: [],
     start: 1100, cap: 5800, sustain: 1300, grow: 160, starve: 26, grace: 28,
     timeLimit: 0, hab: false, shocks: true,
+    /* the win needs the flakes AND enough cycles outlasted for the anticipation
+       to have somewhere to show — see the finish() gate */
+    minShocks: 3,
     shock: { first: 16, period: 25, warn: 5, dur: 6, dmg: 0.0012 },
     script: [
       { t: 2, hi: true, text: 'the air in here is not stable. it will be pulled dry, and soon.' },
@@ -301,7 +323,7 @@ var S = {
   hab: 0, habPeak: 0, habBuilt: -1,
   growAcc: 0, starveAcc: 0,
   shockNext: 0, shockActive: false, shockWarn: false, shocksSurvived: 0,
-  shockWarned: -1, quinTime: 0,
+  shockWarned: -1, quinTime: 0, slow: 1, anticipated: false,
   ambientAt: 0, scriptIdx: 0,
   note: '', failReason: ''
 };
@@ -550,6 +572,28 @@ function step() {
   var i, k;
   for (i = 0; i < nodeHits.length; i++) nodeHits[i] = 0;
 
+  /* --- anticipation (EXP-05) ---
+     After two cycles the interval has been felt often enough that the culture
+     thickens and slows *before* the air changes, which is the whole Saigusa
+     result. One multiplier, read per agent, no per-agent state: eased in across
+     the warn window and dropped the instant the shock lands or the window
+     passes. Deposit is trimmed alongside it because a slower agent revisits the
+     same cell more often — without the trim the tubes bloom rather than thicken. */
+  var slow = 1;
+  if (e.shocks && e.shock && S.shockWarn && S.shocksSurvived >= 2) {
+    var into = clamp((S.simT - (S.shockNext - e.shock.warn)) / e.shock.warn, 0, 1);
+    slow = 1 - 0.55 * (into * into * (3 - 2 * into));   /* smoothstep 1 -> 0.45 */
+    if (!S.anticipated) {
+      S.anticipated = true;
+      logLine('the tubes are already thickening. nothing has happened yet.', true);
+    }
+  } else if (!S.shockWarn) {
+    S.anticipated = false;
+  }
+  S.slow = slow;
+  var stepSpeed = SPEED * slow;
+  var stepDeposit = DEPOSIT * (0.78 + 0.22 * slow);
+
   var shockOn = S.shockActive;
   var shockDmg = e.shock ? e.shock.dmg : 0;
   var quinDmg = 0.050 * (1 - S.hab);
@@ -576,8 +620,8 @@ function step() {
       h += (Math.random() - 0.5) * TURN * 2;
     }
 
-    var nx = x + Math.cos(h) * SPEED;
-    var ny = y + Math.sin(h) * SPEED;
+    var nx = x + Math.cos(h) * stepSpeed;
+    var ny = y + Math.sin(h) * stepSpeed;
 
     if (nx < 1 || ny < 1 || nx >= GW - 1 || ny >= GH - 1 ||
         wallM[(ny | 0) * GW + (nx | 0)]) {
@@ -592,7 +636,7 @@ function step() {
 
     var idx = (ny | 0) * GW + (nx | 0);
     var tv = trail[idx];
-    if (tv < TRAIL_MAX) trail[idx] = tv + DEPOSIT;
+    if (tv < TRAIL_MAX) trail[idx] = tv + stepDeposit;
 
     var ni = nodeAt[idx];
     if (ni >= 0) nodeHits[ni]++;
@@ -678,8 +722,18 @@ function step() {
 
   /* --- end conditions --- */
   if (nAgents <= 0) { finish(false, 'starved'); return; }
-  if (S.engulfed >= e.nodes.length) { finish(true, ''); return; }
+  if (S.engulfed >= e.nodes.length && cyclesMet(e) && !S.shockActive) { finish(true, ''); return; }
   if (e.timeLimit && S.simT >= e.timeLimit) { finish(false, 'timeout'); return; }
+}
+
+/* A dish that runs on a schedule is not won by food alone: the win text claims
+   every cycle was survived, so the run has to have actually survived some. */
+function cyclesMet(e) {
+  var need = e.minShocks | 0;
+  return !need || S.shocksSurvived >= need;
+}
+function cyclesLeft(e) {
+  return Math.max(0, (e.minShocks | 0) - S.shocksSurvived);
 }
 
 function updateShocks(e) {
@@ -776,7 +830,12 @@ function paintField() {
   octx.putImageData(img, 0, 0);
 }
 
-var ptr = { down: false, mode: 0, gx: 0, gy: 0 }; /* mode 1 = cue, 2 = retract */
+/* mode 1 = cue, 2 = retract. touchMode is the verb the on-screen pads select;
+   a second finger overrides it to retract for the duration of that gesture. */
+var ptr = { down: false, mode: 0, gx: 0, gy: 0 };
+var touchMode = 1;
+var downIds = [];      /* pointerIds currently on the stage */
+var primaryId = null;  /* the one the brush follows */
 
 function render() {
   if (!cv || !S.exp) return;
@@ -903,7 +962,7 @@ function updateNarration(e) {
   /* scripted beats */
   while (S.scriptIdx < e.script.length && S.simT >= e.script[S.scriptIdx].t) {
     var s = e.script[S.scriptIdx];
-    logLine(s.text, !!s.hi);
+    logLine((TOUCH && s.textTouch) ? s.textTouch : s.text, !!s.hi);
     S.scriptIdx++;
   }
   /* ambient mutterings */
@@ -977,14 +1036,26 @@ function updateHUD() {
     $('h-habbar').style.width = (S.hab * 100).toFixed(1) + '%';
   }
 
-  $('h-obj').textContent = e.objShort + ' ' + S.engulfed + ' / ' + e.nodes.length;
+  $('h-obj').textContent = objText(e);
   refreshNodeRows();
   $('h-note').textContent = noteText(e);
 }
 
+function objText(e) {
+  var s = e.objShort + ' ' + S.engulfed + ' / ' + e.nodes.length;
+  if (e.minShocks) s += ' · CYCLES ' + Math.min(S.shocksSurvived, e.minShocks) + ' / ' + e.minShocks;
+  return s;
+}
+
 function noteText(e) {
   if (S.shockActive) return 'DRY SHOCK — hold the refuges';
+  if (S.shockWarn && S.slow < 0.98) return 'thickening early — the interval has a shape';
   if (S.shockWarn) return 'humidity falling — ' + Math.max(0, Math.ceil(S.shockNext - S.simT)) + 's';
+  if (e.minShocks && S.engulfed >= e.nodes.length) {
+    var c = cyclesLeft(e);
+    return c > 0 ? 'every flake taken — ' + c + ' more dry cycle' + (c === 1 ? '' : 's') + ' to outlast'
+                 : 'every flake taken — hold through this cycle';
+  }
   if (e.shocks && S.shockNext > 0) {
     var togo = Math.ceil(S.shockNext - S.simT);
     if (togo > 0 && togo < 90) return 'next dry shock in ' + togo + 's';
@@ -1118,17 +1189,18 @@ function startRun(i) {
   S.growAcc = 0; S.starveAcc = 0;
   S.shockNext = e.shock ? e.shock.first : 0;
   S.shockActive = false; S.shockWarn = false; S.shocksSurvived = 0;
-  S.shockWarned = -1; S.quinTime = 0;
+  S.shockWarned = -1; S.quinTime = 0; S.slow = 1; S.anticipated = false;
   S.ambientAt = 14; S.scriptIdx = 0; S.failReason = '';
 
   buildDish(e);
   inoculate(e);
 
-  ptr.down = false; ptr.mode = 0;
+  endGesture(); ptr.mode = 0;
+  setPausedLabel(false);
 
   $('log').innerHTML = '';
   $('h-code').textContent = e.code + ' · ' + e.name;
-  $('h-obj').textContent = e.objShort + ' 0 / ' + e.nodes.length;
+  $('h-obj').textContent = objText(e);
   $('h-time').textContent = '00:00';
   $('h-note').textContent = '';
   $('h-habwrap').style.display = e.hab ? '' : 'none';
@@ -1152,10 +1224,16 @@ function stopRun() {
   if (raf) { window.cancelAnimationFrame(raf); raf = 0; }
 }
 
+function setPausedLabel(p) {
+  var b = $('s-pause');
+  if (b) b.textContent = p ? 'Resume' : 'Hold';
+}
+
 function setPaused(p) {
   if (!S.running || S.over) return;
   S.paused = !!p;
   $('pauseveil').classList.toggle('on', S.paused);
+  setPausedLabel(S.paused);
 }
 
 function finish(won, reason) {
@@ -1262,18 +1340,50 @@ function toGrid(ev) {
   return { x: clamp(gx, 0, GW - 1), y: clamp(gy, 0, GH - 1) };
 }
 
+function setTouchMode(m) {
+  touchMode = (m === 2) ? 2 : 1;
+  var g = $('t-grow'), r = $('t-ret');
+  if (g) { g.classList.toggle('on', touchMode === 1); g.setAttribute('aria-pressed', touchMode === 1 ? 'true' : 'false'); }
+  if (r) { r.classList.toggle('on', touchMode === 2); r.setAttribute('aria-pressed', touchMode === 2 ? 'true' : 'false'); }
+}
+
+function endGesture() {
+  downIds.length = 0;
+  primaryId = null;
+  ptr.down = false;
+}
+
 function bindInput() {
   var stage = $('stage');
 
   stage.addEventListener('contextmenu', function (ev) { ev.preventDefault(); });
 
   stage.addEventListener('pointerdown', function (ev) {
+    if (ev.pointerType === 'touch') markTouch();
     if (!S.running) return;
+    /* the veil owns its own taps; nothing else inside the stage is clickable */
+    if (ev.target && ev.target.id === 'pauseveil') return;
+
+    if (downIds.indexOf(ev.pointerId) < 0) downIds.push(ev.pointerId);
+
+    /* second finger down while a drag is live: that drag becomes a retract,
+       and the brush stays with the first finger. */
+    if (ptr.down && ev.pointerId !== primaryId) {
+      if (ev.pointerType === 'touch') ptr.mode = 2;
+      ev.preventDefault();
+      return;
+    }
+
     var g = toGrid(ev);
     if (!g) return;
     ev.preventDefault();
-    ptr.mode = (ev.button === 2 || ev.shiftKey || ev.ctrlKey) ? 2 : 1;
+    if (ev.pointerType === 'touch') {
+      ptr.mode = (downIds.length > 1) ? 2 : touchMode;
+    } else {
+      ptr.mode = (ev.button === 2 || ev.shiftKey || ev.ctrlKey) ? 2 : 1;
+    }
     ptr.down = true;
+    primaryId = ev.pointerId;
     ptr.gx = g.x; ptr.gy = g.y;
     if (ptr.mode === 1) S.cues++;
     try { stage.setPointerCapture(ev.pointerId); } catch (err) { /* not fatal */ }
@@ -1281,6 +1391,7 @@ function bindInput() {
 
   window.addEventListener('pointermove', function (ev) {
     if (!ptr.down) return;
+    if (primaryId !== null && ev.pointerId !== primaryId) return;
     var g = toGrid(ev);
     if (!g) return;
     ev.preventDefault();
@@ -1288,15 +1399,21 @@ function bindInput() {
   }, { passive: false });
 
   function release(ev) {
-    if (!ptr.down) return;
-    ptr.down = false;
     if (ev && ev.pointerId != null) {
+      var k = downIds.indexOf(ev.pointerId);
+      if (k >= 0) downIds.splice(k, 1);
       try { stage.releasePointerCapture(ev.pointerId); } catch (err) { /* already released */ }
+      /* the gesture ends when the last finger leaves, so a two-finger retract
+         does not snap back to grow when the second finger lifts first */
+      if (downIds.length === 0) { ptr.down = false; primaryId = null; }
+      else if (ev.pointerId === primaryId) primaryId = downIds[0];
+      return;
     }
+    endGesture();
   }
   window.addEventListener('pointerup', release);
   window.addEventListener('pointercancel', release);
-  window.addEventListener('blur', function () { ptr.down = false; });
+  window.addEventListener('blur', endGesture);
 
   document.addEventListener('keydown', function (ev) {
     if (!$('scr-sim').classList.contains('on')) return;
@@ -1324,6 +1441,10 @@ function bindButtons() {
   $('b-go').addEventListener('click', function () { startRun(briefIdx); });
   $('b-back').addEventListener('click', goTitle);
   $('s-abort').addEventListener('click', goTitle);
+  $('s-pause').addEventListener('click', function () { setPaused(!S.paused); });
+  $('s-reset').addEventListener('click', function () { if (S.idx >= 0) startRun(S.idx); });
+  $('t-grow').addEventListener('click', function () { setTouchMode(1); });
+  $('t-ret').addEventListener('click', function () { setTouchMode(2); });
   $('r-retry').addEventListener('click', function () { startRun(S.idx); });
   $('r-menu').addEventListener('click', goTitle);
   $('r-next').addEventListener('click', function () {
@@ -1344,11 +1465,29 @@ function bindButtons() {
 
 function init() {
   loadSave();
+  if (detectCoarse()) markTouch();
   initCanvas();
   bindInput();
   bindButtons();
+  setTouchMode(1);
   renderTitle();
   show('scr-title');
+
+  /* read-only handle for the harness; nothing in the game reads it back */
+  window.SLIME = {
+    S: S, ptr: ptr,
+    touchMode: function () { return touchMode; },
+    isTouch: function () { return TOUCH; },
+    agents: function () { return nAgents; },
+    prog: function () { return S.nodeProg ? Array.prototype.slice.call(S.nodeProg) : []; },
+    front: function () {
+      if (!nAgents) return null;
+      var sx = 0, sy = 0, c = 0;
+      for (var k = 0; k < nAgents; k += 5) { sx += ax[k]; sy += ay[k]; c++; }
+      return { x: sx / c, y: sy / c };
+    },
+    grid: function () { return { w: GW, h: GH }; }
+  };
 }
 
 if (document.readyState === 'loading') {

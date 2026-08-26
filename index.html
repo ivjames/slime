@@ -24,12 +24,14 @@
   --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;
 }
 *{box-sizing:border-box}
-html,body{height:100%}
+html,body{height:100%;overscroll-behavior:none}
 body{
   margin:0;background:var(--bg);color:var(--ink);
   font-family:var(--mono);font-size:14px;line-height:1.5;
   -webkit-font-smoothing:antialiased;
   overscroll-behavior:none;
+  /* kills double-tap zoom without killing scrolling */
+  touch-action:manipulation;
 }
 body::before{
   content:"";position:fixed;inset:0;pointer-events:none;z-index:100;
@@ -71,7 +73,9 @@ h1,h2,h3{font-weight:600;margin:0}
 
 .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
 .btn{border:1px solid var(--line);padding:9px 20px;border-radius:2px;letter-spacing:.16em;
-  font-size:11px;text-transform:uppercase;color:var(--ink);background:#12160f;transition:.14s}
+  font-size:11px;text-transform:uppercase;color:var(--ink);background:#12160f;transition:.14s;
+  touch-action:manipulation;-webkit-tap-highlight-color:transparent;
+  -webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
 .btn:hover{border-color:var(--slime);color:var(--slime)}
 .btn.pri{background:var(--slime);color:#14170d;border-color:var(--slime);font-weight:600}
 .btn.pri:hover{background:var(--slime-hot);border-color:var(--slime-hot);color:#14170d}
@@ -93,10 +97,29 @@ h1,h2,h3{font-weight:600;margin:0}
 .keys{display:grid;grid-template-columns:auto 1fr;gap:6px 14px;margin-top:8px;font-size:12.5px;color:#9ba384}
 .keys b{color:var(--ink);font-weight:600;white-space:nowrap}
 
+/* ---------- coarse-pointer copy swap ---------- */
+/* .keys-touch / .hint-touch are the touch wording; the -fine pair is the
+   mouse+keyboard wording. body.touch is set by sim.js from
+   matchMedia('(pointer: coarse)') / touch points. */
+.keys-touch{display:none}
+.hint-touch{display:none}
+body.touch .keys-fine{display:none}
+body.touch .keys-touch{display:grid}
+body.touch .hint-fine{display:none}
+body.touch .hint-touch{display:inline}
+
 /* ---------- sim ---------- */
-#stage{position:relative;width:100%;border:1px solid var(--line);border-radius:3px;
-  background:#070906;overflow:hidden;touch-action:none;cursor:crosshair}
-#stage canvas{display:block;width:100%;height:auto}
+/* a size container so the HUD can answer to how wide the DISH is, not how wide
+   the window is — letterboxed landscape gives a narrow stage in a wide viewport */
+#stage{position:relative;width:100%;margin:0 auto;border:1px solid var(--line);border-radius:3px;
+  container-type:inline-size;container-name:dish;
+  background:#070906;overflow:hidden;touch-action:none;cursor:crosshair;
+  -webkit-tap-highlight-color:transparent;
+  -webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+/* touch-action does not inherit — the canvas has to opt out on its own or a
+   drag across it still scrolls the page on iOS. */
+#stage canvas{display:block;width:100%;height:auto;touch-action:none;
+  -webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
 .hud{position:absolute;pointer-events:none;font-size:11px;letter-spacing:.08em}
 .hud-tl{top:0;left:0;right:0;display:flex;justify-content:space-between;gap:12px;
   padding:9px 12px;background:linear-gradient(180deg,rgba(6,8,5,.86),transparent)}
@@ -125,10 +148,52 @@ h1,h2,h3{font-weight:600;margin:0}
 .simbar{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-top:10px;flex-wrap:wrap}
 .hint{color:var(--dim);font-size:11px;letter-spacing:.04em}
 .hint b{color:#a8b08f;font-weight:600}
+
+/* ---------- touch verb pads, docked under the stage ---------- */
+.touchbar{display:none;gap:8px;margin-top:8px}
+body.touch .touchbar{display:flex}
+.tbtn{flex:1 1 0;min-height:48px;min-width:44px;padding:12px 10px;border:1px solid var(--line);
+  border-radius:2px;background:#12160f;color:var(--dim);font-size:11.5px;letter-spacing:.20em;
+  text-transform:uppercase;transition:.14s;
+  touch-action:manipulation;-webkit-tap-highlight-color:transparent;
+  -webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+.tbtn .sub{display:block;font-size:9.5px;letter-spacing:.10em;opacity:.72;margin-top:3px;text-transform:none}
+.tbtn.on{background:var(--slime);border-color:var(--slime);color:#14170d;font-weight:600}
+.tbtn.ret.on{background:var(--bad);border-color:var(--bad);color:#1a0a10}
+
+body.touch .btn{min-height:44px;padding:11px 18px}
+body.touch .dish{min-height:132px}
+
+/* The note wraps to two lines on a small dish and lands on top of the biomass
+   meter. The narration log is hidden at this size, so the note moves into that
+   free corner. Stated twice on purpose: the container query is the accurate
+   one, the media query is the fallback where @container is unsupported. */
 @media(max-width:640px){
   #log{display:none}
   .hud-bl{width:54%}
   .hud-tl .lt,.hud-tl .rt{font-size:10px}
+  .hud-br{left:12px;right:auto;top:42px;bottom:auto;text-align:left;max-width:54%;font-size:10px}
+}
+@container dish (max-width:640px){
+  #log{display:none}
+  .hud-bl{width:54%}
+  .hud-tl .lt,.hud-tl .rt{font-size:10px}
+  .hud-br{left:12px;right:auto;top:42px;bottom:auto;text-align:left;max-width:54%;font-size:10px}
+}
+@media(max-width:520px){
+  #app{padding:12px;gap:10px}
+  .card{padding:18px 16px 20px}
+  .card h2{font-size:20px}
+  .keys{grid-template-columns:1fr;gap:1px 0}
+  .keys b{margin-top:9px}
+  .simbar{gap:8px}
+  .hint{font-size:10.5px;flex:1 1 100%}
+}
+/* Letterbox the dish rather than letting a fixed 420:260 canvas run off a
+   short viewport. Width-driven on a portrait phone, so this only bites in
+   landscape / short windows. */
+@media(pointer:coarse),(max-height:760px){
+  #stage{max-width:min(100%,calc(56vh * 1.6154))}
 }
 </style>
 </head>
@@ -162,11 +227,17 @@ h1,h2,h3{font-weight:600;margin:0}
       <div class="fld"><div class="k">Objective</div><div class="v" id="b-obj"></div></div>
       <div class="fld"><div class="k">Dish conditions</div><div id="b-hz"></div></div>
       <div class="fld"><div class="k">Motor control</div>
-        <div class="keys">
+        <div class="keys keys-fine">
           <b>hold left / drag</b><span>emit a growth cue &mdash; the exploratory front flows toward it</span>
           <b>hold right / shift</b><span>retract &mdash; pull cytoplasm back out of a region</span>
           <b>space</b><span>hold the clock</span>
           <b>R</b><span>reset the dish</span>
+        </div>
+        <div class="keys keys-touch">
+          <b>hold / drag</b><span>emit a growth cue &mdash; the exploratory front flows toward your finger</span>
+          <b>RETRACT pad</b><span>switch the verb, then hold to pull cytoplasm back out of a region</span>
+          <b>two fingers</b><span>retract without switching pads &mdash; a second finger flips that drag</span>
+          <b>HOLD / RESET</b><span>the buttons under the dish stop the clock and restart the plate</span>
         </div>
       </div>
       <div class="row" style="margin-top:22px">
@@ -197,9 +268,20 @@ h1,h2,h3{font-weight:600;margin:0}
       <div class="hud hud-br" id="h-note"></div>
       <div id="pauseveil">Culture held</div>
     </div>
+    <div class="touchbar" id="touchbar">
+      <button class="tbtn on" id="t-grow" type="button" aria-pressed="true">Grow<span class="sub">hold on the dish</span></button>
+      <button class="tbtn ret" id="t-ret" type="button" aria-pressed="false">Retract<span class="sub">or use two fingers</span></button>
+    </div>
     <div class="simbar">
-      <div class="hint"><b>Hold</b> to lay a growth cue &middot; <b>right-click / shift</b> to retract &middot; <b>space</b> pause &middot; <b>R</b> reset</div>
-      <div class="row"><button class="btn ghost" id="s-abort">Abandon dish</button></div>
+      <div class="hint">
+        <span class="hint-fine"><b>Hold</b> to lay a growth cue &middot; <b>right-click / shift</b> to retract &middot; <b>space</b> pause &middot; <b>R</b> reset</span>
+        <span class="hint-touch"><b>Hold or drag</b> on the dish to lay a growth cue &middot; tap <b>RETRACT</b> (or use <b>two fingers</b>) to pull back &middot; <b>Hold</b> / <b>Reset</b> below</span>
+      </div>
+      <div class="row">
+        <button class="btn ghost" id="s-pause" type="button">Hold</button>
+        <button class="btn ghost" id="s-reset" type="button">Reset</button>
+        <button class="btn ghost" id="s-abort">Abandon dish</button>
+      </div>
     </div>
   </section>
 
