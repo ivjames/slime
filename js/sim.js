@@ -1481,10 +1481,12 @@ function frame(ts) {
   if (dt > 0.25) dt = 0.25;
 
   if (S.running && !S.paused) {
-    if (ptr.down) paintBrush(ptr.gx, ptr.gy, ptr.mode);
     acc += dt * TURBO;
     var steps = 0, budget = 4 * TURBO;
-    while (acc >= DT && steps < budget && S.running) { step(); acc -= DT; steps++; }
+    while (acc >= DT && steps < budget && S.running) {
+      if (ptr.down) paintBrush(ptr.gx, ptr.gy, ptr.mode);
+      step(); acc -= DT; steps++;
+    }
     if (acc > DT * budget) acc = 0;
   } else {
     acc = 0;
