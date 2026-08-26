@@ -192,7 +192,7 @@ var EXPERIMENTS = [
       [98, 100, 44, 7], [258, 170, 54, 7]
     ]),
     hazards: [],
-    start: 5000, cap: 11000, sustain: 5800, grow: 320, starve: 26, grace: 110, reach: 150, engulf: 1.7,
+    start: 5000, cap: 11000, sustain: 5800, grow: 320, starve: 26, grace: 110, reach: 260, engulf: 1.7,
     timeLimit: 400, hab: false, shocks: false,
     script: [
       { t: 2, hi: true, text: 'walls. the agar has been cut into corridors.' },
@@ -262,7 +262,7 @@ var EXPERIMENTS = [
       { type: 'q', x: 150, y: 0, w: 32, h: GH },
       { type: 'q', x: 246, y: 0, w: 32, h: GH }
     ],
-    start: 5000, cap: 11000, sustain: 3900, grow: 320, starve: 18, grace: 130, reach: 220,
+    start: 5000, cap: 11000, sustain: 3900, grow: 320, starve: 18, grace: 130, reach: 290,
     timeLimit: 440, hab: true, shocks: false,
     script: [
       { t: 2, hi: true, text: 'two purple strips. everything past them smells like dinner.' },
