@@ -124,7 +124,16 @@ var HAZ_QUIN = 5.2;    // repulsion of a quinine zone (scaled by 1 - habituation
 var SPENT_FOOD = 0.30; // an engulfed node's remaining pull (a refuge, not a beacon)
 var SPENT_FALL = 34;   // and only over this reach, so spent food cannot outbid fresh
 var MAX_ENGULF_RATE = 1 / 200; // a node takes >= 3.3s to consume however big the front
-var ENGULF_SOFT = 0.13; // half-rate front, as a fraction of the node's own area
+/* Half-rate front, as a fraction of the node's own area. Blocked agents count
+   as contact, which roughly doubled the hits a jammed front reports — but
+   simply doubling this to compensate is wrong, and measurably so. A cued front
+   is dense and jams, an idle one is sparse and is limited by how long it takes
+   to arrive at all, so this constant prices ACTIVE play almost alone: at 0.26
+   EXP-01 ran 100s led against 114s untouched, erasing the point of the
+   controls, where at 0.13 it is nearer 70s against 105s. The two dishes that
+   came out genuinely too quick are corrected by their own `engulf` multiplier
+   instead, which is the knob meant for per-dish pacing. */
+var ENGULF_SOFT = 0.13;
 var ENGULF_DECAY = 0.0022; // an abandoned node re-forms: commit, or lose the ground
 
 /* ------------------------------------------------------------
@@ -183,7 +192,7 @@ var EXPERIMENTS = [
       [98, 100, 44, 7], [258, 170, 54, 7]
     ]),
     hazards: [],
-    start: 5000, cap: 11000, sustain: 5800, grow: 320, starve: 26, grace: 110, reach: 150,
+    start: 5000, cap: 11000, sustain: 5800, grow: 320, starve: 26, grace: 110, reach: 150, engulf: 1.7,
     timeLimit: 400, hab: false, shocks: false,
     script: [
       { t: 2, hi: true, text: 'walls. the agar has been cut into corridors.' },
@@ -219,7 +228,7 @@ var EXPERIMENTS = [
       { x: 46, y: 84, r: 10, label: 'kofu' }
     ],
     walls: [], hazards: [],
-    start: 4200, cap: 12000, sustain: 1500, grow: 340, starve: 44, grace: 45, engulf: 7.2,
+    start: 4200, cap: 12000, sustain: 1500, grow: 340, starve: 44, grace: 45, engulf: 12.0,
     timeLimit: 340, hab: false, shocks: false,
     script: [
       { t: 2, hi: true, text: 'nine depots. the dish is the wrong shape for a city and you do not care.' },
@@ -327,8 +336,17 @@ var nodeAt = new Int16Array(NCELL);    // cell -> node index, -1 for none
 /* One agent per cell. Without it the whole population collapses into whichever
    vein is currently strongest and the network is a single rope; with it a
    saturated tube spills sideways, which is exactly how the mesh gets its holes
-   and how the front stays a fan rather than a beam. */
-var occ = new Uint8Array(NCELL);
+   and how the front stays a fan rather than a beam.
+
+   COUNTS, not a flag. Placement (inoculation, growth) can still put two agents
+   in one cell, and with a flag the first of them to leave cleared the cell for
+   everyone — the exclusion quietly eroded exactly where the population is
+   densest, which is where it does the work. Counts also mean every path that
+   removes an agent has to decrement: the death branch below does, and the
+   whole grid is restamped from real positions at the top of every step, so
+   spawnAgent/killRandom (which run after the agent loop) cannot leave it
+   drifted for more than the rest of the frame. */
+var occ = new Uint16Array(NCELL);
 
 var ax = new Float32Array(MAXA);
 var ay = new Float32Array(MAXA);
@@ -552,6 +570,9 @@ function inoculate(e) {
      agents would spend its first second exploding outward to find room */
   var R = clamp(Math.sqrt(n / (Math.PI * 0.42)), 8, 64);
   var guard = 0;
+  /* place into the occupancy grid, one per cell, so the drop starts in the
+     same state the movement rule maintains rather than with a stack to unpick */
+  occ.fill(0);
   while (nAgents < n && guard < n * 40) {
     guard++;
     var a = Math.random() * Math.PI * 2;
@@ -559,8 +580,14 @@ function inoculate(e) {
     var x = e.inoc.x + Math.cos(a) * d;
     var y = e.inoc.y + Math.sin(a) * d;
     if (x < 1 || y < 1 || x >= GW - 1 || y >= GH - 1) continue;
-    if (wallM[(y | 0) * GW + (x | 0)]) continue;
+    /* stamp the cell the STORED position resolves to. Float32 rounds the
+       double on the way into the array, so a coordinate a hair under an
+       integer can land one cell over — stamping from x/y instead would leave
+       the grid disagreeing with the agent it was stamped for. */
     ax[nAgents] = x; ay[nAgents] = y;
+    var ci = (ay[nAgents] | 0) * GW + (ax[nAgents] | 0);
+    if (wallM[ci] || occ[ci]) continue;
+    occ[ci] = 1;
     ah[nAgents] = Math.random() * Math.PI * 2;
     nAgents++;
   }
@@ -584,8 +611,13 @@ function spawnAgent() {
     var nx = ax[best] + (Math.random() - 0.5) * 8;
     var ny = ay[best] + (Math.random() - 0.5) * 8;
     if (nx < 1 || ny < 1 || nx >= GW - 1 || ny >= GH - 1) continue;
-    if (wallM[(ny | 0) * GW + (nx | 0)]) continue;
     ax[nAgents] = nx; ay[nAgents] = ny;
+    var ni2 = (ay[nAgents] | 0) * GW + (ax[nAgents] | 0);
+    /* respect the exclusion at birth too: a spawn landing on top of a sibling
+       is a stack the movement rule then has to unpick, and near a flake (where
+       growth is busiest) that is precisely where the mesh wants room */
+    if (wallM[ni2] || occ[ni2]) continue;
+    occ[ni2]++;
     ah[nAgents] = Math.random() * Math.PI * 2;
     nAgents++;
     return;
@@ -595,6 +627,8 @@ function spawnAgent() {
 function killRandom() {
   if (nAgents <= 0) return;
   var k = (Math.random() * nAgents) | 0;
+  var ci = (ay[k] | 0) * GW + (ax[k] | 0);
+  if (occ[ci]) occ[ci]--;          /* every removal path decrements */
   nAgents--;
   ax[k] = ax[nAgents]; ay[k] = ay[nAgents]; ah[k] = ah[nAgents];
 }
@@ -675,13 +709,20 @@ function step() {
 
   var shockOn = S.shockActive;
   var shockDmg = e.shock ? e.shock.dmg : 0;
-  var quinDmg = 0.022 * (1 - S.hab);
+  /* Halved for the same reason as ENGULF_SOFT: an agent wedged in the strip
+     used to be immune because it had not moved, and it was those stalled
+     agents that racked up the contact time habituation is built from. Now
+     they take the damage, so at the old rate the front was culled at the
+     bitter edge before it could learn anything — which is the one outcome
+     this dish must not have. */
+  var quinDmg = 0.011 * (1 - S.hab);
   var heatDmg = 0.010;
   var inQuin = 0;
 
-  /* stamp the occupancy grid for this step */
+  /* restamp the occupancy counts for this step from where the agents actually
+     are — the one line that guarantees the counts cannot drift across frames */
   occ.fill(0);
-  for (k = 0; k < nAgents; k++) occ[(ay[k] | 0) * GW + (ax[k] | 0)] = 1;
+  for (k = 0; k < nAgents; k++) occ[(ay[k] | 0) * GW + (ax[k] | 0)]++;
 
   k = 0;
   while (k < nAgents) {
@@ -721,8 +762,12 @@ function step() {
     var lc = cueF[oldIdx] * CUE_FLOW;
     if (lc > lt) lt = lc;
     var spd = stepSpeed * (lt >= 1 ? 1 : VOID_SPEED + (1 - VOID_SPEED) * lt);
-    var nx = x + Math.cos(h) * spd;
-    var ny = y + Math.sin(h) * spd;
+    /* round to Float32 before anything reads a cell from it: ax/ay are
+       Float32Arrays, so an unrounded double a hair under an integer can test
+       one cell and then store into the next, leaving the occupancy grid
+       reserving a cell the agent is not standing in */
+    var nx = Math.fround(x + Math.cos(h) * spd);
+    var ny = Math.fround(y + Math.sin(h) * spd);
     var idx = -1;
     var blocked = (nx < 1 || ny < 1 || nx >= GW - 1 || ny >= GH - 1);
     if (!blocked) {
@@ -730,24 +775,32 @@ function step() {
       if (wallM[idx] || (idx !== oldIdx && occ[idx])) blocked = true;
     }
 
+    /* Where this agent ends the step, moved or not. A blocked agent used to
+       skip everything below — it did not count toward engulfing the flake it
+       was standing on, did not taste the quinine it was sitting in, and was
+       immune to the dry shock. In a saturated tube most agents are blocked
+       most frames, so an agent's fate turned on whether it happened to move
+       rather than on where it was. It stays put with a fresh heading, and
+       everything the cell does to it still happens; only the trail deposit is
+       movement-only, since a stalled agent pumping trail into one cell piles
+       up against walls and inside junctions and fattens them into blobs. */
+    var cell;
     if (blocked) {
-      /* blocked: stay put, pick a fresh heading */
       ah[k] = Math.random() * Math.PI * 2;
-      k++;
-      continue;
+      cell = oldIdx;
+    } else {
+      ax[k] = nx; ay[k] = ny; ah[k] = h;
+      if (idx !== oldIdx) { occ[oldIdx]--; occ[idx]++; }
+      cell = idx;
+      var tv = trail[cell];
+      if (tv < TRAIL_MAX) trail[cell] = tv + stepDeposit;
     }
 
-    ax[k] = nx; ay[k] = ny; ah[k] = h;
-    if (idx !== oldIdx) { occ[oldIdx] = 0; occ[idx] = 1; }
-
-    var tv = trail[idx];
-    if (tv < TRAIL_MAX) trail[idx] = tv + stepDeposit;
-
-    var ni = nodeAt[idx];
+    var ni = nodeAt[cell];
     if (ni >= 0) nodeHits[ni]++;
 
     var dead = false;
-    var hz = hazM[idx];
+    var hz = hazM[cell];
     if (hz === 2) {
       inQuin++;
       if (quinDmg > 0 && Math.random() < quinDmg) dead = true;
@@ -760,6 +813,7 @@ function step() {
     }
 
     if (dead) {
+      if (occ[cell]) occ[cell]--;
       nAgents--;
       ax[k] = ax[nAgents]; ay[k] = ay[nAgents]; ah[k] = ah[nAgents];
       continue;
