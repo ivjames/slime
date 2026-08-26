@@ -1,0 +1,228 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>SLIME — Physarum polycephalum, specimen 980</title>
+<meta name="description" content="A slime mold simulation game. You are Physarum polycephalum. The lab runs its experiments; you run them from the inside.">
+<meta name="theme-color" content="#0b0d0c">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>%F0%9F%A6%A0</text></svg>">
+<style>
+:root{
+  --bg:#0b0d0c;
+  --agar:#12160f;
+  --panel:#12150f;
+  --line:#2a2f24;
+  --ink:#d8dcc8;
+  --dim:#7e8670;
+  --slime:#e3d24a;
+  --slime-hot:#fff6b0;
+  --cyto:#7fd1b9;
+  --warn:#e0763c;
+  --bad:#c74b6a;
+  --quin:#a95fd4;
+  --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{
+  margin:0;background:var(--bg);color:var(--ink);
+  font-family:var(--mono);font-size:14px;line-height:1.5;
+  -webkit-font-smoothing:antialiased;
+  overscroll-behavior:none;
+}
+body::before{
+  content:"";position:fixed;inset:0;pointer-events:none;z-index:100;
+  background:repeating-linear-gradient(180deg,rgba(255,255,255,.018) 0 1px,transparent 1px 3px);
+  mix-blend-mode:overlay;
+}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
+h1,h2,h3{font-weight:600;margin:0}
+.mono-dim{color:var(--dim)}
+
+/* ---------- shell ---------- */
+#app{height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:16px;gap:14px}
+.screen{display:none;width:100%;max-width:1180px}
+.screen.on{display:block}
+
+/* ---------- title ---------- */
+.hero{text-align:center;padding:8px 0 20px}
+.hero .glyph{font-size:clamp(56px,13vw,124px);line-height:.86;letter-spacing:.16em;
+  color:var(--slime);text-shadow:0 0 34px rgba(227,210,74,.30);margin-right:-.16em}
+.hero .sub{color:var(--dim);letter-spacing:.30em;font-size:11px;text-transform:uppercase;margin-top:14px}
+.hero .tag{max-width:56ch;margin:16px auto 0;color:#a9b199}
+
+.slab{border:1px solid var(--line);background:linear-gradient(180deg,#14180f,#0f1210);border-radius:3px}
+.slab-h{display:flex;justify-content:space-between;align-items:baseline;gap:12px;
+  padding:9px 14px;border-bottom:1px solid var(--line);color:var(--dim);
+  font-size:10.5px;letter-spacing:.22em;text-transform:uppercase}
+
+.dishes{display:grid;grid-template-columns:repeat(auto-fit,minmax(212px,1fr));gap:1px;background:var(--line)}
+.dish{background:#0f1310;padding:15px 16px 17px;text-align:left;position:relative;
+  transition:background .14s,transform .14s;display:flex;flex-direction:column;gap:7px;min-height:150px}
+.dish:hover:not(.locked){background:#171c12}
+.dish .code{font-size:10px;letter-spacing:.22em;color:var(--dim)}
+.dish .nm{font-size:16px;color:var(--slime);letter-spacing:.02em}
+.dish .bl{font-size:12px;color:#98a087;flex:1}
+.dish .st{font-size:10.5px;letter-spacing:.14em;text-transform:uppercase}
+.dish.done .st{color:var(--cyto)}
+.dish.locked{opacity:.34;cursor:not-allowed}
+.dish.locked .nm{color:var(--dim)}
+
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.btn{border:1px solid var(--line);padding:9px 20px;border-radius:2px;letter-spacing:.16em;
+  font-size:11px;text-transform:uppercase;color:var(--ink);background:#12160f;transition:.14s}
+.btn:hover{border-color:var(--slime);color:var(--slime)}
+.btn.pri{background:var(--slime);color:#14170d;border-color:var(--slime);font-weight:600}
+.btn.pri:hover{background:var(--slime-hot);border-color:var(--slime-hot);color:#14170d}
+.btn.ghost{border-color:#242820;color:var(--dim)}
+.btn.ghost:hover{color:var(--ink);border-color:var(--line)}
+
+/* ---------- brief / result cards ---------- */
+.card{max-width:760px;margin:0 auto;padding:22px 26px 24px}
+.card h2{font-size:24px;color:var(--slime);letter-spacing:.02em}
+.card .code{font-size:10.5px;letter-spacing:.24em;color:var(--dim);text-transform:uppercase}
+.card p{color:#aab092;margin:12px 0 0}
+.card .fld{margin-top:18px}
+.card .fld .k{font-size:10px;letter-spacing:.2em;text-transform:uppercase;color:var(--dim);margin-bottom:5px}
+.card .fld .v{color:var(--ink)}
+.hz{display:inline-block;border:1px solid var(--warn);color:var(--warn);
+  padding:2px 9px;border-radius:2px;font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;margin:0 6px 6px 0}
+.hz.q{border-color:var(--quin);color:var(--quin)}
+.hz.ok{border-color:var(--cyto);color:var(--cyto)}
+.keys{display:grid;grid-template-columns:auto 1fr;gap:6px 14px;margin-top:8px;font-size:12.5px;color:#9ba384}
+.keys b{color:var(--ink);font-weight:600;white-space:nowrap}
+
+/* ---------- sim ---------- */
+#stage{position:relative;width:100%;border:1px solid var(--line);border-radius:3px;
+  background:#070906;overflow:hidden;touch-action:none;cursor:crosshair}
+#stage canvas{display:block;width:100%;height:auto}
+.hud{position:absolute;pointer-events:none;font-size:11px;letter-spacing:.08em}
+.hud-tl{top:0;left:0;right:0;display:flex;justify-content:space-between;gap:12px;
+  padding:9px 12px;background:linear-gradient(180deg,rgba(6,8,5,.86),transparent)}
+.hud-tl .obj{color:var(--slime);text-align:center;flex:1}
+.hud-tl .lt,.hud-tl .rt{color:var(--dim);white-space:nowrap}
+.hud-bl{left:12px;bottom:11px;width:min(280px,42%)}
+.meter{margin-bottom:7px}
+.meter .lab{display:flex;justify-content:space-between;color:var(--dim);font-size:10px;
+  letter-spacing:.18em;text-transform:uppercase;margin-bottom:3px}
+.meter .bar{height:4px;background:#1b1f18;border-radius:2px;overflow:hidden}
+.meter .fill{height:100%;width:0%;background:var(--slime);transition:width .18s}
+.meter.mass .fill{background:linear-gradient(90deg,#8f7f1e,var(--slime))}
+.meter.hab .fill{background:linear-gradient(90deg,#5b3479,var(--quin))}
+.meter.crit .fill{background:var(--bad)}
+.hud-br{right:12px;bottom:11px;text-align:right;color:var(--dim);font-size:10.5px;max-width:44%}
+.nodes{position:absolute;right:12px;top:44px;text-align:right;color:var(--dim);font-size:10.5px;line-height:1.7}
+.nodes .n{opacity:.5}
+.nodes .n.hit{color:var(--cyto);opacity:1}
+#log{position:absolute;left:12px;top:44px;max-width:min(320px,46%);color:#8d9578;font-size:11.5px;line-height:1.55}
+#log div{margin-bottom:5px;animation:fade .5s ease-out;text-shadow:0 1px 4px #000}
+#log div.hi{color:var(--slime)}
+@keyframes fade{from{opacity:0;transform:translateY(-3px)}to{opacity:1}}
+#pauseveil{position:absolute;inset:0;display:none;place-items:center;background:rgba(7,9,6,.78);
+  color:var(--dim);letter-spacing:.3em;font-size:12px;text-transform:uppercase}
+#pauseveil.on{display:grid}
+.simbar{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-top:10px;flex-wrap:wrap}
+.hint{color:var(--dim);font-size:11px;letter-spacing:.04em}
+.hint b{color:#a8b08f;font-weight:600}
+@media(max-width:640px){
+  #log{display:none}
+  .hud-bl{width:54%}
+  .hud-tl .lt,.hud-tl .rt{font-size:10px}
+}
+</style>
+</head>
+<body>
+<div id="app">
+
+  <!-- ============ TITLE ============ -->
+  <section class="screen on" id="scr-title">
+    <div class="hero">
+      <div class="glyph">SLIME</div>
+      <div class="sub">Physarum polycephalum &middot; specimen 980</div>
+      <p class="tag">You are one cell. No brain, no neurons, no centre &mdash; just several
+      million nuclei in a shared cytoplasm and a very good sense of where the food is.
+      The laboratory has some questions. Answer them from the inside.</p>
+    </div>
+    <div class="slab">
+      <div class="slab-h"><span>Experiment schedule</span><span id="progress">0 / 5 logged</span></div>
+      <div class="dishes" id="dishes"></div>
+    </div>
+    <div class="row" style="margin-top:14px;justify-content:center">
+      <button class="btn ghost" id="btn-wipe">Wipe specimen log</button>
+    </div>
+  </section>
+
+  <!-- ============ BRIEF ============ -->
+  <section class="screen" id="scr-brief">
+    <div class="slab card">
+      <div class="code" id="b-code"></div>
+      <h2 id="b-name"></h2>
+      <p id="b-brief"></p>
+      <div class="fld"><div class="k">Objective</div><div class="v" id="b-obj"></div></div>
+      <div class="fld"><div class="k">Dish conditions</div><div id="b-hz"></div></div>
+      <div class="fld"><div class="k">Motor control</div>
+        <div class="keys">
+          <b>hold left / drag</b><span>emit a growth cue &mdash; the exploratory front flows toward it</span>
+          <b>hold right / shift</b><span>retract &mdash; pull cytoplasm back out of a region</span>
+          <b>space</b><span>hold the clock</span>
+          <b>R</b><span>reset the dish</span>
+        </div>
+      </div>
+      <div class="row" style="margin-top:22px">
+        <button class="btn pri" id="b-go">Inoculate</button>
+        <button class="btn ghost" id="b-back">Back to schedule</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ SIM ============ -->
+  <section class="screen" id="scr-sim">
+    <div id="stage">
+      <canvas id="cv"></canvas>
+      <div class="hud hud-tl">
+        <div class="lt" id="h-code"></div>
+        <div class="obj" id="h-obj"></div>
+        <div class="rt" id="h-time"></div>
+      </div>
+      <div id="log"></div>
+      <div class="nodes" id="h-nodes"></div>
+      <div class="hud hud-bl">
+        <div class="meter mass"><div class="lab"><span>Biomass</span><span id="h-mass">0</span></div>
+          <div class="bar"><div class="fill" id="h-massbar"></div></div></div>
+        <div class="meter hab" id="h-habwrap" style="display:none">
+          <div class="lab"><span>Habituation</span><span id="h-hab">0%</span></div>
+          <div class="bar"><div class="fill" id="h-habbar"></div></div></div>
+      </div>
+      <div class="hud hud-br" id="h-note"></div>
+      <div id="pauseveil">Culture held</div>
+    </div>
+    <div class="simbar">
+      <div class="hint"><b>Hold</b> to lay a growth cue &middot; <b>right-click / shift</b> to retract &middot; <b>space</b> pause &middot; <b>R</b> reset</div>
+      <div class="row"><button class="btn ghost" id="s-abort">Abandon dish</button></div>
+    </div>
+  </section>
+
+  <!-- ============ RESULT ============ -->
+  <section class="screen" id="scr-result">
+    <div class="slab card">
+      <div class="code" id="r-code"></div>
+      <h2 id="r-head"></h2>
+      <p id="r-body"></p>
+      <div class="fld"><div class="k">Observations</div><div class="v" id="r-stats"></div></div>
+      <div class="row" style="margin-top:22px">
+        <button class="btn pri" id="r-next"></button>
+        <button class="btn ghost" id="r-retry">Run it again</button>
+        <button class="btn ghost" id="r-menu">Schedule</button>
+      </div>
+    </div>
+  </section>
+
+</div>
+<script>
+  // Deploy stamp: `slime deploy` rewrites this line with the live commit.
+  const BUILD = 'dev';
+</script>
+<script src="js/sim.js"></script>
+</body>
+</html>
