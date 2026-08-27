@@ -1944,6 +1944,7 @@ function buildDish(e) {
      due immediately. */
   fieldDirty = true;
   dirtyFrames = REBUILD_EVERY;
+  resetVeinTemporal();
   trail.fill(0); tmpF.fill(0); foodF.fill(0);
   cueF.fill(0); retF.fill(0); slimeF.fill(0); knotF.fill(0); traceF.fill(0);
   nodeAt.fill(-1);
@@ -3189,6 +3190,108 @@ var shpA = new Float32Array(NCELL);   // narrow
 var shpB = new Float32Array(NCELL);   // wide
 var shpT = new Float32Array(NCELL);   // scratch for the separable pass
 
+/* The narrow field again, low-passed over TIME — the surface the highlights
+   are read from, and the first of the three things that stop them twitching.
+
+   Agents deposit into single cells, so `trail` carries a per-cell shot noise
+   that a step's diffusion moves around rather than removes; the blurs take it
+   down to a few per cent of a vein's height and no further. A few per cent is
+   nothing to look at as a field, and it is everything to a DECISION: every
+   number the vein pass computes is fed to a threshold — is this cell a maximum
+   across d, does its curvature clear the floor, which band is this chain's
+   mean in — and a threshold on a wobbling number is a coin flipped twice a
+   frame. That is the twitch. It is not the organism moving; the organism moves
+   about a cell a second.
+
+   So the ridge pass reads this instead: an exponential average of shpA whose
+   coefficient comes from SIM time elapsed since the last rebuild, not from the
+   wall clock. Sim time is the right clock for it twice over. The noise being
+   averaged out arrives per STEP, so a fixed number of steps of memory removes
+   a fixed amount of it whatever the frame rate; and a time-lapse run at x12
+   genuinely moves twelve times as far per frame, so a wall-clock constant
+   would smear real motion into a comet tail at speed while barely touching the
+   jitter at x1. In sim time the lag is the same ~15 steps at every speed.
+
+   This is render-only, like everything else in this section — the simulation
+   never reads it back — so no part of a run's outcome depends on it. What it
+   does cost is that the drawn network is now a function of the rebuild history
+   and not of the field alone: pause and unpause and the veins settle over a
+   few frames rather than being identical instantly. That is the trade, and it
+   is the whole point of it. */
+var shpV = new Float32Array(NCELL);   // narrow, low-passed over sim time
+var VEIN_TAU = 0.25;                  // sim seconds of memory (~15 steps)
+var veinPrimed = false;               // has shpV been seeded at all?
+var veinT = 0;                        // S.simT at the last rebuild
+
+/* Called where the field TELEPORTS rather than evolving, and there is nothing
+   on the far side of the cut to be continuous with: a new dish. Averaging
+   across it would draw one rebuild of the old dish's veins dissolving into the
+   new one's, and the hysteresis below would hold the old dish's ridges up
+   while it happened. */
+function resetVeinTemporal() {
+  veinPrimed = false;
+  veinT = S.simT;
+  rdir.fill(255);
+  rband.fill(255);
+  rbandP.fill(255);
+  lmark.fill(0);
+}
+
+/* The other kind of cut: abandoning a replay, which puts a dish back that this
+   layer HAS seen. Everything here is history — an average of the last fifteen
+   steps, and three maps of what was drawn last time — so a dish restored
+   without it redraws from a standing start and comes back a little thinner
+   than the verdict screen was showing before the replay began, in exactly the
+   faintest hairlines, which are the ones the hysteresis was holding up. The
+   snapshot exists to put the finished dish back; this is part of the finished
+   dish. Restored after S, because the average is clocked off S.simT. */
+/* The other half of that, and the reason it is a function rather than four
+   lines inside the FINAL_STATE literal: it has to run AFTER the verdict
+   screen's own render, because that render is what performs the run's last
+   rebuild. Captured with the rest of the snapshot, which is assembled before
+   it, these four are one rebuild behind the picture the player is looking at —
+   and since the restore leaves dt at zero, a replay exit would then put the
+   PENULTIMATE dish back under the verdict rather than the one it replaced.
+
+   `rdir`/`rband` and not `rprev`/`rbandP`: the pairs swap at the top of every
+   rebuild, so the maps the next one will consult as its memory are the ones
+   this one wrote. */
+function snapshotVeinTemporal(fs) {
+  fs.shpV = new Float32Array(shpV);
+  fs.rdir = new Uint8Array(rdir);
+  fs.rband = new Uint8Array(rband);
+  fs.lmark = new Uint8Array(lmark);
+}
+
+function restoreVeinTemporal(fs) {
+  if (!fs || !fs.shpV) { resetVeinTemporal(); return; }
+  shpV.set(fs.shpV);
+  rdir.set(fs.rdir);
+  rband.set(fs.rband);
+  lmark.set(fs.lmark);
+  veinPrimed = true;
+  veinT = S.simT;
+}
+
+function smoothRidgeField() {
+  var dt = S.simT - veinT;
+  veinT = S.simT;
+  if (!veinPrimed) { shpV.set(shpA); veinPrimed = true; return; }
+  /* A dish that did not advance has nothing to average: holding shpV is both
+     cheaper and more correct than folding the same field into itself, which
+     would only walk the average toward a value it is already at. Backwards is
+     a teleport that got past resetVeinTemporal, and takes the field as given. */
+  if (dt <= 0) { if (dt < 0) shpV.set(shpA); return; }
+  var k = 1 - Math.exp(-dt / VEIN_TAU);
+  if (k >= 0.999) { shpV.set(shpA); return; }
+  /* Swept whole. Skipping the cells where shpA and shpV already agree is exact
+     — the update is a no-op there — and measured as worth nothing, because
+     trail DIFFUSES: after eight blurs there is a tail of some tiny nonzero
+     value across nearly every cell of a running dish, and the cells that agree
+     exactly are too few to pay for the test. */
+  for (var i = 0; i < NCELL; i++) shpV[i] += (shpA[i] - shpV[i]) * k;
+}
+
 /* one separable 1-2-1 pass, src -> dst, via shpT */
 function blurPass(src, dst) {
   var x, y, i, row;
@@ -3448,6 +3551,11 @@ var LOBE_DOT  = 1.9;   // radius of each disc in the union, cells
 /* One slot per cell of the two-cell lattice, so the list cannot overflow and
    there is no cap to test against inside the loop that fills it. */
 var LOBE_CAP  = ((GW >> 1) + 1) * ((GH >> 1) + 1);
+/* Which lattice cells were drawn as mass last rebuild, and how far past its
+   threshold one of them is held for having been. Same reluctance as the vein
+   layer's, for the same reason and against the same noise — see RIDGE_HOLD. */
+var lmark = new Uint8Array(NCELL);
+var LOBE_HOLD = 0.74;
 var lseg = new Float32Array(LOBE_CAP * 2);
 var lsegN = 0;
 var lobePath = null;
@@ -3487,20 +3595,120 @@ var whiskPath = null;
    written north-west, which is the same line but the opposite ray, so it
    pointed backwards from both of its neighbours and a walk crossing it turned
    round into the part of the vein it had just claimed. */
+/* Two fields exist for the sub-cell fit below, which is the first thing here
+   to care which WAY across a vein it is looking rather than only about the
+   line. `sp` is how far apart the two across-samples are — one cell on the
+   axis-aligned pair, root two on the diagonals — because the fit measures a
+   distance. And the third entry's `ax`/`ay` used to be written (0, 1) while
+   its `o` of -GW samples the row ABOVE, the two disagreeing by a sign that
+   nothing could see while the only use of the across-vector was ridgeStep,
+   which adds it and subtracts it in the same breath. The fit reads a signed
+   offset along it, so it is written pointing at `i + o` now, as the other
+   three already were. */
 var RIDGE_DIR = [
-  { o:  1,      ax:  1,      ay:  0,      tx:  0,      ty:  1,      t1:  GW,     t2: -GW     },
-  { o:  1 - GW, ax:  0.7071, ay: -0.7071, tx:  0.7071, ty:  0.7071, t1:  1 + GW, t2: -1 - GW },
-  { o: -GW,     ax:  0,      ay:  1,      tx:  1,      ty:  0,      t1:  1,      t2: -1      },
-  { o: -1 - GW, ax: -0.7071, ay: -0.7071, tx:  0.7071, ty: -0.7071, t1:  1 - GW, t2: -1 + GW }
+  { o:  1,      sp: 1,      ax:  1,      ay:  0,      tx:  0,      ty:  1,      t1:  GW,     t2: -GW     },
+  { o:  1 - GW, sp: 1.4142, ax:  0.7071, ay: -0.7071, tx:  0.7071, ty:  0.7071, t1:  1 + GW, t2: -1 - GW },
+  { o: -GW,     sp: 1,      ax:  0,      ay: -1,      tx:  1,      ty:  0,      t1:  1,      t2: -1      },
+  { o: -1 - GW, sp: 1.4142, ax: -0.7071, ay: -0.7071, tx:  0.7071, ty: -0.7071, t1:  1 - GW, t2: -1 + GW }
 ];
 /* Which way the vein runs at each cell, 255 for "not on a ridge", and which
    cells a walk has already claimed. Deciding the whole field before drawing
    any of it is what lets the walk below follow a vein from end to end. */
 var rdir = new Uint8Array(NCELL);
 var rvis = new Uint8Array(NCELL);
+/* Last rebuild's answers, kept so this rebuild can be reluctant to disagree
+   with them. `rprev` is the ridge map: a cell that was a crest is held as one
+   against a lower floor, because a vein that dips a per cent below the
+   threshold for one rebuild has not stopped being a vein, and dropping it
+   there does not shorten the line by one cell — it cuts the chain in two, and
+   either half that falls under RIDGE_MINPTS is discarded whole. That is why
+   the twitch reads as whole veins blinking rather than as edges shimmering.
+   `rbandP` is which band each crest cell was drawn in, the raw material for
+   the same reluctance applied to width and brightness.
+
+   Both are halves of a pair that swaps every rebuild, and the band map has to
+   be as much as the ridge map does. A single map, only ever written where a
+   chain was accepted, is not a record of the LAST rebuild — it is a record of
+   the last rebuild in which each cell happened to carry a vein, which for
+   ground a vein has left is arbitrarily old. Fresh growth over it would then
+   be told it had a band to be loyal to, and hysteresis anchored to an obsolete
+   observation holds a regrown vein at an obsolete width indefinitely, because
+   each rebuild rewrites the stale answer as the new one. Clearing the current
+   map each rebuild is what makes "no memory" mean no memory. */
+var rprev = new Uint8Array(NCELL);
+var rband = new Uint8Array(NCELL);    // this rebuild's bands
+var rbandP = new Uint8Array(NCELL);   // last rebuild's, what pickBand consults
+/* Where along the across-vector the crest actually lies, in cells, relative to
+   the cell centre; see the parabolic fit in pass one. */
+var roff = new Float32Array(NCELL);
+/* How far a crest cell is held past the threshold it entered on, and how much
+   a direction is favoured for being the one this cell ran last time. The
+   direction stickiness matters more than its size suggests: a cell whose four
+   scores are nearly tied picks a different winner each rebuild, its chain
+   reroutes through a different neighbour, and the vein wags. */
+var RIDGE_HOLD = 0.72;
+var DIR_STICK  = 1.15;
+/* the relaxed floors, folded once rather than per cell — pass one is 106,000
+   cells with a four-way loop inside it, and this is its innermost arithmetic */
+var RIDGE_MIN_LO = RIDGE_MIN * RIDGE_HOLD;
+var RIDGE_K_LO   = RIDGE_K   * RIDGE_HOLD;
+var RIDGE_REL_LO = RIDGE_REL * RIDGE_HOLD;
 var RIDGE_MINPTS = 5;        // a chain shorter than this is speckle
 var chx = new Float32Array(4096);
 var chy = new Float32Array(4096);
+var chi = new Int32Array(4096);      // the cell each chain point stands on
+
+/* Which band a chain is drawn in — the last of the three fixes, and the one
+   that matters even when the geometry is perfectly still. The bands are five
+   buckets of a chain's mean height, and the step between two of them is large
+   on purpose: a trunk is nearly three times a hairline's width and a good deal
+   paler. A chain whose mean sits on a boundary therefore does not shimmer when
+   it crosses, it FLASHES, and it crosses whenever the noise says so.
+
+   So the boundary is asked for a margin, and only in the direction of travel:
+   a chain drawn as a trunk last rebuild stays a trunk until its mean falls
+   BAND_HYST below the boundary it came up through, and vice versa. Which band
+   it was drawn in is remembered per cell rather than per chain, because chains
+   have no identity between rebuilds — they are re-seeded in raster order and a
+   single flipped cell re-cuts a vein into different pieces. Cells do have
+   identity, so the vote below asks the ground rather than the chain: of the
+   cells this chain covers, which band were they drawn in last time.
+
+   A chain landing on ground with no memory (new growth, or a vein that moved)
+   gets the plain answer, which is the right one — there is nothing to be
+   loyal to. */
+var BAND_HYST = 0.12;
+var bandVote = new Int32Array(8);
+
+function pickBand(mean, cells, n) {
+  var last = VEIN_BANDS.length - 1, b = 0, j;
+  while (b < last && mean > VEIN_BANDS[b].max) b++;
+
+  for (j = 0; j <= last; j++) bandVote[j] = 0;
+  var voted = 0;
+  for (j = 0; j < n; j++) {
+    var pb0 = rbandP[cells[j]];
+    if (pb0 <= last) { bandVote[pb0]++; voted++; }
+  }
+  /* A chain mostly on fresh ground is fresh: a handful of remembered cells
+     under a long new vein should not name it. */
+  if (voted * 2 < n) return b;
+  var pb = 0;
+  for (j = 1; j <= last; j++) if (bandVote[j] > bandVote[pb]) pb = j;
+  if (pb === b) return b;
+
+  if (b > pb) {
+    /* climbing: hold the old band until the boundary it sits under is cleared
+       by the margin. VEIN_BANDS[last].max is Infinity, and pb cannot be last
+       here because b would have nowhere above it to be. */
+    if (mean < VEIN_BANDS[pb].max * (1 + BAND_HYST)) return pb;
+  } else {
+    /* falling: likewise for the boundary below it, which exists because pb > b
+       puts pb at least one band up */
+    if (mean > VEIN_BANDS[pb - 1].max * (1 - BAND_HYST)) return pb;
+  }
+  return b;
+}
 
 /* One step along a ridge. From cell (cx, cy) running in direction d, the next
    cell is the one a step along the tangent — or, if the vein bends, one of its
@@ -3552,27 +3760,75 @@ var TIP_STYLE = 'rgba(244,238,120,0.30)';   /* replaced per run by tintVeins */
 var TIP_W = 0.17;
 
 function buildVeins() {
-  var b, i, x, y;
+  var b, i, x, y, bestLo = 0, bestHi = 0;
   for (b = 0; b < VEIN_BANDS.length; b++) vsegN[b] = 0;
   lsegN = 0;
 
   /* --- pass one: which cells are on a ridge, and which way it runs --- */
+  smoothRidgeField();
+  /* last rebuild's maps become this one's memory by swapping the pairs, which
+     costs a pointer where copying 106,000 bytes costs 106,000 bytes */
+  var rswap = rprev; rprev = rdir; rdir = rswap;
+  rswap = rbandP; rbandP = rband; rband = rswap;
   rdir.fill(255);
+  rband.fill(255);
   for (y = 2; y < GH - 2; y++) {
     var row = y * GW;
     for (x = 2; x < GW - 2; x++) {
       i = row + x;
-      var v = shpA[i];
-      if (v < RIDGE_MIN) continue;
-      var bestK = RIDGE_K, bestD = -1;
+      var v = shpV[i];
+      /* Every floor here is two floors: the one a cell must clear to BECOME a
+         crest, and the lower one it must fall through to stop being one. In
+         between, last rebuild's answer stands.
+
+         Tested lowest bar first, so the great majority of the plate — bare
+         agar, nowhere near either floor — still leaves on one comparison and
+         never reads the memory at all. */
+      if (v < RIDGE_MIN_LO) continue;
+      /* Never on a wall. Agar that has just been poured over carries no
+         tissue by definition — diffuseTrail zeroes the trail inside wallM
+         every step — but the surface this pass reads is an AVERAGE, and an
+         average remembers: for the fifteen steps it takes to forget, a wall
+         that has just come down in EXP-17, 18 or 20 would wear the crests of
+         the tube it landed on, held up all the while by the hysteresis above.
+         Tested after the value, so only a cell that was going to be a
+         candidate anyway pays for the read.
+
+         Written as a flat rule rather than as a clear-on-event, because the
+         rule is the true statement — the mold is not on the wall — and a
+         clear would have to be hooked onto every path that can move one. */
+      if (wallM[i]) continue;
+      var pd = rprev[i], held = pd !== 255;
+      if (!held && v < RIDGE_MIN) continue;
+      var floorK = held ? RIDGE_K_LO : RIDGE_K;
+      var floorR = (held ? RIDGE_REL_LO : RIDGE_REL) * v;
+      var bestS = 0, bestD = -1, bestK = 0;
       for (var d = 0; d < 4; d++) {
         var o = RIDGE_DIR[d].o;
-        var lo = shpA[i - o], hi = shpA[i + o];
+        var lo = shpV[i - o], hi = shpV[i + o];
         if (v < lo || v < hi) continue;         /* not a maximum across d */
         var kk = 2 * v - lo - hi;               /* curvature across d */
-        if (kk > bestK && kk > RIDGE_REL * v) { bestK = kk; bestD = d; }
+        if (kk <= floorK || kk <= floorR) continue;
+        /* scored, not thresholded, so the tie-break can lean on last
+           rebuild's direction without letting it lower the bar */
+        var sc = d === pd ? kk * DIR_STICK : kk;
+        if (sc > bestS) { bestS = sc; bestD = d; bestK = kk; bestLo = lo; bestHi = hi; }
       }
-      if (bestD >= 0) rdir[i] = bestD;
+      if (bestD < 0) continue;
+      rdir[i] = bestD;
+      /* Where the crest really is. The four directions quantise a vein's
+         position to the cell it happens to fall in, so a crest drifting half a
+         cell holds still and then jumps a whole one — the third source of
+         twitch, and the one that survives any amount of temporal averaging
+         because it is a rounding, not a noise. Fitting a parabola through the
+         three across-samples puts the maximum back where the field says it is,
+         to a fraction of a cell, and the line then SLIDES as the body moves.
+         Sample spacing is `sp` because the diagonal pair is root two apart;
+         half a spacing is the most the vertex of a fit through a maximum can
+         honestly be, and beyond that the fit is reading noise, not a crest. */
+      var vx = (bestHi - bestLo) / (2 * bestK);
+      if (vx > 0.5) vx = 0.5; else if (vx < -0.5) vx = -0.5;
+      roff[i] = vx * RIDGE_DIR[bestD].sp;
     }
   }
 
@@ -3591,13 +3847,23 @@ function buildVeins() {
      down by then, across the whole verdict screen. Feeding stops at
      engulfment and the pad thins over the next couple of seconds; the drawing
      follows it down instead of switching it off. */
+  /* The same two-floor test the ridge pass uses, and here it matters more per
+     cell than it does there: a disc is nearly two cells across and opaque, so
+     one at the rim of a pad switching off and on again is a blob blinking,
+     where a crest cell dropping out only shortens a line. `lmark` is read and
+     written in the same sweep, which is safe because the lattice visits each
+     of its cells exactly once. */
   for (y = 2; y < GH - 2; y += 2) {
     var rowL = y * GW;
     for (x = 2; x < GW - 2; x += 2) {
       i = rowL + x;
-      var lv = shpA[i];
-      if (lv < BODY_T) continue;
-      var mass = knotF[i] > LOBE_MARK || (lv > LOBE_PAD && feedAt[i] >= 0);
+      var lv = shpV[i];
+      if (wallM[i]) { lmark[i] = 0; continue; }   /* as in pass one */
+      var hold = lmark[i] ? LOBE_HOLD : 1;
+      if (lv < BODY_T * hold) { lmark[i] = 0; continue; }
+      var mass = knotF[i] > LOBE_MARK * hold ||
+                 (lv > LOBE_PAD * hold && feedAt[i] >= 0);
+      lmark[i] = mass ? 1 : 0;
       if (!mass) continue;
       lseg[lsegN * 2] = x + 0.5; lseg[lsegN * 2 + 1] = y + 0.5; lsegN++;
     }
@@ -3631,40 +3897,62 @@ function buildVeins() {
          chopped into fragments — several of them below RIDGE_MINPTS and thrown
          away entirely. Deriving the sign from the movement makes the walk
          independent of the table's sign convention altogether. */
+      /* The walk steps on CELLS and records POINTS, and after the sub-cell fit
+         those are no longer the same thing: chi carries the cell the chain is
+         standing on, chx/chy the crest position inside it. Stepping from the
+         offset point instead would feed a fractional coordinate back into
+         ridgeStep's rounding and let the fit nudge the walk onto a different
+         neighbour — the offset is where the line is DRAWN, not where the vein
+         is. */
       var n = 0, c = i, cd = rdir[i], sum = 0, sgn = 1;
       rvis[c] = 1;
-      chx[n] = (c % GW) + 0.5; chy[n] = ((c / GW) | 0) + 0.5; sum += shpA[c]; n++;
-      var nx2 = c;
+      chi[n] = c;
+      chx[n] = (c % GW) + 0.5 + roff[c] * RIDGE_DIR[cd].ax;
+      chy[n] = ((c / GW) | 0) + 0.5 + roff[c] * RIDGE_DIR[cd].ay;
+      sum += shpV[c]; n++;
+      var nx2 = c, pc = c;
       while (n < 2000) {
-        nx2 = ridgeStep(chx[n - 1] - 0.5, chy[n - 1] - 0.5, cd, sgn);
+        pc = chi[n - 1];
+        var px3 = pc % GW, py3 = (pc / GW) | 0;
+        nx2 = ridgeStep(px3, py3, cd, sgn);
         if (nx2 < 0) break;
         rvis[nx2] = 1;
-        var qx = (nx2 % GW) + 0.5, qy = ((nx2 / GW) | 0) + 0.5;
+        var qx = nx2 % GW, qy = (nx2 / GW) | 0;
         cd = rdir[nx2];
-        sgn = (RIDGE_DIR[cd].tx * (qx - chx[n - 1]) +
-               RIDGE_DIR[cd].ty * (qy - chy[n - 1])) >= 0 ? 1 : -1;
-        chx[n] = qx; chy[n] = qy; sum += shpA[nx2]; n++;
+        sgn = (RIDGE_DIR[cd].tx * (qx - px3) +
+               RIDGE_DIR[cd].ty * (qy - py3)) >= 0 ? 1 : -1;
+        chi[n] = nx2;
+        chx[n] = qx + 0.5 + roff[nx2] * RIDGE_DIR[cd].ax;
+        chy[n] = qy + 0.5 + roff[nx2] * RIDGE_DIR[cd].ay;
+        sum += shpV[nx2]; n++;
       }
       /* reverse in place so the backward walk can append */
       for (var a2 = 0, b2 = n - 1; a2 < b2; a2++, b2--) {
         var tx2 = chx[a2]; chx[a2] = chx[b2]; chx[b2] = tx2;
         var ty2 = chy[a2]; chy[a2] = chy[b2]; chy[b2] = ty2;
+        var ti2 = chi[a2]; chi[a2] = chi[b2]; chi[b2] = ti2;
       }
       cd = rdir[i]; sgn = -1;
       while (n < 2000) {
-        nx2 = ridgeStep(chx[n - 1] - 0.5, chy[n - 1] - 0.5, cd, sgn);
+        pc = chi[n - 1];
+        var px4 = pc % GW, py4 = (pc / GW) | 0;
+        nx2 = ridgeStep(px4, py4, cd, sgn);
         if (nx2 < 0) break;
         rvis[nx2] = 1;
-        var rx = (nx2 % GW) + 0.5, ry = ((nx2 / GW) | 0) + 0.5;
+        var rx = nx2 % GW, ry = (nx2 / GW) | 0;
         cd = rdir[nx2];
-        sgn = (RIDGE_DIR[cd].tx * (rx - chx[n - 1]) +
-               RIDGE_DIR[cd].ty * (ry - chy[n - 1])) >= 0 ? 1 : -1;
-        chx[n] = rx; chy[n] = ry; sum += shpA[nx2]; n++;
+        sgn = (RIDGE_DIR[cd].tx * (rx - px4) +
+               RIDGE_DIR[cd].ty * (ry - py4)) >= 0 ? 1 : -1;
+        chi[n] = nx2;
+        chx[n] = rx + 0.5 + roff[nx2] * RIDGE_DIR[cd].ax;
+        chy[n] = ry + 0.5 + roff[nx2] * RIDGE_DIR[cd].ay;
+        sum += shpV[nx2]; n++;
       }
       if (n < RIDGE_MINPTS) continue;
 
       var mean = sum / n;
-      for (b = 0; b < VEIN_BANDS.length && mean > VEIN_BANDS[b].max; b++) { /* pick band */ }
+      b = pickBand(mean, chi, n);
+      for (var bw = 0; bw < n; bw++) rband[chi[bw]] = b;
       var arr = vseg[b], w = vsegN[b];
       if (w + 1 + n * 2 > VEIN_CAP) continue;
       arr[w++] = n;
@@ -4392,6 +4680,7 @@ function exitReplay() {
     if (fs.nodeDone) S.nodeDone = fs.nodeDone.slice();
     /* the run is a finished exhibit, whatever the snapshot said mid-frame */
     S.running = false; S.paused = false; S.over = true;
+    restoreVeinTemporal(FINAL_STATE);
     /* the restored S carries the original run's wall and hazard lists, but
        the painted masks still hold the replay's — on a dish whose apparatus
        moved, an early abort would otherwise display the verdict over the
@@ -4713,6 +5002,9 @@ function showResult(won) {
   LAST_RESULT = buildResult(won);
   paintResult(LAST_RESULT);
   openResult();
+  /* the highlight layer's memory, added to the snapshot once openResult's own
+     render has drawn the frame it belongs to — see snapshotVeinTemporal */
+  snapshotVeinTemporal(FINAL_STATE);
 }
 
 /* ------------------------------------------------------------
@@ -5057,6 +5349,39 @@ function init() {
         while (r < end) { var c = vseg[b][r++]; ch++; pt += c; r += c * 2; }
       }
       return { chains: ch, points: pt, mean: ch ? +(pt / ch).toFixed(2) : 0 };
+    },
+    /* the drawn vein layer as a band index per cell, 255 for unlit — read back
+       out of the same arrays strokeVeins strokes, so it is what is on the
+       plate and not a parallel accounting of it. Two consecutive samples
+       differenced give the churn of the highlight layer, which is the thing
+       "twitchy" names. */
+    veinMap: function () {
+      var m = new Uint8Array(NCELL);
+      m.fill(255);
+      /* masses first and crests over them, the order strokeVeins draws in, so
+         the difference of two samples is the churn of the composite the eye
+         is actually looking at */
+      for (var l = 0; l < lsegN; l++) {
+        var lx = lseg[l * 2] | 0, ly = lseg[l * 2 + 1] | 0;
+        for (var oy = -1; oy <= 1; oy++) {
+          for (var ox = -1; ox <= 1; ox++) {
+            var mx = lx + ox, my = ly + oy;
+            if (mx >= 0 && my >= 0 && mx < GW && my < GH) m[my * GW + mx] = 100;
+          }
+        }
+      }
+      for (var b = 0; b < vsegN.length; b++) {
+        var a = vseg[b], end = vsegN[b], r = 0;
+        while (r < end) {
+          var c = a[r++];
+          for (var q = 0; q < c; q++) {
+            var cx = a[r + q * 2] | 0, cy = a[r + q * 2 + 1] | 0;
+            if (cx >= 0 && cy >= 0 && cx < GW && cy < GH) m[cy * GW + cx] = b;
+          }
+          r += c * 2;
+        }
+      }
+      return m;
     },
     prog: function () { return S.nodeProg ? Array.prototype.slice.call(S.nodeProg) : []; },
     front: function () {
