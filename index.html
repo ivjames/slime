@@ -179,7 +179,7 @@ body.touch #result .btn{min-height:44px;padding:11px 15px}
    the short-viewport rule uses, so the dish stays whole AND the verdict row
    lands above the fold. The play controls step aside — the panel carries the
    only actions that still mean anything once the run is over. */
-#scr-sim.resulting #stage,#scr-sim.resulting #feed{max-width:var(--plate)}
+#scr-sim.resulting .bench,#scr-sim.resulting #feed{max-width:var(--plate)}
 #scr-sim.resulting .touchbar,#scr-sim.resulting .simbar{display:none}
 
 @media(max-width:700px){
@@ -202,10 +202,15 @@ body.touch .keys-fine{display:none}
 body.touch .keys-touch{display:grid}
 
 /* ---------- sim ---------- */
-/* a size container so the HUD can answer to how wide the DISH is, not how wide
-   the window is — letterboxed landscape gives a narrow stage in a wide viewport */
-#stage{position:relative;width:100%;margin:0 auto;border:1px solid var(--line);border-radius:3px;
-  container-type:inline-size;container-name:dish;
+/* The bench is the plate plus the two readouts that ride over it where there
+   is room and step off it where there is not. It carries the letterbox width
+   and the size container, so #stage is simply all of it: the readouts overlay
+   lines up with the plate to the pixel, and the HUD still answers to how wide
+   the DISH is rather than how wide the window is — letterboxed landscape gives
+   a narrow plate in a wide viewport. */
+.bench{position:relative;width:100%;margin:0 auto;
+  container-type:inline-size;container-name:dish}
+#stage{position:relative;width:100%;border:1px solid var(--line);border-radius:3px;
   background:#070906;overflow:hidden;touch-action:none;cursor:crosshair;
   -webkit-tap-highlight-color:transparent;
   -webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
@@ -242,8 +247,14 @@ body.touch .keys-touch{display:grid}
 .meter.mass .fill{background:linear-gradient(90deg,#8f7f1e,var(--slime))}
 .meter.hab .fill{background:linear-gradient(90deg,#5b3479,var(--quin))}
 .meter.crit .fill{background:var(--bad)}
-.hud-br{right:12px;bottom:11px;text-align:right;color:var(--dim);font-size:10.5px;max-width:44%}
-.nodes{position:absolute;right:12px;top:46px;text-align:right;color:var(--dim);font-size:10.5px;line-height:1.7}
+/* On a plate with room, this is the layer it used to be: node list under the
+   top bar, note above the meters, both against the right edge. */
+.readouts{position:absolute;inset:0;pointer-events:none;display:flex;flex-direction:column;
+  align-items:flex-end;gap:8px;padding:46px 12px 11px}
+/* auto margin rather than space-between: the note belongs at the bottom of the
+   plate whether or not there is a node list above it to be spaced from */
+.hud-br{margin-top:auto;text-align:right;color:var(--dim);font-size:10.5px;letter-spacing:.08em;max-width:44%}
+.nodes{text-align:right;color:var(--dim);font-size:10.5px;line-height:1.7}
 /* not-yet-reached nodes were a half-opacity --dim, which is a colour you can
    see only if you already know what it says. They are dim ink now, not faded. */
 .nodes .n{color:#8b937d}
@@ -283,8 +294,8 @@ body.touch .keys-touch{display:grid}
 .keypop>summary{display:inline-block;list-style:none}
 .keypop>summary::-webkit-details-marker{display:none}
 .keypop>summary::marker{content:""}
-.keypop>summary::after{content:" +";opacity:.7}
-.keypop[open]>summary::after{content:" \2212";opacity:.7}
+.keypop>summary::after{content:" +"}
+.keypop[open]>summary::after{content:" \2212"}
 .keypop[open]>summary{border-color:var(--slime);color:var(--slime)}
 .keypop-body{position:absolute;right:0;bottom:calc(100% + 8px);z-index:20;
   width:min(430px,78vw);padding:12px 15px 14px;
@@ -299,41 +310,91 @@ body.touch .touchbar{display:flex}
   text-transform:uppercase;transition:.14s;
   touch-action:manipulation;-webkit-tap-highlight-color:transparent;
   -webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
-.tbtn .sub{display:block;font-size:9.5px;letter-spacing:.10em;opacity:.72;margin-top:3px;text-transform:none}
+/* The sub-label is smaller, not fainter: at .72 it was 4.15:1 on the pad it
+   labels, and it is the line that tells you HOW to use the verb. */
+.tbtn .sub{display:block;font-size:9.5px;letter-spacing:.10em;margin-top:3px;text-transform:none}
 .tbtn.on{background:var(--slime);border-color:var(--slime);color:#14170d;font-weight:600}
 .tbtn.ret.on{background:var(--bad);border-color:var(--bad);color:#1a0a10}
 
 body.touch .btn{min-height:44px;padding:11px 18px}
 body.touch .dish{min-height:132px}
 
-/* The note wraps on a small dish and lands on top of the biomass meter, so it
-   moves to the corner the narration used to occupy — which is free now that
-   the narration is a strip under the bench. Stated twice on purpose: the
-   container query is the accurate one, the media query is the fallback where
-   @container is unsupported. */
+/* What a small plate carries, and what steps off it. Stated twice on purpose:
+   the container query is the accurate one — it asks how wide the DISH is — and
+   the media query is the fallback where @container is unsupported. */
 @media(max-width:640px){
   .hud-bl{width:58%}
   .hud-tl .lt,.hud-tl .rt{font-size:10px}
-  /* The note and the node list share the top of a narrow dish, one from each
-     edge, so their widths have to add up to less than the dish or one plate
-     covers the other — which is worse now than it was when they were bare text
-     over the agar. 48 + 42 leaves the two insets and a gap between them. The
-     note wraps to two lines at that width, and the longest node row ("flake
-     beyond 100%") wraps on the narrowest phones; both beat an overlap. */
-  .hud-br{left:12px;right:auto;top:46px;bottom:auto;text-align:left;max-width:48%;font-size:10px;padding:6px 8px}
-  .nodes{max-width:42%}
+  /* The objective wedged into the middle third of a narrow bar wraps to three
+     and four lines and swallows the plate — 103px of a 159px dish at the
+     narrowest. Given the whole width on a second row it takes one line, and
+     the bar clears the biomass meter again. */
+  .hud-tl{flex-wrap:wrap;row-gap:2px}
+  .hud-tl .obj{order:3;flex:1 1 100%;text-align:left}
+  /* A phone-sized plate cannot hold all of this. At 320px the dish is 296x184;
+     the top bar wraps its objective and stands 52 to 103px tall, the
+     nine-depot list is 179px, and the biomass meter wants the bottom — the sum
+     is half again the plate, so everything past the first layer either covers
+     the organism or falls off a dish that clips. That was already true before
+     this branch, where nine rows lost 22px off the bottom at this width; the
+     plate each block now carries only made it visible.
+
+     So the readouts step off the plate here, into the strip between the dish
+     and the controls — which is where this branch put the narration, for the
+     same reason. What stays over the agar is what has to be read against it:
+     the top bar and the biomass meter, and those two clear each other at
+     every width the plate can be. */
+  /* One strip rather than two: off the plate they are no longer two things
+     floating over an image, they are a panel — so they get the feed's ground
+     and a rule between them, and stop carrying their own plates. */
+  .readouts{position:static;display:block;padding:0;margin-top:8px;
+    border:1px solid var(--line);border-radius:3px;
+    background:linear-gradient(180deg,#14180f,#0f1210)}
+  .nodes,.hud-br{background:none;border:0;border-radius:0;
+    -webkit-backdrop-filter:none;backdrop-filter:none}
+  .hud-br{max-width:none;text-align:left;font-size:11px;padding:8px 12px}
+  .nodes:not(:empty)+.hud-br{border-top:1px solid var(--line)}
+  /* the list reads across the strip instead of down the side of the plate:
+     nine rows become three lines of three */
+  .nodes{max-width:none;text-align:left;font-size:11px;line-height:1.5;padding:8px 12px;
+    display:flex;flex-wrap:wrap;gap:2px 16px}
 }
 @container dish (max-width:640px){
   .hud-bl{width:58%}
   .hud-tl .lt,.hud-tl .rt{font-size:10px}
-  /* The note and the node list share the top of a narrow dish, one from each
-     edge, so their widths have to add up to less than the dish or one plate
-     covers the other — which is worse now than it was when they were bare text
-     over the agar. 48 + 42 leaves the two insets and a gap between them. The
-     note wraps to two lines at that width, and the longest node row ("flake
-     beyond 100%") wraps on the narrowest phones; both beat an overlap. */
-  .hud-br{left:12px;right:auto;top:46px;bottom:auto;text-align:left;max-width:48%;font-size:10px;padding:6px 8px}
-  .nodes{max-width:42%}
+  /* The objective wedged into the middle third of a narrow bar wraps to three
+     and four lines and swallows the plate — 103px of a 159px dish at the
+     narrowest. Given the whole width on a second row it takes one line, and
+     the bar clears the biomass meter again. */
+  .hud-tl{flex-wrap:wrap;row-gap:2px}
+  .hud-tl .obj{order:3;flex:1 1 100%;text-align:left}
+  /* A phone-sized plate cannot hold all of this. At 320px the dish is 296x184;
+     the top bar wraps its objective and stands 52 to 103px tall, the
+     nine-depot list is 179px, and the biomass meter wants the bottom — the sum
+     is half again the plate, so everything past the first layer either covers
+     the organism or falls off a dish that clips. That was already true before
+     this branch, where nine rows lost 22px off the bottom at this width; the
+     plate each block now carries only made it visible.
+
+     So the readouts step off the plate here, into the strip between the dish
+     and the controls — which is where this branch put the narration, for the
+     same reason. What stays over the agar is what has to be read against it:
+     the top bar and the biomass meter, and those two clear each other at
+     every width the plate can be. */
+  /* One strip rather than two: off the plate they are no longer two things
+     floating over an image, they are a panel — so they get the feed's ground
+     and a rule between them, and stop carrying their own plates. */
+  .readouts{position:static;display:block;padding:0;margin-top:8px;
+    border:1px solid var(--line);border-radius:3px;
+    background:linear-gradient(180deg,#14180f,#0f1210)}
+  .nodes,.hud-br{background:none;border:0;border-radius:0;
+    -webkit-backdrop-filter:none;backdrop-filter:none}
+  .hud-br{max-width:none;text-align:left;font-size:11px;padding:8px 12px}
+  .nodes:not(:empty)+.hud-br{border-top:1px solid var(--line)}
+  /* the list reads across the strip instead of down the side of the plate:
+     nine rows become three lines of three */
+  .nodes{max-width:none;text-align:left;font-size:11px;line-height:1.5;padding:8px 12px;
+    display:flex;flex-wrap:wrap;gap:2px 16px}
 }
 @media(max-width:520px){
   #app{padding:12px;gap:10px}
@@ -349,7 +410,7 @@ body.touch .dish{min-height:132px}
    short viewport. Width-driven on a portrait phone, so this only bites in
    landscape / short windows. */
 @media(pointer:coarse),(max-height:760px){
-  #stage,#feed{max-width:var(--plate)}
+  .bench,#feed{max-width:var(--plate)}
 }
 @media(max-height:760px){
   #log{height:64px}
@@ -410,23 +471,28 @@ body.touch .dish{min-height:132px}
 
   <!-- ============ SIM ============ -->
   <section class="screen" id="scr-sim">
-    <div id="stage">
-      <canvas id="cv"></canvas>
-      <div class="hud hud-tl">
-        <div class="lt" id="h-code"></div>
-        <div class="obj" id="h-obj"></div>
-        <div class="rt" id="h-time"></div>
+    <div class="bench">
+      <div id="stage">
+        <canvas id="cv"></canvas>
+        <div class="hud hud-tl">
+          <div class="lt" id="h-code"></div>
+          <div class="obj" id="h-obj"></div>
+          <div class="rt" id="h-time"></div>
+        </div>
+        <div class="hud hud-bl">
+          <div class="meter mass"><div class="lab"><span>Biomass</span><span id="h-mass">0</span></div>
+            <div class="bar"><div class="fill" id="h-massbar"></div></div></div>
+          <div class="meter hab" id="h-habwrap" style="display:none">
+            <div class="lab"><span id="h-meterlab">Habituation</span><span id="h-hab">0%</span></div>
+            <div class="bar"><div class="fill" id="h-habbar"></div></div></div>
+        </div>
+        <div id="pauseveil">Culture held</div>
       </div>
-      <div class="nodes" id="h-nodes"></div>
-      <div class="hud hud-bl">
-        <div class="meter mass"><div class="lab"><span>Biomass</span><span id="h-mass">0</span></div>
-          <div class="bar"><div class="fill" id="h-massbar"></div></div></div>
-        <div class="meter hab" id="h-habwrap" style="display:none">
-          <div class="lab"><span id="h-meterlab">Habituation</span><span id="h-hab">0%</span></div>
-          <div class="bar"><div class="fill" id="h-habbar"></div></div></div>
+      <!-- over the plate where there is room for them, under it where there is not -->
+      <div class="readouts">
+        <div class="nodes" id="h-nodes"></div>
+        <div class="hud-br" id="h-note"></div>
       </div>
-      <div class="hud hud-br" id="h-note"></div>
-      <div id="pauseveil">Culture held</div>
     </div>
 
     <!-- result: rendered BELOW the finished dish, never over it -->
