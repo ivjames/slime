@@ -137,11 +137,6 @@ function mixWhite(c, k) {
           Math.round(c[1] + (255 - c[1]) * k),
           Math.round(c[2] + (255 - c[2]) * k)];
 }
-/* Plain Rec.709 luma on the encoded channels, for weighing one visible step
-   against another on the same ground. relLum above linearises first, which is
-   what a WCAG measurement wants; for "how far off the sheet does this look"
-   the encoded weights are the better ruler, and the two must not be mixed. */
-function luma(c) { return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]; }
 function hex2(n) { var h = (n | 0).toString(16); return h.length < 2 ? '0' + h : h; }
 function hexOf(c) { return '#' + hex2(c[0]) + hex2(c[1]) + hex2(c[2]); }
 function rgba(c, a) { return 'rgba(' + c[0] + ',' + c[1] + ',' + c[2] + ',' + a + ')'; }
@@ -1445,7 +1440,12 @@ var nAgents = 0;
    the growing ends spreading into lobed fans. The old ramp fought that. It ran
    through olive to near-white, which turned dense tissue grey; and it ramped
    SMOOTHLY, so every vein was a gradient with no edge anywhere and the dish
-   read as luminous goo.
+   read as luminous goo. The threshold below fixed most of that and then
+   underdid its own idea: at three trail units of crossing, every boundary
+   still wore a band of the muddy in-between tones, and a bright body edged
+   in dark mud against a dark dish is the anatomy of a DROP SHADOW — the
+   whole organism read as a sticker with a shadow behind it, which is a
+   different wrong dish from the luminous one but wrong the same amount.
 
    So the transfer is a soft-edged THRESHOLD rather than a ramp. Below BODY_T
    there is no organism and the cell is agar; across the next BODY_SOFT of
@@ -1463,7 +1463,31 @@ var nAgents = 0;
    yellow. */
 var AGAR = [20, 22, 17];        // the dish, unoccupied
 var BODY_T    = 9.0;            // trail at which tissue begins
-var BODY_SOFT = 3.0;            // trail over which the edge resolves
+var BODY_SOFT = 1.4;            // trail over which the edge resolves
+/* 1.4, down from 3.0: the crossing keeps about a cell of width against the
+   trail gradients the body actually has, and the drawImage upscale antialiases
+   that cell, so the edge stays smooth on screen. What the narrower window
+   removes is the apron — the muddy blend tones that ringed every lobe and
+   hole and read, against the dark dish, as a shadow the body was casting. */
+
+/* The inner shadow: the shading of the WHOLE shape of the mold, and the only
+   shadow on the plate. The organism is a raised mass on the agar, lit from
+   up and to the left of the bench; where its surface rolls away from that
+   light — the down-light side of its outline, the up-light wall inside every
+   hole — the tissue darkens. Computed in paintField from the body's own
+   coverage: a cell is shaded by how much the body is ABSENT a little way
+   down-light of it, sampled at two throws so the shade curls off soft instead
+   of stamping a band. Two throws are the whole feather; the field is coarse
+   enough that more would buy nothing.
+
+   It is a multiply on the finished cell, so a shaded green is a darker green,
+   never grey — and it touches nothing but tissue: the agar carries no
+   coverage, so nothing is ever drawn OFF the body. That is the line every
+   earlier attempt crossed: shadows drawn along the veins, at any depth or
+   offset, traced the body's skeleton and summed to a drop shadow under the
+   whole network. The shape's own shadow lives on the shape. */
+var ISH_D     = 2;      // throw, in cells, diagonally down-light per tap
+var ISH_DEPTH = 0.30;   // full-shade depth, as a multiply on the cell
 
 var LUT = new Uint8Array(256 * 3);
 var GAMN = 2048;
@@ -2656,11 +2680,34 @@ function paintField() {
         if (t > BODY_T * 0.5) {
           var gi = (t * GAM_SCALE) | 0;
           if (gi < 0) gi = 0; else if (gi >= GAMN) gi = GAMN - 1;
-          var o = GAM[gi] * 3;
+          var vcov = GAM[gi];
+          var o = vcov * 3;
           r += LUT[o] * FIELD_GAIN; g += LUT[o + 1] * FIELD_GAIN; b += LUT[o + 2] * FIELD_GAIN;
           if (r > 255) r = 255;
           if (g > 255) g = 255;
           if (b > 255) b = 255;
+          /* the inner shadow (see ISH_D above): how much of the body is
+             missing one and two throws down-light of this cell. The last
+             few rows and columns skip it rather than clamp it — they are
+             against the dish wall, where the shade would be guesswork. */
+          var sx2 = i % GW, sy2 = (i / GW) | 0;
+          if (vcov > 8 && sx2 < GW - 2 * ISH_D - 1 && sy2 < GH - 2 * ISH_D - 1) {
+            var j1 = i + ISH_D * GW + ISH_D;
+            var a1 = shpA[j1];
+            var t1 = a1 + SHARP * (a1 - shpB[j1]);
+            var g1 = (t1 * GAM_SCALE) | 0;
+            if (g1 < 0) g1 = 0; else if (g1 >= GAMN) g1 = GAMN - 1;
+            var j2 = i + 2 * ISH_D * GW + 2 * ISH_D;
+            var a2 = shpA[j2];
+            var t2 = a2 + SHARP * (a2 - shpB[j2]);
+            var g2 = (t2 * GAM_SCALE) | 0;
+            if (g2 < 0) g2 = 0; else if (g2 >= GAMN) g2 = GAMN - 1;
+            var sh = vcov * (255 - 0.55 * GAM[g1] - 0.45 * GAM[g2]);
+            if (sh > 0) {
+              var f = 1 - ISH_DEPTH * sh / 65025;
+              r *= f; g *= f; b *= f;
+            }
+          }
         }
       }
       /* the player's cue reads as a faint warm haze in the agar */
@@ -2767,81 +2814,29 @@ var RIDGE_REL = 0.14;  // ...as a fraction of the cell's own trail
    band now tops out around lightness 0.68, which is still plainly the
    brightest thing on the plate and still plainly the specimen's colour.
 
-   The brightness it gives up is returned as `cast`: the depth of the shade
-   the band drops on the sheet beside it, as a multiple of the band's OWN
-   lift. That is the better trade because a highlight needs something to be a
-   highlight OF. The tissue is one flat threshold colour, so a bright line on
-   it was the only tonal event in the picture and read as something drawn ON
-   the plate; a crest with a shade down one side reads as a tube standing up
-   out of it, at a fraction of the brightness. Chaining depth to lift is what
-   keeps the two halves of one lamp: a crest that barely rises off the sheet
-   gets a shade that barely dips below it, and the trunk, which catches the
-   most light, drops the deepest. The first cut fixed the depth by hand, and
-   on the default plate the shade ran nearly three times the lift — the dark
-   rim was the loudest mark on the dish, and a rim louder than the crest it
-   hugs stops reading as that crest's shading at all and attaches itself to
-   the silhouette it follows, which is the body. The ratios below sit just
-   past one: relief, not outline.
-
-   The two finest bands throw none at all, for two separate reasons that
-   happen to agree. `dim` has already sunk the finest BELOW the sheet, where a
-   cast shadow would be a contradiction. And a shadow is only a shadow if you
-   can see which way it fell — the throw scales with the band's own width, so
-   below about a cell it lands under its own crest on both sides and draws an
-   OUTLINE. A dish full of outlined hairlines reads as cut paper, which is a
-   worse failure than the streaks this is fixing. */
+   These lines are the HIGHLIGHTS and nothing else. The bands used to carry
+   shadows too — a dark stroke offset beside each crest, tried at several
+   depths and geometries — and every version misattributed itself: the veins
+   trace the body's whole skeleton, so their offset dark copies summed to a
+   drop shadow under the body, the one thing this dish must never wear. The
+   shading that makes the organism read as a raised mass is the field's own
+   inner shadow now (section 9, ISH_D), computed from the SHAPE of the mold
+   rather than drawn along its veins; the crests stay where light belongs,
+   on top of it. */
 var VEIN_BANDS = [
-  { max: 6,        w: 0.34, hot: 0.00, dim: 0.86, alpha: 0.90, cast: 0.00, style: '', shadow: '' },
-  { max: 10,       w: 0.62, hot: 0.09, dim: 1.00, alpha: 0.97, cast: 0.00, style: '', shadow: '' },
-  { max: 16,       w: 1.05, hot: 0.18, dim: 1.00, alpha: 1,    cast: 0.90, style: '', shadow: '' },
-  { max: 26,       w: 1.75, hot: 0.28, dim: 1.00, alpha: 1,    cast: 1.05, style: '', shadow: '' },
-  { max: Infinity, w: 2.70, hot: 0.40, dim: 1.00, alpha: 1,    cast: 1.20, style: '', shadow: '' }
+  { max: 6,        w: 0.34, hot: 0.00, dim: 0.86, alpha: 0.90, style: '' },
+  { max: 10,       w: 0.62, hot: 0.09, dim: 1.00, alpha: 0.97, style: '' },
+  { max: 16,       w: 1.05, hot: 0.18, dim: 1.00, alpha: 1 },
+  { max: 26,       w: 1.75, hot: 0.28, dim: 1.00, alpha: 1 },
+  { max: Infinity, w: 2.70, hot: 0.40, dim: 1.00, alpha: 1 }
 ];
-/* The lamp: up and to the left of the bench, the way a plate is lit for a
-   photograph. A unit vector in GRID cells, pointing the way shadows fall, so
-   the offsets below scale with the dish and survive a resize along with the
-   baked paths. */
-var LIGHT_X = 0.7071, LIGHT_Y = 0.7071;
-/* How far a band's shadow slides out from under it, and how much wider it is
-   drawn, both as multiples of the band's own line width. Kept small: this is
-   a tube a fraction of a millimetre proud of the agar, not a pipe on a table,
-   and a longer throw immediately reads as a drop shadow under a sticker. */
-var CAST_OFF  = 0.46;
-var CAST_GROW = 1.22;
 function tintVeins(vein) {
-  /* band.shadow is a MULTIPLIER, not a coat of paint: the grey that, stroked
-     in 'multiply', dims the sheet by cast times the band's own lift. Two
-     things fall out of that verb. It is the physically right one — a shadow
-     is the same pigment under less light — so the crescent keeps the
-     tissue's hue exactly, on the sheet and on anything else it grazes. And
-     the agar is immune: an alpha-blended shade LANDS on the near-black dish
-     as a lighter olive rim, and the first cut edged every filament's shadow
-     flank with one brighter against the dish (+27 luma) than the crest was
-     against the sheet (+20) — the body as a sticker casting a drop shadow
-     on the glass — where multiplying near-black moves it nowhere the eye
-     can follow.
-
-     Balanced per run as well as per band: a dark specimen has a big lift
-     and little sheet luma to spend on a shade, a light one the reverse, and
-     no fixed depth suits both. The cap is the dark-specimen case, where a
-     lift larger than the sheet's own luma would otherwise ask for a shade
-     the sheet cannot hold. */
-  var tl = luma(vein);
   for (var i = 0; i < VEIN_BANDS.length; i++) {
     var band = VEIN_BANDS[i];
     var c = mixWhite(vein, band.hot);
     band.style = 'rgba(' + Math.round(c[0] * band.dim) + ','
                          + Math.round(c[1] * band.dim) + ','
                          + Math.round(c[2] * band.dim) + ',' + band.alpha + ')';
-    band.shadow = '';
-    if (band.cast) {
-      var d = band.cast * (luma(c) * band.dim - tl) / tl;
-      if (d > 0.35) d = 0.35;
-      if (d > 0.005) {
-        var g = Math.round(255 * (1 - d));
-        band.shadow = 'rgb(' + g + ',' + g + ',' + g + ')';
-      }
-    }
   }
   TIP_STYLE = rgba(mixWhite(vein, 0.62), '0.34');
 }
@@ -3068,32 +3063,8 @@ function strokeVeins(sx, sy) {
   ctx.setTransform(sx, 0, 0, sy, 0, 0);
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
-  var b, band;
-  /* Every shadow first, then every highlight — rather than shading each band
-     as it is drawn. Two passes cost one extra loop over five cached paths and
-     buy the rule that makes the network read as one surface: nothing standing
-     ABOVE the sheet can have a shadow laid on top of it. Interleaved, a
-     narrower band drawn later multiplies its shade into the crest of the
-     trunk it joins — and it is exactly the junctions that lose, where the
-     hierarchy is read. */
-  ctx.globalCompositeOperation = 'multiply';
-  for (b = VEIN_BANDS.length - 1; b >= 0; b--) {
-    band = VEIN_BANDS[b];
-    if (!veinPath[b] || !band.shadow) continue;
-    /* Offset only the shadow, never the crest. The crest IS the vein — the
-       ridge walk put it on the centreline and moving it would draw the
-       network somewhere the simulation does not have one. Sliding the shade
-       out from under it is what leaves a dark crescent down one side. */
-    ctx.save();
-    ctx.translate(band.w * CAST_OFF * LIGHT_X, band.w * CAST_OFF * LIGHT_Y);
-    ctx.lineWidth = band.w * CAST_GROW;
-    ctx.strokeStyle = band.shadow;
-    ctx.stroke(veinPath[b]);
-    ctx.restore();
-  }
-  ctx.globalCompositeOperation = 'source-over';
   /* widest first, so the hairlines land on top of the trunks they join */
-  for (b = VEIN_BANDS.length - 1; b >= 0; b--) {
+  for (var b = VEIN_BANDS.length - 1; b >= 0; b--) {
     if (!veinPath[b]) continue;
     ctx.lineWidth = VEIN_BANDS[b].w;
     ctx.strokeStyle = VEIN_BANDS[b].style;
