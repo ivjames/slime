@@ -1614,7 +1614,17 @@ function rebuildGeo(e) {
 }
 
 function buildDish(e) {
+  /* A NEW dish, not the next step of the old one — so the next frame has to
+     rebuild rather than wait its turn under REBUILD_EVERY. Marking the field
+     dirty alone is not enough: the run is already S.running by this point and
+     dirtyFrames starts the count at zero, so the first frame of every run took
+     the deferred branch and drew the PREVIOUS run's field image and cached
+     vein paths over the new dish (a black frame on the very first run). One
+     frame, but a deterministic one — and longest on exactly the slow devices
+     the deferral exists to help. Priming the counter makes the next render
+     due immediately. */
   fieldDirty = true;
+  dirtyFrames = REBUILD_EVERY;
   trail.fill(0); tmpF.fill(0); foodF.fill(0);
   cueF.fill(0); retF.fill(0); slimeF.fill(0);
   nodeAt.fill(-1);
