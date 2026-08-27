@@ -765,7 +765,17 @@ function inoculate(e) {
 }
 
 /* Place a daughter at (nx, ny) heading nh, if that cell will take one. */
-function emit(nx, ny, nh) {
+/* `tip` says whether the daughter is being put at the FRONT or into the body,
+   and the caller has to say, because emit() cannot tell. It used to mark every
+   daughter a tip on the reasoning that a daughter is a front by definition —
+   true of a fork, false of a thickening spawn, which lands in the middle of
+   the culture with a random heading. Nothing corrected it until the frontier
+   test ran on the next step, and a step can spawn many times: a thickening
+   daughter born early in one growth loop was an eligible fork parent for the
+   rest of it, so the atip filter that fork selection was just rewritten around
+   could be handed exactly the interior agent it exists to exclude. The
+   renderer would draw it a whisker for a frame, too. */
+function emit(nx, ny, nh, tip) {
   if (nAgents >= MAXA) return false;
   if (nx < 1 || ny < 1 || nx >= GW - 1 || ny >= GH - 1) return false;
   var ci = (ny | 0) * GW + (nx | 0);
@@ -774,7 +784,7 @@ function emit(nx, ny, nh) {
      growth is busiest) that is precisely where the mesh wants room */
   if (wallM[ci] || occ[ci]) return false;
   ax[nAgents] = Math.fround(nx); ay[nAgents] = Math.fround(ny); ah[nAgents] = nh;
-  atip[nAgents] = 1;                 /* a daughter is a front by definition */
+  atip[nAgents] = tip ? 1 : 0;
   occ[ci]++;
   nAgents++;
   return true;
@@ -821,13 +831,13 @@ function forkTip() {
        PARENT turns as well. Splitting only the daughter leaves the trunk
        running dead ahead and reads as a twig, not a bifurcation. */
     var a = BRANCH_A * (0.7 + rnd() * 0.6);
-    if (!emit(x + Math.cos(h + a * side) * 1.2, y + Math.sin(h + a * side) * 1.2, h + a * side)) return false;
+    if (!emit(x + Math.cos(h + a * side) * 1.2, y + Math.sin(h + a * side) * 1.2, h + a * side, 1)) return false;
     ah[best] = h - a * side * 0.85;
     return true;
   }
   /* lateral branch: a daughter leaves the flank and the parent runs on */
   var b = BRANCH_LAT * (0.75 + rnd() * 0.5) * side;
-  return emit(x + Math.cos(h + b) * 1.4, y + Math.sin(h + b) * 1.4, h + b);
+  return emit(x + Math.cos(h + b) * 1.4, y + Math.sin(h + b) * 1.4, h + b, 1);
 }
 
 /* Thicken instead: new cytoplasm appears where the food is and where the
@@ -843,7 +853,7 @@ function thicken() {
   }
   if (best < 0) return false;
   for (var tries = 0; tries < 6; tries++) {
-    if (emit(ax[best] + (rnd() - 0.5) * 8, ay[best] + (rnd() - 0.5) * 8, rnd() * Math.PI * 2)) return true;
+    if (emit(ax[best] + (rnd() - 0.5) * 8, ay[best] + (rnd() - 0.5) * 8, rnd() * Math.PI * 2, 0)) return true;
   }
   return false;
 }
