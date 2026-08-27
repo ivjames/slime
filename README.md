@@ -10,8 +10,8 @@ dependencies, no framework. Open the file, that's the whole app.
 
 ## The experiments
 
-Ten reproduce published *Physarum* results; ten are the lab's own follow-ups
-on the same machinery.
+Nine reproduce published *Physarum* results; the rest are the lab's own
+follow-ups on the same machinery.
 
 - **EXP-01 — FIRST CONTACT.** No apparatus, no hypothesis. Just being an
   organism in a dish: sense, extend, retract, feed. Everything else is built
@@ -67,8 +67,9 @@ on the same machinery.
   taught, at once.
 
 Every run's 24-bit seed doubles as its colour: the specimen line printed on
-the result screen (`#a3f2c1`) is the hex of the tint the organism grew in,
-derived to hold WCAG contrast against the agar whatever the seed.
+the result screen (`#a3f2c1`) sets the hue the organism grows in, with
+saturation and lightness adjusted from the raw hex only as far as needed to
+hold WCAG contrast against the agar whatever the seed.
 
 ## Controls
 

@@ -239,7 +239,6 @@ var HAZ_QUIN = 5.2;    // repulsion of a quinine zone (scaled by 1 - habituation
    is the point. Deposit is small because every agent lays it every step,
    moved or blocked, so a front crossing once is enough to mark the ground. */
 var SLIME_DEP = 0.015;
-var SLIMEW    = 1.0;   // sensed cost of fully-coated agar; the dish sets the dial
 
 var SPENT_FOOD = 0.30; // an engulfed node's remaining pull (a refuge, not a beacon)
 var SPENT_FALL = 34;   // and only over this reach, so spent food cannot outbid fresh
@@ -557,7 +556,7 @@ var EXPERIMENTS = [
   {
     code: 'EXP-09', name: 'THE DECOY',
     blurb: 'Two good meals far apart, one bad one close by. Preference is not supposed to flip.',
-    brief: 'Latty &amp; Beekman, 2011. Give the plasmodium two good meals and it splits its attention evenly. Add a third, worse option nearby and the preference between the first two flips, a small violation of independence of irrelevant alternatives that human economists were not expecting from an organism with no brain. Today\'s dish repeats the trick from the inside: two real meals sit far apart on opposite ends of the agar, and one small, close, mostly-cellulose scrap waits between you and neither of them. It is nearer. It is not the assignment.',
+    brief: 'Latty & Beekman, 2011. Give the plasmodium two good meals and it splits its attention evenly. Add a third, worse option nearby and the preference between the first two flips, a small violation of independence of irrelevant alternatives that human economists were not expecting from an organism with no brain. Today\'s dish repeats the trick from the inside: two real meals sit far apart on opposite ends of the agar, and one small, close, mostly-cellulose scrap waits between you and neither of them. It is nearer. It is not the assignment.',
     obj: 'Engulf the two far meals; the near one is not required.',
     objShort: 'BASINS',
     chips: [['ok', 'two required meals'], ['', 'one decoy, close'], ['', 'engulf costs mass']],
@@ -590,7 +589,7 @@ var EXPERIMENTS = [
   {
     code: 'EXP-10', name: 'THE GRAFT',
     blurb: 'A habituated donor waits in the corner. Fuse before you learn the quinine alone.',
-    brief: 'Vogel &amp; Dussutour, 2016. A plasmodium trained to ignore quinine was fused to a naive one, and the naive half crossed bitter agar as if it had learned the lesson itself — transferred down the shared vein, with no nervous system anywhere to carry it. There is a habituated culture sitting unconnected in the corner of this dish. Learning the strips first-hand, alone, will not finish inside the clock. Find the donor, fuse with it, and let the vein carry what your own crossings cannot.',
+    brief: 'Vogel & Dussutour, 2016. A plasmodium trained to ignore quinine was fused to a naive one, and the naive half crossed bitter agar as if it had learned the lesson itself — transferred down the shared vein, with no nervous system anywhere to carry it. There is a habituated culture sitting unconnected in the corner of this dish. Learning the strips first-hand, alone, will not finish inside the clock. Find the donor, fuse with it, and let the vein carry what your own crossings cannot.',
     obj: 'Fuse with the donor culture, then cross the quinine and engulf the far agar.',
     objShort: 'GRAFT',
     chips: [['q', 'two quinine strips'], ['', 'alone, too slow to learn'], ['ok', 'donor culture waits']],
@@ -727,7 +726,19 @@ var EXPERIMENTS = [
       ] },
       { t: 330, hazards: [
         { type: 'h', x: 378, y: 0, w: 40, h: 260 }
-      ], note: 'the bar reaches the far wall again. the observer notes the regularity and nothing else.' }
+      ], note: 'the bar reaches the far wall again. the observer notes the regularity and nothing else.' },
+      { t: 352, hazards: [
+        { type: 'h', x: 0, y: 0, w: 40, h: 260 }
+      ], note: 'back to the near wall. the schedule does not tire.' },
+      { t: 374, hazards: [
+        { type: 'h', x: 54, y: 0, w: 40, h: 260 }
+      ] },
+      { t: 396, hazards: [
+        { type: 'h', x: 108, y: 0, w: 40, h: 260 }
+      ] },
+      { t: 418, hazards: [
+        { type: 'h', x: 162, y: 0, w: 40, h: 260 }
+      ] }
     ],
     start: 4200, cap: 11500, sustain: 2100, grow: 320, starve: 40, grace: 50,
     timeLimit: 420, hab: false, shocks: false,
@@ -1520,10 +1531,13 @@ function buildDish(e) {
    them is rebuilt, and anything standing where a wall now is does not survive
    being enclosed by it. */
 function applyEvent(e, ev) {
-  var changed = false;
-  if (ev.walls) { S.walls = ev.walls; changed = true; }
-  if (ev.hazards) { S.hazards = ev.hazards; changed = true; }
-  if (changed) {
+  /* Geodesics and food answer only to walls, so a hazard-only event — and
+     the sweeping dishes fire a dozen of them — pays for a mask restamp and
+     a static-field rebuild, not for re-flooding every node's distance
+     field in the middle of a step. */
+  if (ev.walls) {
+    S.walls = ev.walls;
+    if (ev.hazards) S.hazards = ev.hazards;
     stampMasks();
     var k = 0;
     while (k < nAgents) {
@@ -1537,6 +1551,10 @@ function applyEvent(e, ev) {
       k++;
     }
     rebuildGeo(e);
+  } else if (ev.hazards) {
+    S.hazards = ev.hazards;
+    stampMasks();
+    rebuildStatic();
   }
   if (ev.note) logLine(ev.note, !!ev.hi);
 }
@@ -1742,7 +1760,7 @@ function sense(x, y) {
     if (sm > 0) {
       var occupied = trail[i] * 0.125;
       if (occupied > 1) occupied = 1;
-      v -= SLIME_W * sm * SLIMEW * (1 - occupied);
+      v -= SLIME_W * sm * (1 - occupied);
     }
   }
   return v;
@@ -2515,7 +2533,7 @@ function objText(e) {
     for (i = 0; i < e.required.length; i++) if (S.nodeDone[e.required[i]]) d++;
     s = e.objShort + ' ' + d + ' / ' + e.required.length;
   } else if (e.holdWin) {
-    s = 'HELD ' + S.engulfed + ' / ' + e.holdWin;
+    s = e.objShort + ' ' + S.engulfed + ' / ' + e.holdWin;
   } else {
     s = e.objShort + ' ' + S.engulfed + ' / ' + e.nodes.length;
   }
