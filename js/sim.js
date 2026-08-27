@@ -114,11 +114,95 @@ var DT = 1 / 60;                           // fixed sim timestep
    mesh scale, and 9 on a dish only 420x260 leaves room for about six tubes
    and no holes at all. Five halves the vein width and buys a mesh of
    twenty-to-fifty cells, which is what reads as physarum at this size. */
-var SENS_D = 5.0;      // sensor distance, cells
+var SENS_D = 6.5;      // sensor distance, cells
 var SENS_A = 0.40;     // sensor half-angle, rad (~23 deg)
 var TURN   = 0.79;     // rotation per step toward the better sensor, rad (45 deg)
 var SPEED  = 1.0;      // cells per step
 var JITTER = 0.11;     // random heading jitter per step — the probing of the front
+
+/* ---- the advancing tip ----
+   Physarum does not advance as a wall. It advances as a fan of filaments that
+   run, split and run again, and the constants below are what separate a tip
+   at the front from cytoplasm inside a tube. Without them every agent obeys
+   one rule, the front random-walks as a blob, and the branching structure has
+   to be imagined rather than seen.
+
+   What counts as a tip is decided by what is AHEAD of the agent, not by what
+   is under it. Reading the cell it stands on looks equivalent and is not: a
+   tip lays a tube as it goes, so within a step or two it is standing on its
+   own fresh deposit, tests as cytoplasm, drops back to the short-range rule
+   and the filament stalls one cell after it started. The frontier test has no
+   such feedback — an agent is a tip exactly while there is open agar in front
+   of it, which is also what the word means.
+
+   TIP_SENS is a longer reach, because a tip has nothing local to read and must
+   commit to a direction over a distance; TIP_PERSIST is an apical bias added
+   to the forward sensor only, so a tip holds its line unless a flank sensor
+   genuinely beats it (against SENS_NOISE of 1.5 this is a lean, not a veto — a
+   real gradient still turns it); TIP_JIT is the reduced wander that makes the
+   result a needle rather than a scribble. */
+var TIP_LOOK    = 3.5;   // how far ahead the frontier test looks, cells
+var TIP_TRAIL   = 9.0;   // trail ahead below which the agent is at the front
+var TIP_SENS    = 9.5;   // a tip's sensor reach, cells
+var TIP_PERSIST = 1.15;  // forward-sensor bonus: apical dominance
+var TIP_JIT     = 0.045; // a tip's heading jitter
+var TIP_SPEED   = 0.20;  // a supplied tip's fraction of full speed
+
+/* ---- supply ----
+   A tip is fed by the tube behind it, and this is the constant that keeps the
+   organism an organism. Granting every tip the same speed and the same deposit
+   looks like the obvious reading of "the front moves faster", and it is a
+   runaway: a fast straight tip is out on clean agar, where the frontier test
+   is trivially satisfied, so it stays a tip, keeps its speed, and keeps going.
+   Every agent it passes becomes a tip by the same argument. Measured, that
+   regime put trail in 96% of the cells in the dish — a uniform haze with no
+   edge, no lattice and nothing to look at, which is the opposite of the
+   filaments it was reaching for.
+
+   Reading the trail BEHIND the tip closes the loop. Cytoplasm has to come from
+   somewhere: a tip connected to a real tube streams and advances, a tip whose
+   own tail has decayed is not a tip at all but a detached scrap, and it slows
+   to VOID_SPEED and is reabsorbed. Filaments can therefore only extend as far
+   as the network can keep them supplied, branches compete for that supply, and
+   the ones that lead nowhere are starved out — which is the pruning the whole
+   game is about, arrived at from the growth rule rather than bolted on. */
+var TIP_BACK = 6.0;      // how far BEHIND a tip its supply is read, cells
+var TIP_FEED = 12.0;     // trail there that counts as a supplied tube
+var TIP_MIN  = 0.25;     // ...and the fraction of it below which this is no tip
+/* What a tip lays per STEP, as a multiple of DEPOSIT — not per cell travelled
+   like everything else. That exception is the point. Deposit is otherwise
+   proportional to distance because trail is material dragged through a cell by
+   flow, and charging a stalled agent a full dose is what used to wash the dish
+   grey. But a tip is not one particle being dragged anywhere; it is the front
+   of an advancing bulge, and the tube behind it is built by the cytoplasm
+   arriving into it, at a rate that has nothing to do with how fast the front
+   happens to be creeping. Charging it by distance makes a slow tip lay a thin
+   tube, which supplies a slower tip, which lays a thinner one — the front
+   stalls a few cells out of the body and the culture starves in place. The
+   floor is what lets a pioneer lay a tube worth following. It is safe against
+   the grey wash because it is gated on being a tip at all, and the supply test
+   above denies that to anything that has come adrift. */
+var TIP_LAY  = 3.0;      // trail a tip lays per step, as a multiple of DEPOSIT
+
+/* ---- branching ----
+   New cytoplasm is not sprinkled near the food any more; it is spent FORKING
+   a tip, which is the one edit that turns a spreading front into a fractal.
+   A fork takes a tip that is already running and splits it in two: apically
+   (both halves turn, a Y), or laterally (a daughter leaves the flank of a
+   trunk and the parent runs on). Each daughter is a tip in its own right and
+   can fork again, so the structure that comes out is recursive rather than
+   merely rough — a branch of a branch of a branch, which is what the dish
+   actually looks like down a microscope.
+
+   BRANCH_P is a share of the growth budget, not an extra population: the
+   spawn accounting above it is unchanged, so forking cannot outrun the
+   biomass a dish's engulfed nodes are paying for. The remainder still goes
+   where it went before, thickening the network near food and under the
+   player's cue, which is what keeps a trunk a trunk. */
+var BRANCH_P    = 0.55;  // share of new cytoplasm spent forking a tip
+var BRANCH_APEX = 0.66;  // ...of which this share are apical splits, not lateral
+var BRANCH_A    = 0.60;  // apical half-angle, rad (~34 deg)
+var BRANCH_LAT  = 1.28;  // lateral branch angle off the trunk, rad (~73 deg)
 /* Sensor noise, and the reason it exists. The turn is decided by COMPARING
    three samples, so a field's weight changes nothing where it is the only
    field present — an arbitrarily faint food gradient still wins every
@@ -140,14 +224,29 @@ var VOID_SPEED = 0.05; // fraction of full speed out on bare agar
 var SPEED_REF  = 20.0; // trail level that buys full speed
 var CUE_FLOW   = 0.95; // and a player cue buys it outright
 
-var DEPOSIT   = 5.0;   // trail laid per agent per step
+var DEPOSIT   = 2.4;   // trail laid per agent per CELL TRAVELLED (see step())
 var TRAIL_MAX = 90.0;
-var DECAY     = 0.945; // per-frame trail decay
+/* Per-step trail decay, and the constant that decides whether a filament can
+   exist at all. At 0.945 a tube's half-life is a fifth of a second, which is
+   shorter than the time a pioneering tip takes to advance its own body length:
+   the tube it lays has decayed to nothing a few cells behind it, so it reads
+   no supply, slows, lays less, and reads even less. Traced, the front crawled
+   out at a sixtieth of a cell per step and the culture starved with every
+   flake still untouched. Nothing downstream can fix that — an organism whose
+   veins forget themselves faster than it can grow them is not going to build a
+   network.
+
+   At 0.985 the half-life is about three quarters of a second, which is long
+   enough for cytoplasm to follow a new filament in and start maintaining it,
+   and still short enough that a branch nothing uses is gone within a few
+   seconds. DEPOSIT drops by the same factor the decay rose, so the level a
+   busy tube settles at — deposit over one-minus-decay, which is what every
+   other threshold in the file is scaled against — is where it was. */
+var DECAY     = 0.985; // per-step trail decay
 /* Side weight of the separable blur run once a frame. It sets how fat a vein
    can get: the classic 3x3 mean smears a one-cell tube out to six or seven,
    which on a 420x260 dish leaves room for about six tubes and no mesh at all. */
-var DIFF      = 0.10;
-var TRAIL_VIS = 46.0;  // trail value that renders as a fully lit tube
+var DIFF      = 0.055;
 
 /* Food is a WEAK bias, not the field the organism follows. It used to be
    worth 15x a normalised attractant against a trail that maxed out at 6, so
@@ -400,45 +499,58 @@ var occ = new Uint16Array(NCELL);
 var ax = new Float32Array(MAXA);
 var ay = new Float32Array(MAXA);
 var ah = new Float32Array(MAXA);
+/* Was this agent at the front on the last step it took? The renderer needs
+   this and cannot recompute it: an agent's own tube deposit puts the cell
+   under a tip well up into trunk territory within a step, so reading the
+   trail there and calling anything low a tip mis-sorts every filament in the
+   dish into the trunk band and the front stops being drawn. Written where it
+   is decided, read where it is needed. */
+var atip = new Uint8Array(MAXA);
 var nAgents = 0;
 
-/* colour lookup for the slime body: faint olive -> yellow -> white hot */
+/* ------------------------------------------------------------
+   Palette and body transfer, taken off a photograph of the organism
+   ------------------------------------------------------------
+   Physarum on agar is not a glow. It is flat chrome yellow with a hard edge,
+   sitting on translucent grey-green agar: solid trunks that fork down through
+   several generations into finer and finer veins, the fine ones closing loops
+   into a net, and the growing ends spreading into lobed fans. Everything the
+   old palette did fought that. It ramped through olive to near-white, which
+   turned dense tissue grey rather than yellow; and it ramped SMOOTHLY, so
+   every vein was rendered as a gradient with no edge anywhere and the whole
+   dish read as luminous goo.
+
+   So the transfer is a soft-edged THRESHOLD rather than a ramp. Below BODY_T
+   there is no organism and the cell is agar; across the next BODY_SOFT of
+   trail it becomes tissue; above that it is tissue, at one flat colour,
+   however much trail it carries. The narrow crossing band is what draws the
+   edge — wide enough to antialias at this grid resolution, narrow enough that
+   the boundary reads as a boundary. How much trail a tube carries is then
+   expressed the way the organism expresses it, by how WIDE the tube is, which
+   the field renders directly and the vein lines in 9b render as line weight. */
+var AGAR = [20, 22, 17];        // the dish, unoccupied
+var BODY = [236, 228, 52];      // plasmodium
+var BODY_T    = 9.0;            // trail at which tissue begins
+var BODY_SOFT = 3.0;            // trail over which the edge resolves
+
 var LUT = new Uint8Array(256 * 3);
-/* Trail -> LUT index, gamma 0.45. Linear mapping is what made the lattice
-   invisible: a vein carrying a tenth of a trunk's traffic landed three steps
-   above black, so the mesh was simulated and never seen. The gamma lifts the
-   low decade into the olive range, which is where the fine veins live. */
 var GAMN = 2048;
 var GAM = new Uint8Array(GAMN);
 var GAM_SCALE = (GAMN - 1) / TRAIL_MAX;
 (function buildGamma() {
   for (var j = 0; j < GAMN; j++) {
-    var t = (j / GAM_SCALE) / TRAIL_VIS;
-    if (t > 1) t = 1;
-    var v = Math.pow(t, 0.45) * 255;
-    GAM[j] = v > 255 ? 255 : (v | 0);
+    var u = ((j / GAM_SCALE) - BODY_T) / BODY_SOFT;
+    if (u < 0) u = 0; else if (u > 1) u = 1;
+    var v = u * u * (3 - 2 * u);          /* smoothstep: the edge */
+    GAM[j] = (v * 255) | 0;
   }
 })();
 (function buildLUT() {
-  var stops = [
-    [0.00,   0,   0,   0],
-    [0.05,  16,  18,   8],
-    [0.14,  38,  40,  14],
-    [0.30,  84,  80,  22],
-    [0.54, 152, 138,  38],
-    [0.78, 220, 204,  74],
-    [1.00, 255, 246, 190]
-  ];
   for (var i = 0; i < 256; i++) {
-    var t = i / 255, a = stops[0], b = stops[stops.length - 1];
-    for (var s = 0; s < stops.length - 1; s++) {
-      if (t >= stops[s][0] && t <= stops[s + 1][0]) { a = stops[s]; b = stops[s + 1]; break; }
-    }
-    var span = (b[0] - a[0]) || 1;
-    var k = (t - a[0]) / span;
-    LUT[i * 3]     = (a[1] + (b[1] - a[1]) * k) | 0;
-    LUT[i * 3 + 1] = (a[2] + (b[2] - a[2]) * k) | 0;
-    LUT[i * 3 + 2] = (a[3] + (b[3] - a[3]) * k) | 0;
+    var t = i / 255;
+    LUT[i * 3]     = ((BODY[0] - AGAR[0]) * t) | 0;
+    LUT[i * 3 + 1] = ((BODY[1] - AGAR[1]) * t) | 0;
+    LUT[i * 3 + 2] = ((BODY[2] - AGAR[2]) * t) | 0;
   }
 })();
 
@@ -638,6 +750,7 @@ function inoculate(e) {
     if (!wallM[si] && !occ[si]) {
       occ[si] = 1;
       ah[nAgents] = rnd() * Math.PI * 2;
+      atip[nAgents] = 0;
       nAgents++;
     }
     var w = ci - 1, ee = ci + 1, nn = ci - GW, ss2 = ci + GW;
@@ -648,35 +761,77 @@ function inoculate(e) {
   }
 }
 
-function spawnAgent() {
-  if (nAgents <= 0 || nAgents >= MAXA) return;
-  /* bias toward the richest of three random parents */
+/* Place a daughter at (nx, ny) heading nh, if that cell will take one. */
+function emit(nx, ny, nh) {
+  if (nAgents >= MAXA) return false;
+  if (nx < 1 || ny < 1 || nx >= GW - 1 || ny >= GH - 1) return false;
+  var ci = (ny | 0) * GW + (nx | 0);
+  /* respect the exclusion at birth too: a spawn landing on top of a sibling
+     is a stack the movement rule then has to unpick, and at a fork (where
+     growth is busiest) that is precisely where the mesh wants room */
+  if (wallM[ci] || occ[ci]) return false;
+  ax[nAgents] = Math.fround(nx); ay[nAgents] = Math.fround(ny); ah[nAgents] = nh;
+  atip[nAgents] = 1;                 /* a daughter is a front by definition */
+  occ[ci]++;
+  nAgents++;
+  return true;
+}
+
+/* Fork a tip. Best-of-K sampling picks a candidate that is actually AT the
+   front — an agent buried in a saturated trunk has nowhere to branch to, and
+   spending the growth budget on one produces a fatter tube instead of a new
+   filament. Food and the player's cue still bias which front gets the
+   cytoplasm, so a cue held out on open agar draws branches toward it. */
+function forkTip() {
+  var best = -1, bestV = -1e9;
+  for (var t = 0; t < 5; t++) {
+    var k = (rnd() * nAgents) | 0;
+    var ci = ((ay[k] | 0) * GW + (ax[k] | 0));
+    var tr = trail[ci];
+    if (tr > TIP_TRAIL * 4.0) continue;             /* deep inside a tube */
+    var v = foodF[ci] + cueF[ci] * 0.8 - tr * 0.06;
+    if (v > bestV) { bestV = v; best = k; }
+  }
+  if (best < 0) return false;
+
+  var h = ah[best], x = ax[best], y = ay[best];
+  var side = rnd() < 0.5 ? 1 : -1;
+  if (rnd() < BRANCH_APEX) {
+    /* apical split: the tip stops being one tip and becomes two, so the
+       PARENT turns as well. Splitting only the daughter leaves the trunk
+       running dead ahead and reads as a twig, not a bifurcation. */
+    var a = BRANCH_A * (0.7 + rnd() * 0.6);
+    if (!emit(x + Math.cos(h + a * side) * 1.2, y + Math.sin(h + a * side) * 1.2, h + a * side)) return false;
+    ah[best] = h - a * side * 0.85;
+    return true;
+  }
+  /* lateral branch: a daughter leaves the flank and the parent runs on */
+  var b = BRANCH_LAT * (0.75 + rnd() * 0.5) * side;
+  return emit(x + Math.cos(h + b) * 1.4, y + Math.sin(h + b) * 1.4, h + b);
+}
+
+/* Thicken instead: new cytoplasm appears where the food is and where the
+   player is asking for it, so holding a cue fattens that part of the network
+   rather than only steering the tips that happen to be inside the brush. */
+function thicken() {
   var best = -1, bestV = -1e9;
   for (var t = 0; t < 3; t++) {
     var k = (rnd() * nAgents) | 0;
     var ci = ((ay[k] | 0) * GW + (ax[k] | 0));
-    /* new cytoplasm appears where the food is and where the player is asking
-       for it, so holding a cue thickens that part of the network rather than
-       only steering the tips that happen to be inside the brush */
     var v = foodF[ci] + cueF[ci] * 0.8;
     if (v > bestV) { bestV = v; best = k; }
   }
-  if (best < 0) return;
+  if (best < 0) return false;
   for (var tries = 0; tries < 6; tries++) {
-    var nx = ax[best] + (rnd() - 0.5) * 8;
-    var ny = ay[best] + (rnd() - 0.5) * 8;
-    if (nx < 1 || ny < 1 || nx >= GW - 1 || ny >= GH - 1) continue;
-    ax[nAgents] = nx; ay[nAgents] = ny;
-    var ni2 = (ay[nAgents] | 0) * GW + (ax[nAgents] | 0);
-    /* respect the exclusion at birth too: a spawn landing on top of a sibling
-       is a stack the movement rule then has to unpick, and near a flake (where
-       growth is busiest) that is precisely where the mesh wants room */
-    if (wallM[ni2] || occ[ni2]) continue;
-    occ[ni2]++;
-    ah[nAgents] = rnd() * Math.PI * 2;
-    nAgents++;
-    return;
+    if (emit(ax[best] + (rnd() - 0.5) * 8, ay[best] + (rnd() - 0.5) * 8, rnd() * Math.PI * 2)) return true;
   }
+  return false;
+}
+
+function spawnAgent() {
+  if (nAgents <= 0 || nAgents >= MAXA) return;
+  if (rnd() < BRANCH_P) { if (forkTip()) return; }
+  thicken();
 }
 
 function killRandom() {
@@ -685,7 +840,7 @@ function killRandom() {
   var ci = (ay[k] | 0) * GW + (ax[k] | 0);
   if (occ[ci]) occ[ci]--;          /* every removal path decrements */
   nAgents--;
-  ax[k] = ax[nAgents]; ay[k] = ay[nAgents]; ah[k] = ah[nAgents];
+  ax[k] = ax[nAgents]; ay[k] = ay[nAgents]; ah[k] = ah[nAgents]; atip[k] = atip[nAgents];
 }
 
 /* sample the combined desirability field (nearest cell) */
@@ -759,8 +914,25 @@ function step() {
     S.anticipated = false;
   }
   S.slow = slow;
+  /* Deposit is per unit DISTANCE TRAVELLED, applied below — trail is material
+     laid down by cytoplasm flowing through a cell, so an agent that covers a
+     twentieth of a cell this step leaves a twentieth of a dose. Charging a
+     full dose per STEP instead, which is what this used to do, pays a stalled
+     agent the same as a streaming one: an agent crawling on bare agar at
+     VOID_SPEED sits in one cell for twenty steps and pumps twenty full doses
+     into it, manufacturing a tube out of an agent that has gone nowhere.
+     Multiplied across a few thousand wanderers that is a grey wash over the
+     whole dish — measured at 96% of cells carrying trail, with no edge to the
+     organism anywhere — and a lattice cannot be seen through it.
+
+     This also subsumes the old hand-trimmed deposit under the anticipation
+     slow-down. That trim existed because a slower agent revisits the same cell
+     more often and the tubes bloomed; per-distance deposit makes revisiting
+     cost-free by construction, so what is left here is the thickening the
+     Saigusa result actually calls for, stated as itself rather than as a
+     correction. */
   var stepSpeed = SPEED * slow;
-  var stepDeposit = DEPOSIT * (0.78 + 0.22 * slow);
+  var stepDeposit = DEPOSIT * (1 + 0.55 * (1 - slow));
 
   var shockOn = S.shockActive;
   var shockDmg = e.shock ? e.shock.dmg : 0;
@@ -783,14 +955,46 @@ function step() {
   while (k < nAgents) {
     var x = ax[k], y = ay[k], h = ah[k];
 
+    /* Tip or cytoplasm? Read once, and let it pick the whole sensing regime.
+       A tip reaches further, holds its line, and wanders less; an agent inside
+       a tube keeps the short-range Jones rule that resolves the mesh. */
+    var here = (y | 0) * GW + (x | 0);
     var cf = Math.cos(h), sf = Math.sin(h);
-    var F = sense(x + cf * SENS_D, y + sf * SENS_D);
+    var lx = x + cf * TIP_LOOK, ly = y + sf * TIP_LOOK;
+    var tip = (lx < 0 || ly < 0 || lx >= GW || ly >= GH)
+      ? false
+      : trail[(ly | 0) * GW + (lx | 0)] < TIP_TRAIL;
+    /* how well fed: the tube this tip is being supplied through */
+    var feed = 0;
+    if (tip) {
+      /* Read the supply well BEHIND the tube's own leading end. At the
+         frontier distance it reads the deposit the tip laid moments ago, so
+         supply is whatever the tip most recently did — a loop with itself.
+         Deadlocked, it never starts: a slow tip lays a thin tube, a thin tube
+         supplies a slow tip, and the front does not move at all (measured: no
+         flake reached, at any tip speed). Read further back and it is the
+         network's tube being asked about, which is the question. The loop is
+         still there at this distance and is now the right one: a filament that
+         carries traffic keeps its tube up and stays fed, and a lone runaway's
+         tube decays behind it within a second or two and starves it. */
+      var bx = x - cf * TIP_BACK, by = y - sf * TIP_BACK;
+      if (bx >= 0 && by >= 0 && bx < GW && by < GH) {
+        feed = trail[(by | 0) * GW + (bx | 0)] / TIP_FEED;
+        if (feed > 1) feed = 1;
+      }
+      if (feed < TIP_MIN) tip = false;  /* come adrift: cytoplasm, not a front */
+    }
+    atip[k] = tip ? 1 : 0;
+    var sd = tip ? TIP_SENS : SENS_D;
+
+    var F = sense(x + cf * sd, y + sf * sd);
     var hl = h - SENS_A, hr = h + SENS_A;
-    var L = sense(x + Math.cos(hl) * SENS_D, y + Math.sin(hl) * SENS_D);
-    var R = sense(x + Math.cos(hr) * SENS_D, y + Math.sin(hr) * SENS_D);
+    var L = sense(x + Math.cos(hl) * sd, y + Math.sin(hl) * sd);
+    var R = sense(x + Math.cos(hr) * sd, y + Math.sin(hr) * sd);
     F += (rnd() - 0.5) * SENS_NOISE;
     L += (rnd() - 0.5) * SENS_NOISE;
     R += (rnd() - 0.5) * SENS_NOISE;
+    if (tip) F += TIP_PERSIST;
 
     /* Jones' rule, exactly: hold the heading when the middle sensor is best,
        turn one rotation-angle toward the better flank otherwise, and turn a
@@ -806,9 +1010,9 @@ function step() {
     } else if (R > L) {
       h += TURN;
     }
-    h += (rnd() - 0.5) * JITTER;
+    h += (rnd() - 0.5) * (tip ? TIP_JIT : JITTER);
 
-    var oldIdx = (y | 0) * GW + (x | 0);
+    var oldIdx = here;
     /* Speed is how much cytoplasm is behind the tip: established trail, or the
        player shoving it there. A cue does not merely aim the front, it makes it
        flow — which is the difference between leading the culture and watching
@@ -816,7 +1020,31 @@ function step() {
     var lt = trail[oldIdx] / SPEED_REF;
     var lc = cueF[oldIdx] * CUE_FLOW;
     if (lc > lt) lt = lc;
-    var spd = stepSpeed * (lt >= 1 ? 1 : VOID_SPEED + (1 - VOID_SPEED) * lt);
+    var spd;
+    if (tip) {
+      /* A tip's speed is its SUPPLY, and nothing else. Letting the ordinary
+         trail term win where it is larger — which is what "give the tip a
+         speed floor" quietly does — hands the tip its own tube to stand on:
+         it deposits two-odd units into the cell under it every step, reaches
+         the full-speed trail level within a dozen steps, and from then on
+         runs at full speed no matter what its supply is. That is not a subtle
+         effect. Measured over a three-and-a-half-fold change in TIP_SPEED, the
+         time for a dish to be solved moved by two seconds, because the
+         constant was doing nothing at all.
+         The player's cue still overrides it, because pushing the front is what
+         the cue is for. */
+      /* Supplied, so it advances at the front's own speed. The test above is
+         what makes this safe, and it is a threshold rather than a multiplier
+         on purpose: scaling speed by supply reads as the careful choice and is
+         the deadlock again in slow motion, since a tip slowed by thin supply
+         lays a thinner tube still. Connected or not connected; and if it is,
+         it moves. */
+      var sup = TIP_SPEED;
+      if (lc > sup) sup = lc > 1 ? 1 : lc;
+      spd = stepSpeed * sup;
+    } else {
+      spd = stepSpeed * (lt >= 1 ? 1 : VOID_SPEED + (1 - VOID_SPEED) * lt);
+    }
     /* round to Float32 before anything reads a cell from it: ax/ay are
        Float32Arrays, so an unrounded double a hair under an integer can test
        one cell and then store into the next, leaving the occupancy grid
@@ -848,7 +1076,10 @@ function step() {
       if (idx !== oldIdx) { occ[oldIdx]--; occ[idx]++; }
       cell = idx;
       var tv = trail[cell];
-      if (tv < TRAIL_MAX) trail[cell] = tv + stepDeposit;
+      if (tv < TRAIL_MAX) {
+        var dep = stepDeposit * (tip ? TIP_LAY : spd / SPEED);
+        trail[cell] = tv + dep > TRAIL_MAX ? TRAIL_MAX : tv + dep;
+      }
     }
 
     var ni = nodeAt[cell];
@@ -870,7 +1101,7 @@ function step() {
     if (dead) {
       if (occ[cell]) occ[cell]--;
       nAgents--;
-      ax[k] = ax[nAgents]; ay[k] = ay[nAgents]; ah[k] = ah[nAgents];
+      ax[k] = ax[nAgents]; ay[k] = ay[nAgents]; ah[k] = ah[nAgents]; atip[k] = atip[nAgents];
       continue;
     }
     k++;
@@ -1008,26 +1239,98 @@ function resizeCanvas() {
   }
 }
 
+/* Ridge lift — the difference between a photograph of glowing goo and a
+   drawing of a network.
+
+   The trail field is blurred once a step, which is what lets an agent nine
+   cells away sense a tube at all; the cost is that every vein renders with a
+   soft skirt several cells wide, and two veins running near each other render
+   as one fat smear. An unsharp mask undoes exactly that at paint time and
+   nowhere else: subtract a WIDE local mean from a NARROW one, and what is left
+   is bright along the centre line of a tube and negative on its flanks. Veins
+   come out as lines with dark gaps between them, and junctions as junctions.
+
+   Both radii matter, and a bare Laplacian on the raw field — which is the
+   obvious way to write this — gets the narrow one wrong. Agents deposit into
+   single cells, so the field carries a lot of one-cell noise; differencing it
+   against its immediate neighbours amplifies precisely that noise, and the
+   body renders as glitter rather than as a sheet. Smoothing first (RN) throws
+   the per-cell grain away and keeps the vein, which is several cells across.
+
+   It is a pure function of the field, the simulation never reads it back, and
+   no draw from the RNG is involved — so nothing about determinism or balance
+   depends on these numbers. They are the pen the network is drawn with. */
+/* With the veins drawn as lines over it, the field's job changes: it is no
+   longer trying to BE the network, it is the sheet the network is embedded in
+   — where the plasmodium has been, as a stain in the agar. So it is held well
+   below the line layer's brightness. Painted at full strength it competes with
+   the strokes and the picture goes back to being a glow. */
+/* The body is now the body, at its own colour, so there is nothing left to
+   dim it against — the vein lines below draw over it rather than competing
+   with it for brightness. The faint diffusion tail that used to need a black
+   point subtracted from it now falls below BODY_T and is simply agar. */
+var FIELD_GAIN = 1.0;
+var SHARP  = 2.40;   // strength of the ridge lift
+var SHARP_RN = 3;    // narrow blur passes: kills per-cell grain, keeps the vein
+var SHARP_RW = 5;    // wide blur passes: the local mean a vein stands out from
+var shpA = new Float32Array(NCELL);   // narrow
+var shpB = new Float32Array(NCELL);   // wide
+var shpT = new Float32Array(NCELL);   // scratch for the separable pass
+
+/* one separable 1-2-1 pass, src -> dst, via shpT */
+function blurPass(src, dst) {
+  var x, y, i, row;
+  for (y = 0; y < GH; y++) {
+    row = y * GW;
+    for (x = 0; x < GW; x++) {
+      i = row + x;
+      shpT[i] = 0.25 * (x > 0 ? src[i - 1] : src[i])
+              + 0.50 * src[i]
+              + 0.25 * (x < GW - 1 ? src[i + 1] : src[i]);
+    }
+  }
+  for (y = 0; y < GH; y++) {
+    row = y * GW;
+    var up = y > 0 ? row - GW : row, dn = y < GH - 1 ? row + GW : row;
+    for (x = 0; x < GW; x++) {
+      i = row + x;
+      dst[i] = 0.25 * shpT[up + x] + 0.50 * shpT[i] + 0.25 * shpT[dn + x];
+    }
+  }
+}
+
+function buildRidge() {
+  var n;
+  blurPass(trail, shpA);
+  for (n = 1; n < SHARP_RN; n++) blurPass(shpA, shpA);
+  blurPass(shpA, shpB);
+  for (n = 1; n < SHARP_RW; n++) blurPass(shpB, shpB);
+}
+
 function paintField() {
   var d = imgData;
+  buildRidge();
   for (var i = 0, p = 0; i < NCELL; i++, p += 4) {
     var r, g, b;
     if (wallM[i]) {
-      r = 42; g = 47; b = 36;
+      r = 46; g = 50; b = 40;
     } else {
-      r = 7; g = 9; b = 6;
+      r = AGAR[0]; g = AGAR[1]; b = AGAR[2];
       var hz = hazM[i];
       if (hz === 1) { r += 38; g += 20; b += 9; }
       else if (hz === 2) { r += 27; g += 12; b += 40; }
-      var t = trail[i];
-      if (t > 0.004) {
-        var gi = (t * GAM_SCALE) | 0;
-        if (gi >= GAMN) gi = GAMN - 1;
-        var o = GAM[gi] * 3;
-        r += LUT[o]; g += LUT[o + 1]; b += LUT[o + 2];
-        if (r > 255) r = 255;
-        if (g > 255) g = 255;
-        if (b > 255) b = 255;
+      var a = shpA[i];
+      if (a > 0.004) {
+        var t = a + SHARP * (a - shpB[i]);
+        if (t > BODY_T * 0.5) {
+          var gi = (t * GAM_SCALE) | 0;
+          if (gi < 0) gi = 0; else if (gi >= GAMN) gi = GAMN - 1;
+          var o = GAM[gi] * 3;
+          r += LUT[o] * FIELD_GAIN; g += LUT[o + 1] * FIELD_GAIN; b += LUT[o + 2] * FIELD_GAIN;
+          if (r > 255) r = 255;
+          if (g > 255) g = 255;
+          if (b > 255) b = 255;
+        }
       }
       /* the player's cue reads as a faint warm haze in the agar */
       var c = cueF[i];
@@ -1046,6 +1349,290 @@ function paintField() {
   octx.putImageData(img, 0, 0);
 }
 
+/* ------------------------------------------------------------
+   9b. the vein layer — the network drawn as lines
+   ------------------------------------------------------------
+   The field above is 420x260 and is shown across a canvas five or six times
+   that wide, so one cell is five or six display pixels and a one-cell vein
+   can never be anything but a soft five-pixel smudge however the field is
+   filtered. That is why the dish used to read as glowing goo: not the
+   simulation, the raster. Physarum is not a glow. It is a drawing — filaments,
+   forks, a lattice of lines — and a drawing has to be drawn at the resolution
+   it is looked at.
+
+   So the veins are STROKED, in display space. Two passes, because the
+   organism has two halves and they want different pens:
+
+   THE LATTICE is traced out of the trail field. Every cell is tested for
+   being on a ridge — a local maximum ACROSS some direction, with real
+   curvature there rather than a plateau — and each ridge cell contributes one
+   short segment along the ridge. Neighbouring ridge cells overlap, so what
+   comes out is a continuous line down the centre of every tube, at canvas
+   resolution, with the width and colour taken from how much trail the tube
+   carries. Trunks draw broad and pale, minor veins draw as hairlines, and the
+   holes between them are holes.
+
+   Tracing the FIELD rather than the agents is the part worth keeping. The
+   obvious alternative — stroke the path each agent walks — was tried and is
+   wrong: the agents are spread through the whole body at any instant, most of
+   them between the veins rather than on them, so what it draws is a stipple
+   of the plasmodium's area and the lattice does not appear at all. The veins
+   are a property of the accumulated field, so the field is what to read.
+
+   Where the body is a saturated sheet the curvature test finds no ridge and
+   draws nothing, which is right: a sheet is not a line, and the field layer
+   underneath already renders it as a sheet.
+
+   THE FRONT is drawn from the agents, because that half genuinely is the
+   agents: a whisker along each tip's heading, so the growing edge reads as a
+   fan of spikes probing the agar, which is what it is. A tip has no tube yet
+   for the ridge trace to find, so without this the newest growth — the part
+   worth watching — would be the one thing not drawn.
+
+   Both are recomputed from scratch every frame. Nothing accumulates, nothing
+   is stateful, nothing needs resetting between runs, and the picture is the
+   same at x1 and x12 rather than depending on how many steps a frame
+   happened to fit in. Nothing here feeds back into the simulation and nothing
+   draws from the RNG, so the determinism contract in section 0b is untouched:
+   this is a second way of looking at the same dish, not a change to it. */
+var RIDGE_MIN = 5.0;   // trail below which a ridge is noise, not a vein
+/* Curvature floor. It is doing more than rejecting flat ground: on a nearly
+   flat patch the four directions score almost the same, so which one wins is
+   decided by noise, and neighbouring cells pick different winners. Their
+   segments then cross instead of joining and the vein grows a fringe of barbs
+   down both sides. Demanding real curvature keeps the direction stable along a
+   tube, which is what makes the segments line up into a line. */
+var RIDGE_K   = 0.55;  // minimum across-vein curvature to count as a ridge
+/* And the same floor again, relative to how much trail the cell carries. The
+   absolute one alone cannot tell a faint vein from the middle of a saturated
+   sheet: curvature scales with height, so a plateau at trail 60 still clears a
+   fixed floor on noise alone, and the packed body of the culture came out
+   cross-hatched with a rectilinear grid that is an artefact of quantising
+   those directions to four. A vein has curvature in proportion to its own
+   height whatever that height is; a plateau has none at any height. */
+var RIDGE_REL = 0.14;  // ...as a fraction of the cell's own trail
+
+/* Bands: trail ceiling, line width in cells, colour, alpha. A minor vein is a
+   bright hairline; a trunk is broad, and pale because it is carrying
+   everything. */
+/* Five generations of vein, because the organism has about that many and the
+   hierarchy is most of what the picture is. Thin veins are drawn a shade
+   duller: in the photograph a fine vein is thin enough to be translucent and
+   sits closer to the agar in tone, while a trunk is opaque chrome yellow with
+   a highlight along it. Widths span roughly seven to one, which is the ratio
+   the real thing shows between its finest branches and its trunk. */
+var VEIN_BANDS = [
+  { max: 6,        w: 0.34, style: 'rgba(196,192,74,0.90)' },
+  { max: 10,       w: 0.62, style: 'rgba(218,212,60,0.97)' },
+  { max: 16,       w: 1.05, style: 'rgba(232,224,48,1)' },
+  { max: 26,       w: 1.75, style: 'rgba(240,232,44,1)' },
+  { max: Infinity, w: 2.70, style: 'rgba(246,240,62,1)' }
+];
+var VEIN_CAP = 200000;                 /* floats held per band per frame */
+var vseg = [], vsegN = [];
+(function () {
+  for (var i = 0; i < VEIN_BANDS.length; i++) {
+    vseg.push(new Float32Array(VEIN_CAP));
+    vsegN.push(0);
+  }
+})();
+
+/* The four directions a vein can run ACROSS: the across unit vector, the
+   tangent it runs along, and the two cell offsets that step along that
+   tangent. */
+var RIDGE_DIR = [
+  { o:  1,      ax:  1,      ay:  0,      tx:  0,      ty:  1,      t1:  GW,     t2: -GW     },
+  { o:  1 - GW, ax:  0.7071, ay: -0.7071, tx: -0.7071, ty: -0.7071, t1: -1 - GW, t2:  1 + GW },
+  { o: -GW,     ax:  0,      ay:  1,      tx:  1,      ty:  0,      t1:  1,      t2: -1      },
+  { o: -1 - GW, ax: -0.7071, ay: -0.7071, tx:  0.7071, ty: -0.7071, t1:  1 - GW, t2: -1 + GW }
+];
+/* Which way the vein runs at each cell, 255 for "not on a ridge", and which
+   cells a walk has already claimed. Deciding the whole field before drawing
+   any of it is what lets the walk below follow a vein from end to end. */
+var rdir = new Uint8Array(NCELL);
+var rvis = new Uint8Array(NCELL);
+var RIDGE_MINPTS = 5;        // a chain shorter than this is speckle
+var chx = new Float32Array(4096);
+var chy = new Float32Array(4096);
+
+/* One step along a ridge. From cell (cx, cy) running in direction d, the next
+   cell is the one a step along the tangent — or, if the vein bends, one of its
+   two neighbours across. A bend of one direction index (45 degrees) is allowed
+   and anything sharper ends the chain, which is what stops a walk cutting the
+   corner at a junction and welding two veins into one. Returns the cell index
+   or -1. */
+function ridgeStep(cx, cy, d, sign) {
+  var dir = RIDGE_DIR[d];
+  for (var t = 0; t < 6; t++) {
+    /* one step along the tangent, then its two neighbours across; failing all
+       three, the same three at two steps out. The longer reach is what carries
+       a chain over a single cell that missed the curvature floor — without it
+       a vein is cut into three or four pieces by the few cells along it that
+       happen to sit on a local flat, and the network draws as dashes. */
+    var reach = t < 3 ? 1 : 2;
+    var px = cx + sign * dir.tx * reach, py = cy + sign * dir.ty * reach;
+    var side = t % 3;
+    if (side === 1) { px += dir.ax; py += dir.ay; }
+    else if (side === 2) { px -= dir.ax; py -= dir.ay; }
+    var ix = Math.round(px), iy = Math.round(py);
+    if (ix < 1 || iy < 1 || ix >= GW - 1 || iy >= GH - 1) continue;
+    var ci = iy * GW + ix;
+    if (rvis[ci] || rdir[ci] === 255) continue;
+    var dd = rdir[ci];
+    var diff = dd - d;
+    if (diff < 0) diff = -diff;
+    if (diff > 2) diff = 4 - diff;          /* directions wrap at 4 */
+    if (diff > 1) continue;
+    return ci;
+  }
+  return -1;
+}
+
+/* The tip whisker: a short line back along the heading, so the front reads as
+   a fan of spikes rather than as a scatter of dots. A tip has no tube yet for
+   the ridge walk to find, so without this the newest growth would be the one
+   thing not drawn. */
+var TIP_WHISK = 2.6;   // cells
+var TIP_STYLE = 'rgba(255,248,206,0.34)';
+var TIP_W = 0.17;
+
+/* The tip whisker: a short line back along the heading, so the front reads as
+   a fan of spikes rather than as a scatter of dots. A tip has no tube yet for
+   the ridge walk to find, so without this the newest growth — the part worth
+   watching — would be the one thing not drawn. */
+var TIP_WHISK = 2.6;   // cells
+var TIP_STYLE = 'rgba(244,238,120,0.30)';
+var TIP_W = 0.17;
+
+function drawVeins(sx, sy) {
+  var b, i, x, y;
+  for (b = 0; b < VEIN_BANDS.length; b++) vsegN[b] = 0;
+
+  /* --- pass one: which cells are on a ridge, and which way it runs --- */
+  rdir.fill(255);
+  for (y = 2; y < GH - 2; y++) {
+    var row = y * GW;
+    for (x = 2; x < GW - 2; x++) {
+      i = row + x;
+      var v = shpA[i];
+      if (v < RIDGE_MIN) continue;
+      var bestK = RIDGE_K, bestD = -1;
+      for (var d = 0; d < 4; d++) {
+        var o = RIDGE_DIR[d].o;
+        var lo = shpA[i - o], hi = shpA[i + o];
+        if (v < lo || v < hi) continue;         /* not a maximum across d */
+        var kk = 2 * v - lo - hi;               /* curvature across d */
+        if (kk > bestK && kk > RIDGE_REL * v) { bestK = kk; bestD = d; }
+      }
+      if (bestD >= 0) rdir[i] = bestD;
+    }
+  }
+
+  /* --- pass two: walk each ridge from end to end into a polyline ---
+     Emitting one short segment per ridge cell instead — which is the obvious
+     way to do this and was the first way it was done — draws a dashed
+     staircase: a vein running at an angle puts its cells two or three apart,
+     the segments do not meet, and every stray cell that scraped past the
+     curvature floor is drawn as a barb. Chaining fixes both at once. The
+     chain is a real curve, so it can be stroked as one smooth path; and a
+     chain that never reaches RIDGE_MINPTS is speckle by construction and is
+     dropped, which is a far better filter for noise than any threshold on a
+     single cell. */
+  rvis.fill(0);
+  for (y = 2; y < GH - 2; y++) {
+    var row2 = y * GW;
+    for (x = 2; x < GW - 2; x++) {
+      i = row2 + x;
+      if (rdir[i] === 255 || rvis[i]) continue;
+
+      /* walk forward from the seed, then backward, then join */
+      var n = 0, c = i, cd = rdir[i], sum = 0;
+      rvis[c] = 1;
+      chx[n] = (c % GW) + 0.5; chy[n] = ((c / GW) | 0) + 0.5; sum += shpA[c]; n++;
+      var nx2 = c;
+      while (n < 2000) {
+        nx2 = ridgeStep(chx[n - 1] - 0.5, chy[n - 1] - 0.5, cd, 1);
+        if (nx2 < 0) break;
+        rvis[nx2] = 1; cd = rdir[nx2];
+        chx[n] = (nx2 % GW) + 0.5; chy[n] = ((nx2 / GW) | 0) + 0.5; sum += shpA[nx2]; n++;
+      }
+      /* reverse in place so the backward walk can append */
+      for (var a2 = 0, b2 = n - 1; a2 < b2; a2++, b2--) {
+        var tx2 = chx[a2]; chx[a2] = chx[b2]; chx[b2] = tx2;
+        var ty2 = chy[a2]; chy[a2] = chy[b2]; chy[b2] = ty2;
+      }
+      cd = rdir[i];
+      while (n < 2000) {
+        nx2 = ridgeStep(chx[n - 1] - 0.5, chy[n - 1] - 0.5, cd, -1);
+        if (nx2 < 0) break;
+        rvis[nx2] = 1; cd = rdir[nx2];
+        chx[n] = (nx2 % GW) + 0.5; chy[n] = ((nx2 / GW) | 0) + 0.5; sum += shpA[nx2]; n++;
+      }
+      if (n < RIDGE_MINPTS) continue;
+
+      var mean = sum / n;
+      for (b = 0; b < VEIN_BANDS.length && mean > VEIN_BANDS[b].max; b++) { /* pick band */ }
+      var arr = vseg[b], w = vsegN[b];
+      if (w + 1 + n * 2 > VEIN_CAP) continue;
+      arr[w++] = n;
+      for (var q = 0; q < n; q++) { arr[w++] = chx[q]; arr[w++] = chy[q]; }
+      vsegN[b] = w;
+    }
+  }
+
+  ctx.save();
+  ctx.setTransform(sx, 0, 0, sy, 0, 0);
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  /* widest first, so the hairlines land on top of the trunks they join */
+  for (b = VEIN_BANDS.length - 1; b >= 0; b--) {
+    var end = vsegN[b];
+    if (!end) continue;
+    var a3 = vseg[b];
+    ctx.beginPath();
+    var r = 0;
+    while (r < end) {
+      var cnt = a3[r++];
+      var x0 = a3[r], y0 = a3[r + 1];
+      ctx.moveTo(x0, y0);
+      if (cnt === 2) {
+        ctx.lineTo(a3[r + 2], a3[r + 3]);
+      } else {
+        /* quadratics through the midpoints: the control points are the cell
+           centres, so the curve passes between them and the 45-degree
+           quantisation of the walk stops being visible as a staircase */
+        for (var q2 = 1; q2 < cnt - 1; q2++) {
+          var px2 = a3[r + q2 * 2], py2 = a3[r + q2 * 2 + 1];
+          var nx3 = a3[r + q2 * 2 + 2], ny3 = a3[r + q2 * 2 + 3];
+          ctx.quadraticCurveTo(px2, py2, (px2 + nx3) * 0.5, (py2 + ny3) * 0.5);
+        }
+        ctx.lineTo(a3[r + (cnt - 1) * 2], a3[r + (cnt - 1) * 2 + 1]);
+      }
+      r += cnt * 2;
+    }
+    ctx.lineWidth = VEIN_BANDS[b].w;
+    ctx.strokeStyle = VEIN_BANDS[b].style;
+    ctx.stroke();
+  }
+
+  /* --- the front: one whisker per tip --- */
+  ctx.beginPath();
+  var any = false;
+  for (var k = 0; k < nAgents; k++) {
+    if (!atip[k]) continue;
+    var ax0 = ax[k], ay0 = ay[k], h = ah[k];
+    ctx.moveTo(ax0 - Math.cos(h) * TIP_WHISK, ay0 - Math.sin(h) * TIP_WHISK);
+    ctx.lineTo(ax0, ay0);
+    any = true;
+  }
+  if (any) {
+    ctx.lineWidth = TIP_W;
+    ctx.strokeStyle = TIP_STYLE;
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
 /* mode 1 = cue, 2 = retract. touchMode is the verb the on-screen pads select;
    a second finger overrides it to retract for the duration of that gesture. */
 var ptr = { down: false, mode: 0, gx: 0, gy: 0 };
@@ -1061,7 +1648,9 @@ function render() {
   if ('imageSmoothingQuality' in ctx) ctx.imageSmoothingQuality = 'high';
   ctx.drawImage(off, 0, 0, cv.width, cv.height);
 
+  /* the sheet is the field; the veins are lines drawn over it */
   var sx = cv.width / GW, sy = cv.height / GH;
+  drawVeins(sx, sy);
   ctx.save();
   ctx.setTransform(sx, 0, 0, sy, 0, 0);
 
