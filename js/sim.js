@@ -516,9 +516,9 @@ var EXPERIMENTS = [
 
   {
     code: 'EXP-08', name: 'THE DIET',
-    blurb: 'Eight lopsided blends. Eat the right four, not all eight.',
+    blurb: 'Eight lopsided blends. Eat the ones that balance, not all eight.',
     brief: 'Dussutour, 2010. Offered many protein:carbohydrate blends across a dish, the plasmodium in the paper composed its own diet — straddling several imperfect foods to land close to a two-to-one protein-to-carbohydrate intake, no matter which blends were on offer. Eight blends ring this dish, from nearly pure protein to nearly pure sugar. Eating all eight misses the target by a wide margin. Choose a handful in the right proportions, and retract from whatever the ratio does not want.',
-    obj: 'Take four blends that land the mix near two parts protein to one, and leave the rest.',
+    obj: 'Compose a mix near two parts protein to one from at least four blends, and leave the rest.',
     objShort: 'BLENDS',
     chips: [['ok', '8 blend nodes'], ['ok', 'open dish'], ['', 'target ratio 2:1']],
     inoc: { x: 210, y: 130 },
@@ -549,7 +549,7 @@ var EXPERIMENTS = [
       'the tongue you do not have has opinions anyway.',
       'a diet is only another shape to hold.'
     ],
-    win: 'Four blends held, the protein:carbohydrate ratio settling near two to one — inside the band, and nowhere close to what all eight nodes together would have produced. The observer notes that the untouched flakes were the important decision, not the eaten ones.',
+    win: 'Blends enough held, the protein:carbohydrate ratio settling near two to one — inside the band, and nowhere close to what all eight nodes together would have produced. The observer notes that the untouched flakes were the important decision, not the eaten ones.',
     lose: 'The culture took whatever blend sat nearest until the ratio drifted past saving, or ran out of clock still short of four. The observer writes appetite, not diet, and closes the notebook.'
   },
 
@@ -928,6 +928,7 @@ var EXPERIMENTS = [
       [280, 8, 8, 200]
     ],
     hazards: [],
+    requireEvents: true,
     events: [
       { t: 100, walls: [
         [0, 0, 420, 8],
@@ -2110,8 +2111,10 @@ function dietMet(e) {
 function winMet(e) {
   /* The graft dish is ABOUT the fusion: its win text credits the donor, so a
      culture that brute-forced the strips alone has not run the experiment,
-     however much far agar it holds. */
+     however much far agar it holds. The same honesty for a dish whose win
+     text claims its revisions were survived: they have to have happened. */
   if (e.donor && !S.fused) return false;
+  if (e.requireEvents && e.events && S.eventIdx < e.events.length) return false;
   return engulfGate(e) && cyclesMet(e) && dietMet(e) && !S.shockActive;
 }
 
@@ -2562,6 +2565,7 @@ function noteText(e) {
   /* Only when the ratio is the one thing left in the way — otherwise it is a
      number on screen that the player cannot yet act on. */
   if (e.donor && !S.fused && engulfGate(e)) return 'the far agar is not the assignment. the fusion is';
+  if (e.requireEvents && e.events && S.eventIdx < e.events.length && engulfGate(e)) return 'the dish is not done being revised';
   if (e.diet && engulfGate(e) && !dietMet(e)) {
     if (S.engulfed < (e.diet.min | 0)) return 'fed, but not on enough — ' + S.engulfed + ' / ' + (e.diet.min | 0) + ' sources';
     return 'p:c ' + dietRatio() + ' — wanted ' + e.diet.target.toFixed(1) + ' ±' + e.diet.tol;
@@ -2822,6 +2826,12 @@ function exitReplay() {
     if (fs.nodeDone) S.nodeDone = fs.nodeDone.slice();
     /* the run is a finished exhibit, whatever the snapshot said mid-frame */
     S.running = false; S.paused = false; S.over = true;
+    /* the restored S carries the original run's wall and hazard lists, but
+       the painted masks still hold the replay's — on a dish whose apparatus
+       moved, an early abort would otherwise display the verdict over the
+       wrong maze */
+    stampMasks();
+    rebuildGeo(S.exp);
     $('log').innerHTML = FINAL_STATE.logHTML;
     setSpeed(FINAL_STATE.turbo);
   }
