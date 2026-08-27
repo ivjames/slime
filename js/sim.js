@@ -2108,6 +2108,10 @@ function dietMet(e) {
 }
 
 function winMet(e) {
+  /* The graft dish is ABOUT the fusion: its win text credits the donor, so a
+     culture that brute-forced the strips alone has not run the experiment,
+     however much far agar it holds. */
+  if (e.donor && !S.fused) return false;
   return engulfGate(e) && cyclesMet(e) && dietMet(e) && !S.shockActive;
 }
 
@@ -2557,6 +2561,7 @@ function noteText(e) {
   if (S.shockWarn) return 'humidity falling — ' + Math.max(0, Math.ceil(S.shockNext - S.simT)) + 's';
   /* Only when the ratio is the one thing left in the way — otherwise it is a
      number on screen that the player cannot yet act on. */
+  if (e.donor && !S.fused && engulfGate(e)) return 'the far agar is not the assignment. the fusion is';
   if (e.diet && engulfGate(e) && !dietMet(e)) {
     if (S.engulfed < (e.diet.min | 0)) return 'fed, but not on enough — ' + S.engulfed + ' / ' + (e.diet.min | 0) + ' sources';
     return 'p:c ' + dietRatio() + ' — wanted ' + e.diet.target.toFixed(1) + ' ±' + e.diet.tol;
