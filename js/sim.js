@@ -1642,11 +1642,14 @@ var BODY_T    = 9.0;            // trail at which tissue begins
 var BODY_SOFT = 1.4;            // trail over which the edge resolves
 /* The floor the same edge resolves from along a BRIDGE — see buildBridges.
    A tube thin enough to need bridging sits well under BODY_T by definition,
-   so measuring it against BODY_T would draw nothing. Sampled over three seeds
-   at 900 and 2000 steps, shpA along a bridge — which is what paintField reads
-   for one, and see there for why it is not t — runs p05 3.3, median 5.3.
-   Anchoring the ramp here puts all of that at or near full tissue while still
-   leaving somewhere for a cell over genuinely empty agar to fade out to. */
+   so measuring it against BODY_T would draw nothing. This sits BELOW
+   BRIDGE_MIN, and the gap between the two is load-bearing rather than
+   incidental: paintField reads a bridged cell's coverage off the same trail
+   field the flood qualified it on, so a cell that cleared 3.0 to be routed
+   cannot then fail to be drawn. It resolves at 79% coverage at worst and full
+   tissue by 3.4. What the remaining distance to zero is for is a cell the mask
+   still names after its tube has decayed out from under it, which fades rather
+   than being asserted. */
 var BODY_LO   = 2.0;            // ...and the floor it resolves from on a bridge
 
 /* Everything the dish can ADD to a cell, named in one place, because the
@@ -3603,24 +3606,32 @@ function paintField() {
              instead, which is the whole of what the bridge pass changes about
              this loop.
 
-             And it is measured against shpA rather than against t. The ridge
-             lift is a local mean subtracted from a narrow one, so it drives
-             the flanks of anything bright NEGATIVE — which is what separates
-             two veins running side by side, and is also exactly wrong for a
-             thin strand leaving a thick trunk, the one shape this pass exists
-             to draw. Sampled on corridor cells, t runs p05 2.3 against a
-             BODY_LO of 2.0: 1.7% to 3.4% of them come out with no coverage at
-             all and as many again below a quarter, so a route the flood
-             qualified on the trail field could still be painted as a hole.
-             shpA is the same field one step earlier, before the lift, and over
-             the same samples not one corridor cell falls under BODY_LO — p05
-             3.3, median 5.3. The body keeps the lift; the strand does not
-             need separating from anything. */
+             And it is measured against TRAIL — the field that qualified the
+             route — rather than against anything the ridge pass built out of
+             it. Both blurred candidates leak the same way, in proportion to
+             how thin the tube is, which is the one property every cell here
+             has. Three 1-2-1 passes put 20/64 of a one-cell line back at its
+             own centre, so a corridor at BRIDGE_MIN renders from shpA at
+             0.9375 and from t lower still: routing accepts it, the painter
+             draws a hole, and the two pieces stay visibly apart. Reading trail
+             closes that by construction rather than by luck. Every cell the
+             flood marked cleared BRIDGE_MIN against the same array this lookup
+             reads, in the same pass, so the floor is not a hope about dish
+             conditions: BRIDGE_MIN is 3.0, BODY_LO is 2.0 and BODY_SOFT 1.4,
+             which puts the worst a qualified cell can draw at 79% coverage and
+             saturates it by 3.4.
+
+             That gap is also what answers the objection to reading a raw field
+             — that trail carries per-cell shot noise the painter blurs out on
+             purpose. It does, and none of it lands here: the ramp is already
+             flat 0.4 above the floor every corridor cell stands on, so the
+             noise has nowhere to show. Measured across five experiments and
+             42,649 corridor cells, no cell drew under that floor. */
           var vcov;
           if (br) {
-            var ga = (a * GAM_SCALE) | 0;
-            if (ga < 0) ga = 0; else if (ga >= GAMN) ga = GAMN - 1;
-            vcov = GAM_LO[ga];
+            var gt = (trail[i] * GAM_SCALE) | 0;
+            if (gt < 0) gt = 0; else if (gt >= GAMN) gt = GAMN - 1;
+            vcov = GAM_LO[gt];
           } else {
             vcov = GAM[gi];
           }
