@@ -583,6 +583,7 @@ function fillRect(arr, val, rx, ry, rw, rh) {
 }
 
 function buildDish(e) {
+  fieldDirty = true;
   trail.fill(0); tmpF.fill(0); foodF.fill(0);
   cueF.fill(0); retF.fill(0);
   wallM.fill(0); hazM.fill(0); nodeAt.fill(-1);
@@ -708,6 +709,7 @@ function buildFood() {
 /* statF folds together everything static for this frame's sensing:
    food attraction, hazard repulsion (quinine scaled by habituation), walls. */
 function rebuildStatic() {
+  fieldDirty = true;
   var qs = HAZ_QUIN * (1 - S.hab * 0.92);
   for (var i = 0; i < NCELL; i++) {
     var v = foodF[i] * FOODW;
@@ -724,6 +726,7 @@ function rebuildStatic() {
    6. agents
    ------------------------------------------------------------ */
 function inoculate(e) {
+  fieldDirty = true;
   nAgents = 0;
   var n = Math.min(e.start, MAXA);
   /* The drop fills outward from the inoculation point through CONNECTED open
@@ -906,6 +909,7 @@ var nodeHits = new Int32Array(16);
 function step() {
   var e = S.exp;
   S.simT += DT;
+  fieldDirty = true;
 
   diffuseTrail();
 
@@ -1233,6 +1237,40 @@ function updateShocks(e) {
    ------------------------------------------------------------ */
 var cv = null, ctx = null, off = null, octx = null, img = null, imgData = null;
 
+/* Does the picture need rebuilding, or can the last one be shown again?
+   Everything expensive in the renderer — eight separable blurs over 109,200
+   cells, then two more full-grid passes to find and chain the ridges — is a
+   pure function of the trail field and where the agents are. Neither moves
+   except in step(), so on a paused dish, on the result screen, or on any frame
+   the step budget did not advance, rebuilding it computes the same answer
+   again. Measured under 6x CPU throttling, standing in for a phone, a PAUSED
+   frame cost 974ms against 1065ms running: almost the entire frame was the
+   rebuild, and the dish was not even moving. That also feeds back into the
+   simulation, because the frame loop drops accumulated steps when it falls
+   behind, so a dish that cannot draw runs slower in real time as well.
+
+   The flag is set wherever the field or the agents actually change, and the
+   built geometry is kept in Path2D objects so a clean frame re-strokes them
+   without walking the grid or re-issuing the path. */
+var fieldDirty = true;
+
+/* Dirty frames between rebuilds while the dish is running. Caching alone only
+   helps frames where nothing moved — a paused dish, the result screen — and
+   during actual play every frame advances a step, so every frame is dirty and
+   pays in full. Measured unthrottled on a 2356px canvas, that full price is
+   9ms of a 16.7ms budget, over half the frame gone to redrawing a network that
+   changes by a fraction of a per cent per step.
+
+   Rebuilding every other dirty frame halves it. Counting FRAMES rather than
+   capping by elapsed time is deliberate and is the opposite of the obvious
+   choice: a 30Hz time cap never triggers on the device that needs it, since a
+   struggling phone is already below 30Hz, and so does nothing for exactly the
+   case this is here for. A frame count always halves the work, whatever the
+   device is managing. The cost is one frame of latency on a body that visibly
+   moves at about the speed of a slime mould. */
+var REBUILD_EVERY = 2;
+var dirtyFrames = 0;
+
 function initCanvas() {
   cv = $('cv');
   ctx = cv.getContext('2d', { alpha: false });
@@ -1445,14 +1483,16 @@ var VEIN_BANDS = [
   { max: 26,       w: 1.75, style: 'rgba(240,232,44,1)' },
   { max: Infinity, w: 2.70, style: 'rgba(246,240,62,1)' }
 ];
-var VEIN_CAP = 200000;                 /* floats held per band per frame */
-var vseg = [], vsegN = [];
+var VEIN_CAP = 200000;                 /* floats held per band per rebuild */
+var vseg = [], vsegN = [], veinPath = [];
 (function () {
   for (var i = 0; i < VEIN_BANDS.length; i++) {
     vseg.push(new Float32Array(VEIN_CAP));
     vsegN.push(0);
+    veinPath.push(null);
   }
 })();
+var whiskPath = null;
 
 /* The four directions a vein can run ACROSS: the across unit vector, the
    tangent it runs along, and the two cell offsets that step along that
@@ -1526,7 +1566,7 @@ var TIP_WHISK = 2.6;   // cells
 var TIP_STYLE = 'rgba(244,238,120,0.30)';
 var TIP_W = 0.17;
 
-function drawVeins(sx, sy) {
+function buildVeins() {
   var b, i, x, y;
   for (b = 0; b < VEIN_BANDS.length; b++) vsegN[b] = 0;
 
@@ -1620,23 +1660,19 @@ function drawVeins(sx, sy) {
     }
   }
 
-  ctx.save();
-  ctx.setTransform(sx, 0, 0, sy, 0, 0);
-  ctx.lineCap = 'round';
-  ctx.lineJoin = 'round';
-  /* widest first, so the hairlines land on top of the trunks they join */
-  for (b = VEIN_BANDS.length - 1; b >= 0; b--) {
+  /* Bake each band into a Path2D, in grid coordinates. Held rather than
+     re-issued, so a frame that changed nothing re-strokes the same geometry
+     without walking 109,200 cells or replaying the moveTo/lineTo calls. The
+     canvas transform does the scaling, so these survive a resize too. */
+  for (b = 0; b < VEIN_BANDS.length; b++) {
     var end = vsegN[b];
-    if (!end) continue;
-    var a3 = vseg[b];
-    ctx.beginPath();
-    var r = 0;
+    if (!end) { veinPath[b] = null; continue; }
+    var a3 = vseg[b], pth = new Path2D(), r = 0;
     while (r < end) {
       var cnt = a3[r++];
-      var x0 = a3[r], y0 = a3[r + 1];
-      ctx.moveTo(x0, y0);
+      pth.moveTo(a3[r], a3[r + 1]);
       if (cnt === 2) {
-        ctx.lineTo(a3[r + 2], a3[r + 3]);
+        pth.lineTo(a3[r + 2], a3[r + 3]);
       } else {
         /* quadratics through the midpoints: the control points are the cell
            centres, so the curve passes between them and the 45-degree
@@ -1644,31 +1680,43 @@ function drawVeins(sx, sy) {
         for (var q2 = 1; q2 < cnt - 1; q2++) {
           var px2 = a3[r + q2 * 2], py2 = a3[r + q2 * 2 + 1];
           var nx3 = a3[r + q2 * 2 + 2], ny3 = a3[r + q2 * 2 + 3];
-          ctx.quadraticCurveTo(px2, py2, (px2 + nx3) * 0.5, (py2 + ny3) * 0.5);
+          pth.quadraticCurveTo(px2, py2, (px2 + nx3) * 0.5, (py2 + ny3) * 0.5);
         }
-        ctx.lineTo(a3[r + (cnt - 1) * 2], a3[r + (cnt - 1) * 2 + 1]);
+        pth.lineTo(a3[r + (cnt - 1) * 2], a3[r + (cnt - 1) * 2 + 1]);
       }
       r += cnt * 2;
     }
-    ctx.lineWidth = VEIN_BANDS[b].w;
-    ctx.strokeStyle = VEIN_BANDS[b].style;
-    ctx.stroke();
+    veinPath[b] = pth;
   }
 
   /* --- the front: one whisker per tip --- */
-  ctx.beginPath();
-  var any = false;
+  var wp = new Path2D(), any = false;
   for (var k = 0; k < nAgents; k++) {
     if (!atip[k]) continue;
     var ax0 = ax[k], ay0 = ay[k], h = ah[k];
-    ctx.moveTo(ax0 - Math.cos(h) * TIP_WHISK, ay0 - Math.sin(h) * TIP_WHISK);
-    ctx.lineTo(ax0, ay0);
+    wp.moveTo(ax0 - Math.cos(h) * TIP_WHISK, ay0 - Math.sin(h) * TIP_WHISK);
+    wp.lineTo(ax0, ay0);
     any = true;
   }
-  if (any) {
+  whiskPath = any ? wp : null;
+}
+
+function strokeVeins(sx, sy) {
+  ctx.save();
+  ctx.setTransform(sx, 0, 0, sy, 0, 0);
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  /* widest first, so the hairlines land on top of the trunks they join */
+  for (var b = VEIN_BANDS.length - 1; b >= 0; b--) {
+    if (!veinPath[b]) continue;
+    ctx.lineWidth = VEIN_BANDS[b].w;
+    ctx.strokeStyle = VEIN_BANDS[b].style;
+    ctx.stroke(veinPath[b]);
+  }
+  if (whiskPath) {
     ctx.lineWidth = TIP_W;
     ctx.strokeStyle = TIP_STYLE;
-    ctx.stroke();
+    ctx.stroke(whiskPath);
   }
   ctx.restore();
 }
@@ -1682,7 +1730,16 @@ var primaryId = null;  /* the one the brush follows */
 
 function render() {
   if (!cv || !S.exp) return;
-  paintField();
+  /* A run that has stopped is not going to get another frame from the loop —
+     the result screen and exitReplay call render() once, by hand — so those
+     rebuild immediately rather than waiting for a second frame that never
+     arrives and leaving the verdict over a stale dish. */
+  if (fieldDirty && (!S.running || ++dirtyFrames >= REBUILD_EVERY)) {
+    paintField();
+    buildVeins();
+    dirtyFrames = 0;
+    fieldDirty = false;
+  }
 
   ctx.imageSmoothingEnabled = true;
   if ('imageSmoothingQuality' in ctx) ctx.imageSmoothingQuality = 'high';
@@ -1690,7 +1747,7 @@ function render() {
 
   /* the sheet is the field; the veins are lines drawn over it */
   var sx = cv.width / GW, sy = cv.height / GH;
-  drawVeins(sx, sy);
+  strokeVeins(sx, sy);
   ctx.save();
   ctx.setTransform(sx, 0, 0, sy, 0, 0);
 
@@ -1741,6 +1798,7 @@ function render() {
    10. player fields (brush)
    ------------------------------------------------------------ */
 function paintBrush(gx, gy, mode) {
+  fieldDirty = true;
   var R = CUE_R, R2 = R * R;
   var x0 = clamp(Math.round(gx - R), 0, GW - 1), x1 = clamp(Math.round(gx + R), 0, GW - 1);
   var y0 = clamp(Math.round(gy - R), 0, GH - 1), y1 = clamp(Math.round(gy + R), 0, GH - 1);
@@ -2157,6 +2215,7 @@ function exitReplay() {
     trail.set(FINAL_STATE.trail);
     cueF.set(FINAL_STATE.cueF); retF.set(FINAL_STATE.retF);
     nAgents = FINAL_STATE.n;
+    fieldDirty = true;
     ax.set(FINAL_STATE.ax); ay.set(FINAL_STATE.ay);
     ah.set(FINAL_STATE.ah); atip.set(FINAL_STATE.atip);
     var fs = FINAL_STATE.S;
