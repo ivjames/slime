@@ -1526,6 +1526,7 @@ function exitReplay() {
      clock agree with the verdict below them */
   if (FINAL_STATE) {
     trail.set(FINAL_STATE.trail);
+    cueF.set(FINAL_STATE.cueF); retF.set(FINAL_STATE.retF);
     nAgents = FINAL_STATE.n;
     S.simT = FINAL_STATE.simT; S.peak = FINAL_STATE.peak; S.cues = FINAL_STATE.cues;
     S.engulfed = FINAL_STATE.engulfed;
@@ -1789,6 +1790,7 @@ function showResult(won) {
      of leaving the replay's partial state on display. */
   FINAL_STATE = {
     trail: new Float32Array(trail),
+    cueF: new Float32Array(cueF), retF: new Float32Array(retF),
     n: nAgents,
     simT: S.simT, peak: S.peak, cues: S.cues, engulfed: S.engulfed,
     hab: S.hab, habPeak: S.habPeak, shocksSurvived: S.shocksSurvived,
