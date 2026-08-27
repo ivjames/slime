@@ -378,14 +378,25 @@ var ENGULF_DECAY = 0.0022; // an abandoned node re-forms: commit, or lose the gr
    FEED_FILL is the release valve, and the pad is a trap without it. Retention
    with no ceiling means the first flake found keeps every agent that touches
    it for as long as it has food, and the rest of the dish is never explored.
-   So the hold is scaled by how much room is left, measured against the
-   flake's own area: an uncovered flake pulls its arrivals in hard, a covered
-   one lets them wander off again, and what settles out is a pad about the
-   size of the meal with the surplus back on the agar. */
+   So the hold is scaled by how much room is left in the pad: an uncovered
+   flake pulls its arrivals in hard, a covered one lets them wander off again.
+
+   It is a share of the flake's own area rather than a count of agents per
+   cell, and the difference is the whole value of the constant. Written as
+   agents-per-cell it reads like a packing limit and is not one — the
+   exclusion is on cells, but a pad's agents are moving, so a saturated pad
+   never approaches one agent per cell. Measured across a run, the peak load
+   on a flake's own disc is 0.19 to 0.34 of its area on EXP-01's four big
+   flakes and 0.55 to 0.76 on EXP-03's nine small ones. The first value here
+   was 1.10, which is above every one of those: the valve never opened, it
+   only sagged to two thirds of the hold on the dish where it mattered least.
+   At 0.55 it opens fully on the crowded dishes — the ones with enough flakes
+   for hoarding to cost the culture anything — and eases the hold on the
+   sparse ones, where there is nothing to hoard against. */
 var FEED_R     = 1.35; // fan radius, as a multiple of the flake's own
 var FEED_OUT   = 0.34; // share of the way toward the rim taken per step, at the centre
 var FEED_HOLD  = 0.55; // ...and back toward the centre, at the edge of the fan
-var FEED_FILL  = 1.10; // agents per flake cell at which the fan stops holding them
+var FEED_FILL  = 0.55; // share of the flake's own area, in agents, that opens the valve
 var FEED_LAY   = 1.30; // trail a feeding agent lays per step (multiple of DEPOSIT)
 var FEED_SPEED = 0.30; // floor under a feeding agent's speed, so the pad can fill
 
@@ -2374,9 +2385,24 @@ function markKnot(ci) {
 
   /* Runs around the ring, and the direction each one points: the sum of the
      unit vectors of its members, which is the arm's own bearing however many
-     samples wide it happens to be. */
+     samples wide it happens to be.
+
+     Traversed from a GAP rather than from sample zero, and it has to be. An
+     arm that straddles the wrap — samples eleven and zero, with ten clear —
+     is one run, but walked from zero its head arrives before any run has been
+     opened and lands in no sum at all, so the arm's bearing is computed from
+     whatever tail happens to sit before the wrap. The COUNT survives that (a
+     run is tallied where it starts, and a wrapped run starts at its tail), so
+     the bug is invisible in whether a junction is found and shows up only in
+     where its arms are pointing: the same corner, rotated, scores a different
+     separation and can fall the other side of KNOT_BEND. Since n is neither 0
+     nor KNOT_N there is always a clear sample to start after, and starting
+     there makes every run contiguous. */
+  var gap = 0;
+  while (mask & (1 << gap)) gap++;
   var arms = 0, a0x = 0, a0y = 0, a1x = 0, a1y = 0;
-  for (d = 0; d < KNOT_N; d++) {
+  for (var t = 1; t <= KNOT_N; t++) {
+    d = (gap + t) % KNOT_N;
     if (!(mask & (1 << d))) continue;
     var prev = (mask & (1 << ((d + KNOT_N - 1) % KNOT_N))) !== 0;
     if (!prev) arms++;                       /* a run starts here */
@@ -3454,22 +3480,25 @@ function buildVeins() {
   /* --- pass 1b: where the masses are --- */
   /* Every other cell in each direction, so a pad the size of a flake costs a
      few hundred discs rather than a few thousand; the discs are wider than
-     the lattice they sit on, so the union is still solid. A mass is drawn
-     only where there is tissue to draw it out of — a junction mark outlives
-     the tubes that made it by a few seconds, and a flake nothing has reached
-     yet is not a pad. */
-  var done = S.nodeDone;
+     the lattice they sit on, so the union is still solid.
+
+     A mass is drawn only where there is tissue to draw it out of: a junction
+     mark outlives by a few seconds the tubes that made it, and a flake
+     nothing has reached yet is not a pad. The trail is the whole gate on a
+     pad, and deliberately — whether the flake has been ENGULFED says nothing
+     about whether the cytoplasm is still sitting on it. Gating on that was
+     the first version, and it took the pads off the plate at exactly the
+     wrong moments: the instant a flake went down, and, because every flake is
+     down by then, across the whole verdict screen. Feeding stops at
+     engulfment and the pad thins over the next couple of seconds; the drawing
+     follows it down instead of switching it off. */
   for (y = 2; y < GH - 2; y += 2) {
     var rowL = y * GW;
     for (x = 2; x < GW - 2; x += 2) {
       i = rowL + x;
       var lv = shpA[i];
       if (lv < BODY_T) continue;
-      var mass = knotF[i] > LOBE_MARK;
-      if (!mass && lv > LOBE_PAD) {
-        var lfi = feedAt[i];
-        mass = lfi >= 0 && done && !done[lfi];
-      }
+      var mass = knotF[i] > LOBE_MARK || (lv > LOBE_PAD && feedAt[i] >= 0);
       if (!mass) continue;
       lseg[lsegN * 2] = x + 0.5; lseg[lsegN * 2 + 1] = y + 0.5; lsegN++;
     }
