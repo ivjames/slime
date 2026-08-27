@@ -434,6 +434,845 @@ var EXPERIMENTS = [
     ],
     win: 'Every flake taken and every dry cycle survived, with the culture visibly slowing ahead of shocks that had not yet arrived. The observer withheld one shock to see what would happen. Something happened anyway.',
     lose: 'Caught in the open when the air went dry, repeatedly, until there was not enough left to catch. The cycle was regular. That was the entire point.'
+  },
+
+  {
+    code: 'EXP-06', name: 'THE U-TRAP',
+    blurb: 'A U-shaped trap between you and food. Escaping means walking away from it first.',
+    brief: 'Reid, 2012. Behind a U-shaped wall, the food is close enough to smell and impossible to reach in a straight line — the only way out is backward, through the mouth you came in by. A plasmodium that avoids its own abandoned ground escapes efficiently; one bathed first in its own slime, with nothing left to tell searched from unsearched, wanders the trap until it starves. You have the first culture\'s advantage, if you use it. Push at the back wall once, then stop pushing there — remember it, and go around instead.',
+    obj: 'Retreat out of the trap\'s dead end and engulf both flakes on the far side of the wall.',
+    objShort: 'FLAKES',
+    chips: [['', 'u-shaped trap wall'], ['', 'old ground repels'], ['ok', '2 flakes beyond it']],
+    inoc: { x: 200, y: 130 },
+    nodes: [
+      { x: 310, y: 110, r: 12, label: 'flake beyond' },
+      { x: 320, y: 215, r: 12, label: 'flake south' }
+    ],
+    walls: [
+      [252, 68, 8, 124],
+      [150, 68, 110, 8],
+      [150, 184, 110, 8]
+    ],
+    hazards: [],
+    start: 5000, cap: 11000, sustain: 5000, grow: 320, starve: 16, grace: 180, reach: 280, engulf: 1.7,
+    timeLimit: 480, hab: false, shocks: false,
+    slimeAvoid: 2.5,
+    preSlime: [[98, 76, 50, 108]],
+    script: [
+      { t: 2, hi: true, text: 'three walls and a door behind you. the food is past the fourth.' },
+      { t: 9, hi: true, text: 'retract on purpose. ground you deliberately leave starts to smell like nothing.' },
+      { t: 22, text: 'the wall does not care that you can smell dinner through it.' }
+    ],
+    ambient: [
+      'the back wall has been pushed on for a while now.',
+      'somewhere behind you, the door is still open. you have not looked.',
+      'searched and un-searched are, it turns out, different smells.',
+      'the shortest way to dinner is currently a wall. the second-shortest works.'
+    ],
+    win: 'Both flakes taken by a network that never returned to the wall it first tried. The dead end reads, in the trail record, as a single thick stub and nothing built past it — the culture found the door by remembering every place that wasn\'t one. The observer notes the irony of an organism with no memory keeping such careful books.',
+    lose: 'The front spent itself pressing on the same stretch of wall long after the wall had made its point, and there was nothing left to send around it. The dish records a very determined failure to learn.'
+  },
+
+  {
+    code: 'EXP-07', name: 'THE LIT MAZE',
+    blurb: 'A lit shortcut and a dark detour. Physarum minimises risk, not distance.',
+    brief: 'Nakagaki, 2007. A maze under uneven light: physarum is photophobic, and the network that survives balances path length against light exposure rather than minimising either alone. This dish offers two ways to the far blocks — a short corridor washed in light, and a long one left dark. The light does not stop you; it only costs you, steadily, for as long as you sit in it. Decide what a shortest path is actually worth.',
+    obj: 'Engulf both agar blocks across the maze.',
+    objShort: 'BLOCKS',
+    chips: [['', 'two-route maze'], ['l', 'lit shortcut'], ['ok', 'dark route clear']],
+    inoc: { x: 50, y: 130 },
+    nodes: [
+      { x: 370, y: 60, r: 12, label: 'block N' },
+      { x: 370, y: 200, r: 12, label: 'block S' }
+    ],
+    walls: [
+      [0, 0, 420, 8],
+      [0, 252, 420, 8],
+      [0, 0, 8, 260],
+      [412, 0, 8, 260],
+      [130, 8, 200, 76],
+      [130, 124, 200, 8],
+      [220, 132, 8, 90]
+    ],
+    hazards: [
+      { type: 'l', x: 130, y: 84, w: 200, h: 40 }
+    ],
+    start: 5000, cap: 11000, sustain: 5600, grow: 320, starve: 12, grace: 250, reach: 250, engulf: 1.6,
+    timeLimit: 650, hab: false, shocks: false,
+    heatDmg: 0.004,
+    script: [
+      { t: 2, hi: true, text: 'two ways across. one of them is lit.' },
+      { t: 10, hi: true, text: 'the light does not block you. it only charges admission.' },
+      { t: 20, text: 'the dark corridor costs nothing but time, and time is also a cost.' }
+    ],
+    ambient: [
+      'brightness is not a wall. it only has a price tag.',
+      'the dark route sits open and mostly ignored.',
+      'something in you keeps a running tab on the light.',
+      'shortest was never the only variable in this equation.'
+    ],
+    win: 'Both blocks taken, and the log shows a front that spent real biomass crossing the lit corridor rather than routing around it every time. The dark detour saw traffic too — the network hedged, the way the paper\'s plasmodia did. The observer notes the two routes never fully agreed on which was cheaper.',
+    lose: 'The culture bled itself thin in the light, crossing and recrossing a shortcut it never learned to avoid. The dark corridor sat open the whole time.'
+  },
+
+  {
+    code: 'EXP-08', name: 'THE DIET',
+    blurb: 'Eight lopsided blends. Eat the right four, not all eight.',
+    brief: 'Dussutour, 2010. Offered many protein:carbohydrate blends across a dish, the plasmodium in the paper composed its own diet — straddling several imperfect foods to land close to a two-to-one protein-to-carbohydrate intake, no matter which blends were on offer. Eight blends ring this dish, from nearly pure protein to nearly pure sugar. Eating all eight misses the target by a wide margin. You will need to choose a handful, in proportion, and retract from whatever the ratio doesn\'t want.',
+    obj: 'Take four blends that land the protein:carbohydrate mix near two to one, and leave the rest alone.',
+    objShort: 'BLENDS',
+    chips: [['ok', '8 blend nodes'], ['ok', 'open dish'], ['', 'target ratio 2:1']],
+    inoc: { x: 210, y: 130 },
+    nodes: [
+      { x: 60, y: 50, r: 11, label: 'blend 8:1', nut: [24, 3] },
+      { x: 210, y: 30, r: 11, label: 'blend 5:1', nut: [15, 3] },
+      { x: 360, y: 50, r: 11, label: 'blend 3:1', nut: [9, 3] },
+      { x: 380, y: 150, r: 11, label: 'blend 2:1', nut: [6, 3] },
+      { x: 360, y: 220, r: 11, label: 'blend 1:2', nut: [3, 6] },
+      { x: 210, y: 235, r: 11, label: 'blend 1:3', nut: [3, 9] },
+      { x: 60, y: 220, r: 11, label: 'blend 1:5', nut: [3, 15] },
+      { x: 40, y: 130, r: 11, label: 'blend 1:8', nut: [3, 24] }
+    ],
+    walls: [],
+    hazards: [],
+    start: 4200, cap: 11000, sustain: 2200, grow: 310, starve: 40, grace: 45, reach: 260, engulf: 2.5,
+    timeLimit: 320, hab: false, shocks: false,
+    holdWin: 4,
+    diet: { target: 2, tol: 0.4, min: 4 },
+    script: [
+      { t: 2, hi: true, text: 'eight blends on the agar, and none of them taste like enough.' },
+      { t: 12, text: 'more protein is not the same question as more food.' },
+      { t: 22, hi: true, text: 'something in you is already weighing this against that.' }
+    ],
+    ambient: [
+      'protein and carbohydrate, and an appetite doing the arithmetic nobody taught it.',
+      'too much of a good blend is only a bad blend, later.',
+      'the tongue you do not have has opinions anyway.',
+      'a diet, it turns out, is just another shape to hold.'
+    ],
+    win: 'Four blends held, the protein:carbohydrate ratio settling near two to one — inside the band, and nowhere close to what all eight nodes together would have produced. The observer notes that the untouched flakes were the important decision, not the eaten ones.',
+    lose: 'The culture took whatever blend sat nearest until the ratio drifted past saving, or ran out of clock still short of four. The observer writes appetite, not diet, and closes the notebook.'
+  },
+
+  {
+    code: 'EXP-09', name: 'THE DECOY',
+    blurb: 'Two good meals far apart, one bad one close by. Preference is not supposed to flip.',
+    brief: 'Latty &amp; Beekman, 2011. Give the plasmodium two good meals and it splits its attention evenly. Add a third, worse option nearby and the preference between the first two flips, a small violation of independence of irrelevant alternatives that human economists were not expecting from an organism with no brain. Today\'s dish repeats the trick from the inside: two real meals sit far apart on opposite ends of the agar, and one small, close, mostly-cellulose scrap waits between you and neither of them. It is nearer. It is not the assignment. Retract before you commit to it.',
+    obj: 'Engulf the two far meals; the near one is not required.',
+    objShort: 'BASINS',
+    chips: [['ok', 'two required meals'], ['', 'one decoy, close'], ['', 'engulf costs mass']],
+    inoc: { x: 210, y: 130 },
+    nodes: [
+      { x: 246, y: 108, r: 10, label: 'near crumb', trap: true },
+      { x: 52, y: 44, r: 12, label: 'north basin' },
+      { x: 368, y: 216, r: 12, label: 'south basin' }
+    ],
+    walls: [],
+    hazards: [],
+    start: 4500, cap: 11000, sustain: 3200, grow: 300, starve: 40, grace: 150, reach: 260, engulf: 1.5,
+    timeLimit: 480, hab: false, shocks: false,
+    required: [1, 2],
+    script: [
+      { t: 1.5, hi: true, text: 'something is close and something is far, and closeness is not an argument.' },
+      { t: 9, text: 'the near one bites back. mostly cellulose, all rind.' },
+      { t: 20, text: 'two real meals, opposite ends of the dish, still exactly as far as they were.' }
+    ],
+    ambient: [
+      'the near one keeps getting sniffed and left again.',
+      'distance was never the argument. proximity just felt like one.',
+      'somewhere an economist is taking this personally.',
+      'two good meals, unrelated to a third, ought to stay unrelated.'
+    ],
+    win: 'North and south basins both taken, whatever became of the crumb between them left to the record or not. The two meals that mattered were reached without the third one getting a vote. Latty and Beekman would want the mechanism; the notebook only has room for the outcome.',
+    lose: 'The near crumb went first, then most of an afternoon, and the far basins stayed exactly as far as they started. A preference got reversed. Nobody consulted the culture about it, which was rather the point.'
+  },
+
+  {
+    code: 'EXP-10', name: 'THE GRAFT',
+    blurb: 'A habituated donor waits in the corner. Fuse before you learn the quinine alone.',
+    brief: 'Vogel &amp; Dussutour, 2016. A plasmodium trained to ignore quinine was fused to a naive one, and the naive half crossed bitter agar as if it had learned the lesson itself — transferred down the shared vein, with no nervous system anywhere to carry it. There is a habituated culture sitting unconnected in the corner of this dish. Learning the strips first-hand, alone, will not finish inside the clock. Find the donor, fuse with it, and let the vein carry what your own crossings cannot.',
+    obj: 'Fuse with the donor culture, then cross the quinine and engulf the far agar.',
+    objShort: 'GRAFT',
+    chips: [['q', 'two quinine strips'], ['', 'alone, too slow to learn'], ['ok', 'donor culture waits']],
+    inoc: { x: 66, y: 130 },
+    nodes: [
+      { x: 352, y: 56, r: 12, label: 'far agar N' },
+      { x: 392, y: 140, r: 12, label: 'far agar E' },
+      { x: 346, y: 216, r: 12, label: 'far agar S' }
+    ],
+    walls: [],
+    hazards: [
+      { type: 'q', x: 160, y: 0, w: 34, h: 260 },
+      { type: 'q', x: 256, y: 0, w: 34, h: 260 }
+    ],
+    donor: { x: 66, y: 222, r: 18, hab: 0.85 },
+    start: 5000, cap: 11000, sustain: 4200, grow: 320, starve: 20, grace: 160, reach: 300,
+    timeLimit: 520, hab: true, shocks: false,
+    habRate: 0.12,
+    script: [
+      { t: 2, hi: true, text: 'two bitter strips ahead, and a second ring of cytoplasm in the corner that is not yet yours.' },
+      { t: 9, hi: true, text: 'hold the cue on the ring. two veins that meet become one vein, and it remembers for both.' },
+      { t: 22, text: 'crossing the strips alone is teaching yourself a lesson slower than the clock allows.' }
+    ],
+    ambient: [
+      'the ring in the corner made up its mind about this dish before you arrived.',
+      'a shared vein does not ask where the memory came from.',
+      'bitterness, secondhand, is somehow still bitterness.',
+      'nobody in this dish learned the quinine alone. that was rather the point.'
+    ],
+    win: 'The donor\'s vein met yours in the corner of the dish, and the crossing that followed afterward barely registered — a fraction of a flake\'s worth of cytoplasm, not the toll a first crossing usually takes. The observer notes that the lesson was learned exactly once, by someone else, and still counted.',
+    lose: 'The strips were crossed and recrossed first-hand while the donor culture sat three centimetres away, untouched. The lesson it already knew stayed exactly where it was — filed under owned by someone else.'
+  },
+
+  {
+    code: 'EXP-11', name: 'THE WARM ROOM',
+    blurb: 'No walls at all — the dish is partitioned by heat, and heat can be crossed.',
+    brief: 'No citation on this one — nobody has published it yet. The lab wanted to know what happens when the walls are made of heat instead of agar: five rooms, no partition you can\'t cross, only bands of warm agar joining them at odd offsets. You can shove straight through a strip and pay for it in biomass, or find the cool seam between two rooms and cross for free. This dish is teaching you the ledger before the dishes that make you keep it.',
+    obj: 'Engulf all five flakes scattered across the warm rooms.',
+    objShort: 'FLAKES',
+    chips: [['', 'heat, not walls'], ['', 'crossable, at a cost'], ['ok', '5 flakes, 5 rooms']],
+    inoc: { x: 45, y: 130 },
+    nodes: [
+      { x: 30, y: 210, r: 11, label: 'flake near' },
+      { x: 161, y: 130, r: 12, label: 'flake one' },
+      { x: 277, y: 100, r: 12, label: 'flake two' },
+      { x: 390, y: 55, r: 11, label: 'flake far n' },
+      { x: 390, y: 215, r: 11, label: 'flake far s' }
+    ],
+    walls: [],
+    hazards: [
+      { type: 'h', x: 90, y: 1, w: 26, h: 222 },
+      { type: 'h', x: 206, y: 37, w: 26, h: 222 },
+      { type: 'h', x: 322, y: 1, w: 26, h: 222 }
+    ],
+    start: 4800, cap: 11500, sustain: 3400, grow: 310, starve: 20, grace: 110, reach: 280, engulf: 1.3,
+    timeLimit: 640, hab: false, shocks: false,
+    script: [
+      { t: 1.5, hi: true, text: 'the warm patches are not walls. cross them and you pay for it in cytoplasm.' },
+      { t: 10, text: 'a front left sitting in the heat keeps paying. move through, don\'t camp.' },
+      { t: 22, text: 'the gaps between the warm strips are the only agar that costs nothing at all.' }
+    ],
+    ambient: [
+      'the thermometer in here has opinions about where you go.',
+      'heat is not a wall. it only behaves like one if you flinch.',
+      'the cool ground is a corridor, not a destination.',
+      'somewhere a technician is adjusting a dial and calling it architecture.'
+    ],
+    win: 'All five rooms taken, the network threading the gaps between the warm strips instead of through them. The observer notes the front never lingered in the heat long enough to be charged for it. Efficient, and — this being a budget line — the more important of the two.',
+    lose: 'The culture parked itself on a warm strip and burned down to nothing arguing the point. The heat did not have to move.'
+  },
+
+  {
+    code: 'EXP-12', name: 'THE SWEEP',
+    blurb: 'A wall of warmth sweeps the dish end to end. Grow where it isn\'t, not where it was.',
+    brief: 'Nobody has published this one — the lab is running its own follow-ups. A full-height bar of heat crosses the dish left to right on a fixed clock, and when it reaches the far wall it resets to the near one and starts again. Food sits on both flanks, and no ground stays cool for long. You cannot out-argue the schedule, only leave ground before the bar arrives and take it back once it has passed. The dish rewards timing. It does not reward loyalty to a patch of agar.',
+    obj: 'Engulf all six oat flakes before the dish times out.',
+    objShort: 'FLAKES',
+    chips: [['', 'heat bar sweeps'], ['', 'no ground stays cool'], ['ok', 'six oat flakes']],
+    inoc: { x: 210, y: 130 },
+    nodes: [
+      { x: 60, y: 66, r: 12, label: 'flake w' },
+      { x: 60, y: 196, r: 12, label: 'flake sw' },
+      { x: 195, y: 34, r: 11, label: 'flake n' },
+      { x: 225, y: 228, r: 11, label: 'flake s' },
+      { x: 360, y: 66, r: 12, label: 'flake e' },
+      { x: 360, y: 196, r: 12, label: 'flake se' }
+    ],
+    walls: [],
+    hazards: [
+      { type: 'h', x: 0, y: 0, w: 40, h: 260 }
+    ],
+    events: [
+      { t: 22, hazards: [
+        { type: 'h', x: 54, y: 0, w: 40, h: 260 }
+      ], note: 'the element ticks. the warm bar moves a hand-width right.', hi: true },
+      { t: 44, hazards: [
+        { type: 'h', x: 108, y: 0, w: 40, h: 260 }
+      ] },
+      { t: 66, hazards: [
+        { type: 'h', x: 162, y: 0, w: 40, h: 260 }
+      ], note: 'the bar keeps to schedule. always right, never back — not yet.' },
+      { t: 88, hazards: [
+        { type: 'h', x: 216, y: 0, w: 40, h: 260 }
+      ] },
+      { t: 110, hazards: [
+        { type: 'h', x: 270, y: 0, w: 40, h: 260 }
+      ] },
+      { t: 132, hazards: [
+        { type: 'h', x: 324, y: 0, w: 40, h: 260 }
+      ] },
+      { t: 154, hazards: [
+        { type: 'h', x: 378, y: 0, w: 40, h: 260 }
+      ], note: 'the bar touches the far wall. that should be the end of it.' },
+      { t: 176, hazards: [
+        { type: 'h', x: 0, y: 0, w: 40, h: 260 }
+      ], note: 'it is not. the bar resets to the near wall and starts again.', hi: true },
+      { t: 198, hazards: [
+        { type: 'h', x: 54, y: 0, w: 40, h: 260 }
+      ] },
+      { t: 220, hazards: [
+        { type: 'h', x: 108, y: 0, w: 40, h: 260 }
+      ] },
+      { t: 242, hazards: [
+        { type: 'h', x: 162, y: 0, w: 40, h: 260 }
+      ] },
+      { t: 264, hazards: [
+        { type: 'h', x: 216, y: 0, w: 40, h: 260 }
+      ], note: 'second pass. the ground it clears now was already yours once.' },
+      { t: 286, hazards: [
+        { type: 'h', x: 270, y: 0, w: 40, h: 260 }
+      ] },
+      { t: 308, hazards: [
+        { type: 'h', x: 324, y: 0, w: 40, h: 260 }
+      ] },
+      { t: 330, hazards: [
+        { type: 'h', x: 378, y: 0, w: 40, h: 260 }
+      ], note: 'the bar reaches the far wall again. the observer notes the regularity and nothing else.' }
+    ],
+    start: 4200, cap: 11500, sustain: 2100, grow: 320, starve: 40, grace: 50,
+    timeLimit: 420, hab: false, shocks: false,
+    script: [
+      { t: 2, hi: true, text: 'a bar of warmth stands at the near wall. it will not stand there long.' },
+      { t: 10, text: 'watch where it is. then guess where it is going.' },
+      { t: 20, text: 'it moves on a clock, not on anything you do. losing ground to it is only geography.' }
+    ],
+    ambient: [
+      'warmth, evenly applied, is still a threat.',
+      'the front leaves without complaint. it has done this before, seconds ago.',
+      'behind the bar the agar is already cooling. you are not the first to notice.',
+      'the schedule does not care what you were doing when it moved.'
+    ],
+    win: 'Every flake taken, several of them twice — once ahead of the bar and once behind it. The observer notes a network that never stopped moving and so never lost much of anything. The bar kept its own schedule throughout and noticed none of this.',
+    lose: 'Ground was held past the point the bar allows, and the bar does not negotiate that point. The observer logs the time of the last retreat that came too late and leaves the rest of the page for the next culture.'
+  },
+
+  {
+    code: 'EXP-13', name: 'THE MISSED BEAT',
+    blurb: 'The dry shocks keep a fixed beat. On schedule, the fourth one doesn\'t land.',
+    brief: 'Nobody has published this one yet. The lab already knows a dry shock on a fixed period teaches you to slow down before it lands — you did that yourself, once. This dish keeps the beat, then breaks it: the fourth scheduled shock is announced by the same warning window, the same held breath, and then nothing crosses the agar at all. The meter keeps counting; the schedule does not stop for your confusion. Hold ground on what you have already taken, and wait to find out whether you can tell the difference.',
+    obj: 'Engulf every flake and outlast six dry cycles, including the one that never lands.',
+    objShort: 'FLAKES',
+    chips: [['', 'dry shock every ~22s'], ['', 'one shock withheld'], ['ok', 'engulfed agar holds water']],
+    inoc: { x: 210, y: 130 },
+    nodes: [
+      { x: 370, y: 130, r: 12, label: 'flake 1' },
+      { x: 290, y: 48, r: 12, label: 'flake 2' },
+      { x: 130, y: 48, r: 12, label: 'flake 3' },
+      { x: 50, y: 130, r: 12, label: 'flake 4' },
+      { x: 130, y: 212, r: 12, label: 'flake 5' },
+      { x: 290, y: 212, r: 12, label: 'flake 6' }
+    ],
+    walls: [],
+    hazards: [],
+    shock: { first: 14, period: 22, warn: 5, dur: 6, dmg: 0.0015, skip: [4] },
+    start: 4200, cap: 11500, sustain: 2100, grow: 320, starve: 46, grace: 40,
+    timeLimit: 0, hab: false, shocks: true,
+    minShocks: 6,
+    script: [
+      { t: 2, hi: true, text: 'the dry cycles are back, same schedule as before. you have done this.' },
+      { t: 10, text: 'engulfed agar holds moisture. root yourself in it before the first cycle lands.' },
+      { t: 65, text: 'you have started slowing before the warning even sounds. good. or bad. hard to say from here.' }
+    ],
+    ambient: [
+      'the interval has not changed. you have.',
+      'a slowdown arriving early is still, technically, correct.',
+      'somewhere a clock is being trusted more than it has earned.',
+      'not every held breath ends in something. this might be one of those.'
+    ],
+    win: 'Six flakes taken, six scheduled cycles logged, and the fourth one never came — the culture slowed for it anyway, on time, into an empty interval. The observer notes anticipation surviving contact with an absent stimulus, which was rather the point of building a switch that could be left unthrown. The rhythm resumed on the next beat as if nothing had been withheld, which is either resilience or a short memory.',
+    lose: 'The culture never slowed for anything, dry or otherwise, and spent itself flat against the next real cycle. The schedule kept its appointment; the culture did not keep pace with it.'
+  },
+
+  {
+    code: 'EXP-14', name: 'THE SYNCOPATION',
+    blurb: 'Dry shocks on a shrinking clock. Build your refuges before the rhythm outruns you.',
+    brief: 'Nobody has published this one — the lab is just curious what happens when the interval itself is the variable. The dry cycles start slow, practically generous, and each one arrives sooner than the last. Anticipation still gets its warning window; only the gap it has to work with keeps shrinking. Get your engulfed flakes doing double duty as refuges now, while there is still room between beats — the schedule you can out-think early is the one that outpaces you late.',
+    obj: 'Engulf every flake and outlast seven accelerating dry cycles.',
+    objShort: 'FLAKES',
+    chips: [['', 'dry shock, shrinking gap'], ['', '7 cycles required'], ['ok', 'engulfed agar = refuge']],
+    inoc: { x: 210, y: 130 },
+    nodes: [
+      { x: 210, y: 40, r: 12, label: 'flake n' },
+      { x: 348, y: 78, r: 12, label: 'flake ne' },
+      { x: 356, y: 196, r: 12, label: 'flake se' },
+      { x: 210, y: 224, r: 12, label: 'flake s' },
+      { x: 64, y: 196, r: 12, label: 'flake sw' },
+      { x: 72, y: 78, r: 12, label: 'flake nw' }
+    ],
+    walls: [],
+    hazards: [],
+    shock: { first: 14, period: 26, warn: 5, dur: 6, dmg: 0.0013, accel: 0.88, minPeriod: 13 },
+    start: 4200, cap: 11500, sustain: 2100, grow: 320, starve: 44, grace: 40,
+    timeLimit: 0, hab: false, shocks: true,
+    minShocks: 7,
+    script: [
+      { t: 2, hi: true, text: 'the air in here has a metronome. it is not going to keep the tempo.' },
+      { t: 10, text: 'engulfed agar holds water. it is also the only ground that will still be dry later.' },
+      { t: 20, hi: true, text: 'each gap is shorter than the one before it. spend the wide ones now.' }
+    ],
+    ambient: [
+      'the interval used to feel generous. it no longer does.',
+      'somewhere a clock is being wound tighter, not reset.',
+      'you count the gap before it counts you.',
+      'the refuges do not care what tempo it is outside them.'
+    ],
+    win: 'All six flakes taken and seven cycles survived, the last of them landing on top of the one before it with almost no gap left to work with. The refuges held because they were built while the schedule still allowed it. The observer notes the tempo, then notes that nobody asked the culture whether it wanted to keep time.',
+    lose: 'The gaps ran out before the flakes did, and the last few dry cycles arrived close enough together to be one long one. The observer marks the interval where the rhythm won.'
+  },
+
+  {
+    code: 'EXP-15', name: 'THE TIDE',
+    blurb: 'Six stations in a ring, and ground that reverts the moment you look away.',
+    brief: 'Nobody has run this one before; the lab wrote it for you. Six agar stations ring the dish, and an engulfed flake left untended for sixteen seconds is not spoils — it is agar, and agar reverts. There is no route that lets you finish and leave. The whole ring has to stand fed at once, tube touching all six stations simultaneously, or the tide takes back whatever you turned away from.',
+    obj: 'Hold all six stations engulfed at the same time.',
+    objShort: 'HELD',
+    chips: [['', 'ground reseals'], ['ok', 'six stations'], ['', 'hold, don\'t tour']],
+    inoc: { x: 210, y: 130 },
+    nodes: [
+      { x: 210, y: 35, r: 12, label: 'shore n' },
+      { x: 344, y: 83, r: 12, label: 'shoal ne' },
+      { x: 344, y: 178, r: 12, label: 'shoal se' },
+      { x: 210, y: 225, r: 12, label: 'shore s' },
+      { x: 76, y: 178, r: 12, label: 'shoal sw' },
+      { x: 76, y: 83, r: 12, label: 'shoal nw' }
+    ],
+    walls: [],
+    hazards: [],
+    start: 4800, cap: 10000, sustain: 1700, grow: 310, starve: 32, grace: 70, reach: 200, engulf: 1.2,
+    timeLimit: 520, hab: false, shocks: false,
+    reseal: 16,
+    script: [
+      { t: 2, hi: true, text: 'six stations, no walls, and ground you leave alone stops being yours.' },
+      { t: 16, hi: true, text: 'the first one you touched and left is already thinking about reverting.' },
+      { t: 40, text: 'a network that only visits is not the same as a network that stays.' }
+    ],
+    ambient: [
+      'agar has no memory of gratitude. it only remembers attention.',
+      'the tide is not water. the tide is you, elsewhere.',
+      'every station you are not touching is quietly reconsidering.',
+      'six mouths, one cytoplasm, and nowhere it can afford to stop.'
+    ],
+    win: 'All six stations held at once, the network finally still instead of touring. The observer notes that holding is a different verb from finding, and a harder one. Nothing in the dish reverted on the way to press time.',
+    lose: 'Something was always mid-reversion. The observer counts five held, one skinning over, and writes down that six is not five plus patience.'
+  },
+
+  {
+    code: 'EXP-16', name: 'THE TRIAGE',
+    blurb: 'Eight flakes, six hands. Hold the ones you can, and let the reseal take the rest.',
+    brief: 'Eight patches of agar, and only six of you to go around once the reseal clock starts running. Nobody has published this one yet — the lab is just curious what a plasmodium does when holding everything is arithmetically impossible. Spread wide if you like. Watch what happens to the far corners while you are elsewhere. Then choose your six, and stop pretending the other two were ever coming with you.',
+    obj: 'Hold six of the eight stations at once.',
+    objShort: 'FLAKES',
+    chips: [['', 'hold 6 of 8'], ['', 'idle ground reseals'], ['ok', 'no hazards']],
+    inoc: { x: 210, y: 130 },
+    nodes: [
+      { x: 210, y: 50, r: 11, label: 'flake n' },
+      { x: 320, y: 80, r: 11, label: 'flake ne' },
+      { x: 320, y: 180, r: 11, label: 'flake se' },
+      { x: 210, y: 210, r: 11, label: 'flake s' },
+      { x: 100, y: 180, r: 11, label: 'flake sw' },
+      { x: 100, y: 80, r: 11, label: 'flake nw' },
+      { x: 30, y: 30, r: 11, label: 'far flake nw' },
+      { x: 390, y: 230, r: 11, label: 'far flake se' }
+    ],
+    walls: [],
+    hazards: [],
+    start: 4800, cap: 10500, sustain: 1500, grow: 320, starve: 24, grace: 85, reach: 240,
+    timeLimit: 520, hab: false, shocks: false,
+    reseal: 15, holdWin: 6,
+    script: [
+      { t: 2, hi: true, text: 'eight stations. tending is not the same as holding.' },
+      { t: 9, hi: true, text: 'ground you leave alone for too long seals back over. it does not ask first.' },
+      { t: 22, text: 'there is not enough of you for all eight. six will have to be the whole answer.' }
+    ],
+    ambient: [
+      'six is not a compromise. six is the number that was always available.',
+      'the far bench costs more just to remember it exists.',
+      'a flake left alone does not starve. it simply stops being yours.',
+      'triage, in the end, is just arithmetic wearing a lab coat.'
+    ],
+    win: 'Six stations held at once, the far two abandoned early and without ceremony. The observer notes this was always the correct answer, not a shortfall met halfway. Eight was never on offer.',
+    lose: 'The network spread thin across all eight, held none of them long enough, and watched the reseal timers win every argument at once. Ambition, on this agar, is just starvation with better publicity.'
+  },
+
+  {
+    code: 'EXP-17', name: 'THE REVISION',
+    blurb: 'A labyrinth re-cut twice mid-run. Trust nothing you have already built.',
+    brief: 'Nobody has published this one — it is the lab\'s own follow-up to the labyrinth dish, run because someone wondered what your network remembers when the maze itself starts lying to it. Two agar blocks, cut corridors, the usual crawl. Then, twice, the walls change: a route you thickened into dissolves and a route you never tried opens somewhere else. The notebook\'s real question is whether the shortest path lives in your tubes or gets rebuilt from nothing each time the agar is repoured. Regrow. Do not sulk about it.',
+    obj: 'Engulf both agar blocks; the maze will be re-cut twice along the way.',
+    objShort: 'BLOCKS',
+    chips: [['', 'cut labyrinth'], ['', 'walls recut mid-run'], ['ok', 'two agar blocks']],
+    inoc: { x: 210, y: 130 },
+    nodes: [
+      { x: 40, y: 220, r: 13, label: 'block SW' },
+      { x: 380, y: 40, r: 13, label: 'block NE' }
+    ],
+    walls: [
+      [0, 0, 420, 8],
+      [0, 252, 420, 8],
+      [0, 0, 8, 260],
+      [412, 0, 8, 260],
+      [40, 90, 60, 7],
+      [320, 160, 60, 7],
+      [140, 52, 8, 200],
+      [280, 8, 8, 200]
+    ],
+    hazards: [],
+    events: [
+      { t: 100, walls: [
+        [0, 0, 420, 8],
+        [0, 252, 420, 8],
+        [0, 0, 8, 260],
+        [412, 0, 8, 260],
+        [40, 90, 60, 7],
+        [320, 160, 60, 7],
+        [140, 8, 8, 200],
+        [280, 52, 8, 200]
+      ], note: 'somewhere a wall you trusted is being poured.', hi: true },
+      { t: 210, walls: [
+        [0, 0, 420, 8],
+        [0, 252, 420, 8],
+        [0, 0, 8, 260],
+        [412, 0, 8, 260],
+        [40, 90, 60, 7],
+        [320, 160, 60, 7],
+        [140, 52, 8, 200],
+        [280, 52, 8, 200]
+      ], note: 'a second pour. the shortcut that saved you the first time is gone.', hi: true }
+    ],
+    start: 5000, cap: 11000, sustain: 5800, grow: 320, starve: 10, grace: 260, reach: 280, engulf: 1.7,
+    timeLimit: 820, hab: false, shocks: false,
+    script: [
+      { t: 2, hi: true, text: 'a labyrinth again. this one is not finished being cut.' },
+      { t: 15, text: 'dead ends cost cytoplasm. retract out of them.' },
+      { t: 80, hi: true, text: 'the walls you have not tested yet are the ones that matter most.' }
+    ],
+    ambient: [
+      'a corridor this well-worn should be permanent. it is not.',
+      'the tubes remember a shape the walls no longer have.',
+      'concrete would be kinder. concrete would also be data-poor.',
+      'somewhere a graduate student is enjoying this far too much.'
+    ],
+    win: 'Both blocks taken, the network rebuilt twice over without complaint. The tubes that carried you through the second revision were laid after it, not before — whatever survived the repour was in the organism, not the plumbing. The observer writes this down and immediately wants to run it a third time.',
+    lose: 'The culture kept feeding a corridor that had already been poured shut. Loyalty, in this dish, was never a survival trait.'
+  },
+
+  {
+    code: 'EXP-18', name: 'THE DRAWBRIDGE',
+    blurb: 'A wall down the middle, two doors, one open at a time. Time the crossing.',
+    brief: 'Nobody has published this one yet. The lab poured a wall down the centre of the dish and left two doors in it, and rigged the doors to trade places — north open while south seals, then south open while north seals, on a half-minute switch nobody consulted you about. Food waits on both sides of that wall, plus a little kept close so you are not starving while you learn the rhythm. Crossing is not a pathfinding problem. It is a scheduling problem, and the door does not check who is still standing in the frame when it shuts.',
+    obj: 'Engulf all three agar patches, timing each crossing to an open gate.',
+    objShort: 'AGAR',
+    chips: [['', 'gated centre wall'], ['', '~30s door cycle'], ['ok', '3 agar patches']],
+    inoc: { x: 100, y: 130 },
+    nodes: [
+      { x: 60, y: 130, r: 11, label: 'near agar' },
+      { x: 330, y: 87, r: 12, label: 'far agar n' },
+      { x: 330, y: 177, r: 12, label: 'far agar s' }
+    ],
+    walls: [
+      [0, 0, 420, 8],
+      [0, 252, 420, 8],
+      [0, 0, 8, 260],
+      [412, 0, 8, 260],
+      [206, 8, 8, 62],
+      [206, 104, 8, 90],
+      [206, 194, 8, 58]
+    ],
+    hazards: [],
+    events: [
+      { t: 30, walls: [
+        [0, 0, 420, 8],
+        [0, 252, 420, 8],
+        [0, 0, 8, 260],
+        [412, 0, 8, 260],
+        [206, 8, 8, 96],
+        [206, 104, 8, 56],
+        [206, 194, 8, 58]
+      ], note: 'south opens. north is a wall again.', hi: true },
+      { t: 60, walls: [
+        [0, 0, 420, 8],
+        [0, 252, 420, 8],
+        [0, 0, 8, 260],
+        [412, 0, 8, 260],
+        [206, 8, 8, 62],
+        [206, 104, 8, 90],
+        [206, 194, 8, 58]
+      ], note: 'north opens. south is a wall again.', hi: true },
+      { t: 90, walls: [
+        [0, 0, 420, 8],
+        [0, 252, 420, 8],
+        [0, 0, 8, 260],
+        [412, 0, 8, 260],
+        [206, 8, 8, 96],
+        [206, 104, 8, 56],
+        [206, 194, 8, 58]
+      ], note: 'the south door again. the north one you were counting on is gone.' },
+      { t: 120, walls: [
+        [0, 0, 420, 8],
+        [0, 252, 420, 8],
+        [0, 0, 8, 260],
+        [412, 0, 8, 260],
+        [206, 8, 8, 62],
+        [206, 104, 8, 90],
+        [206, 194, 8, 58]
+      ], note: 'the north door again. the south one you were counting on is gone.' },
+      { t: 150, walls: [
+        [0, 0, 420, 8],
+        [0, 252, 420, 8],
+        [0, 0, 8, 260],
+        [412, 0, 8, 260],
+        [206, 8, 8, 96],
+        [206, 104, 8, 56],
+        [206, 194, 8, 58]
+      ], note: 'south stands open. whatever you left at the north door is on its own now.' },
+      { t: 180, walls: [
+        [0, 0, 420, 8],
+        [0, 252, 420, 8],
+        [0, 0, 8, 260],
+        [412, 0, 8, 260],
+        [206, 8, 8, 62],
+        [206, 104, 8, 90],
+        [206, 194, 8, 58]
+      ], note: 'north stands open. whatever you left at the south door is on its own now.' },
+      { t: 210, walls: [
+        [0, 0, 420, 8],
+        [0, 252, 420, 8],
+        [0, 0, 8, 260],
+        [412, 0, 8, 260],
+        [206, 8, 8, 96],
+        [206, 104, 8, 56],
+        [206, 194, 8, 58]
+      ], note: 'south lifts. the north seam closes without asking who is still in it.' },
+      { t: 240, walls: [
+        [0, 0, 420, 8],
+        [0, 252, 420, 8],
+        [0, 0, 8, 260],
+        [412, 0, 8, 260],
+        [206, 8, 8, 62],
+        [206, 104, 8, 90],
+        [206, 194, 8, 58]
+      ], note: 'north lifts. the south seam closes without asking who is still in it.' },
+      { t: 270, walls: [
+        [0, 0, 420, 8],
+        [0, 252, 420, 8],
+        [0, 0, 8, 260],
+        [412, 0, 8, 260],
+        [206, 8, 8, 96],
+        [206, 104, 8, 56],
+        [206, 194, 8, 58]
+      ], note: 'south opens. north is a wall again.' },
+      { t: 300, walls: [
+        [0, 0, 420, 8],
+        [0, 252, 420, 8],
+        [0, 0, 8, 260],
+        [412, 0, 8, 260],
+        [206, 8, 8, 62],
+        [206, 104, 8, 90],
+        [206, 194, 8, 58]
+      ], note: 'north opens. south is a wall again.' },
+      { t: 330, walls: [
+        [0, 0, 420, 8],
+        [0, 252, 420, 8],
+        [0, 0, 8, 260],
+        [412, 0, 8, 260],
+        [206, 8, 8, 96],
+        [206, 104, 8, 56],
+        [206, 194, 8, 58]
+      ], note: 'the south door again. the north one you were counting on is gone.' },
+      { t: 360, walls: [
+        [0, 0, 420, 8],
+        [0, 252, 420, 8],
+        [0, 0, 8, 260],
+        [412, 0, 8, 260],
+        [206, 8, 8, 62],
+        [206, 104, 8, 90],
+        [206, 194, 8, 58]
+      ], note: 'the north door again. the south one you were counting on is gone.' },
+      { t: 390, walls: [
+        [0, 0, 420, 8],
+        [0, 252, 420, 8],
+        [0, 0, 8, 260],
+        [412, 0, 8, 260],
+        [206, 8, 8, 96],
+        [206, 104, 8, 56],
+        [206, 194, 8, 58]
+      ], note: 'south stands open. whatever you left at the north door is on its own now.' },
+      { t: 420, walls: [
+        [0, 0, 420, 8],
+        [0, 252, 420, 8],
+        [0, 0, 8, 260],
+        [412, 0, 8, 260],
+        [206, 8, 8, 62],
+        [206, 104, 8, 90],
+        [206, 194, 8, 58]
+      ], note: 'north stands open. whatever you left at the south door is on its own now.' },
+      { t: 450, walls: [
+        [0, 0, 420, 8],
+        [0, 252, 420, 8],
+        [0, 0, 8, 260],
+        [412, 0, 8, 260],
+        [206, 8, 8, 96],
+        [206, 104, 8, 56],
+        [206, 194, 8, 58]
+      ], note: 'south lifts. the north seam closes without asking who is still in it.' }
+    ],
+    start: 4800, cap: 11500, sustain: 3400, grow: 310, starve: 18, grace: 80, reach: 260,
+    timeLimit: 480, hab: false, shocks: false,
+    script: [
+      { t: 2, hi: true, text: 'a wall splits the dish top to bottom. two doors sit in it, and only one is open.' },
+      { t: 14, text: 'feed close first — the doors are not going anywhere, but starving while you wait for one is still starving.' },
+      { t: 27, hi: true, text: 'a door is closing. whatever is standing in the frame does not get pulled back first.' }
+    ],
+    ambient: [
+      'the wall does not care which side you meant to be on.',
+      'a door about to close looks exactly like one that just opened.',
+      'cytoplasm left in a closing frame does not get a vote.',
+      'the near flake was never the point. it was groceries.'
+    ],
+    win: 'All three patches taken, both doors caught open when it mattered and shut on nothing of yours. Nobody adjusted the schedule for you; you adjusted to it. The observer records this as punctuality, a word rarely applied to a mould.',
+    lose: 'The dish timed out with agar still dark on the far side, the front parked at a door that was never going to open on request. The observer notes the timing, and files the effort separately.'
+  },
+
+  {
+    code: 'EXP-19', name: 'THE FIRE DRILL',
+    blurb: 'Dry shocks flood the centre with heat too. Anticipate, contract, re-expand.',
+    brief: 'Nobody has published this one yet. Two drills run on the same clock: the dry-air shock from a dish further back in this lab\'s schedule, and underneath it, timed to the same beat, the floor across the centre of the plate floods with heat. Five flakes sit in the corners, outside the flood line. The rhythm asks two things at once — pull in before the warning ends, and push back out the instant it lifts, because the crossing does not stay open, and it does not stay cool either.',
+    obj: 'Engulf all five flakes and survive at least four heat drills.',
+    objShort: 'FLAKES',
+    chips: [['', 'dry shock every ~25 s'], ['', 'centre floods with heat'], ['ok', 'corners hold cool']],
+    inoc: { x: 210, y: 130 },
+    nodes: [
+      { x: 50, y: 40, r: 12, label: 'flake NW' },
+      { x: 370, y: 40, r: 12, label: 'flake NE' },
+      { x: 50, y: 220, r: 12, label: 'flake SW' },
+      { x: 370, y: 220, r: 12, label: 'flake SE' },
+      { x: 40, y: 130, r: 12, label: 'flake W' }
+    ],
+    walls: [],
+    hazards: [],
+    events: [
+      { t: 18, hazards: [
+        { type: 'h', x: 130, y: 70, w: 80, h: 120 },
+        { type: 'h', x: 210, y: 70, w: 80, h: 120 }
+      ], note: 'the plain goes hot. the middle of the dish is the whole of the danger.', hi: true },
+      { t: 24, hazards: [
+        
+      ], note: 'the heat lifts. the middle is agar again, briefly.', hi: true },
+      { t: 43, hazards: [
+        { type: 'h', x: 130, y: 70, w: 80, h: 120 },
+        { type: 'h', x: 210, y: 70, w: 80, h: 120 }
+      ], note: 'again. the floor under the inoculation point floods with heat.' },
+      { t: 49, hazards: [
+        
+      ], note: 'cool returns to the centre. use it.' },
+      { t: 68, hazards: [
+        { type: 'h', x: 130, y: 70, w: 80, h: 120 },
+        { type: 'h', x: 210, y: 70, w: 80, h: 120 }
+      ], note: 'on schedule. the centre is not safe and was never going to stay that way.' },
+      { t: 74, hazards: [
+        
+      ], note: 'the plain clears. the window will not stay open.' },
+      { t: 93, hazards: [
+        { type: 'h', x: 130, y: 70, w: 80, h: 120 },
+        { type: 'h', x: 210, y: 70, w: 80, h: 120 }
+      ], note: 'fourth flood. the corners are still cool. that is the entire strategy.' },
+      { t: 99, hazards: [
+        
+      ], note: 'four survived. the middle goes quiet again.' },
+      { t: 118, hazards: [
+        { type: 'h', x: 130, y: 70, w: 80, h: 120 },
+        { type: 'h', x: 210, y: 70, w: 80, h: 120 }
+      ], note: 'the drill repeats. repetition is the point of a drill.' },
+      { t: 124, hazards: [
+        
+      ], note: 'heat off. the clock toward the next one has already started.' },
+      { t: 143, hazards: [
+        { type: 'h', x: 130, y: 70, w: 80, h: 120 },
+        { type: 'h', x: 210, y: 70, w: 80, h: 120 }
+      ], note: 'hot again, dead centre, same as every time before.' },
+      { t: 149, hazards: [
+        
+      ], note: 'the centre cools. nothing here forgives lateness.' },
+      { t: 168, hazards: [
+        { type: 'h', x: 130, y: 70, w: 80, h: 120 },
+        { type: 'h', x: 210, y: 70, w: 80, h: 120 }
+      ], note: 'the middle floods once more. you should not still be surprised.' },
+      { t: 174, hazards: [
+        
+      ], note: 'clear again, for a while that is shorter than it feels.' },
+      { t: 193, hazards: [
+        { type: 'h', x: 130, y: 70, w: 80, h: 120 },
+        { type: 'h', x: 210, y: 70, w: 80, h: 120 }
+      ], note: 'last scheduled flood. the plain earns its name.' },
+      { t: 199, hazards: [
+        
+      ], note: 'the last flood recedes. the plain is done for the day.' }
+    ],
+    shock: { first: 18, period: 25, warn: 5, dur: 6, dmg: 0.0018 },
+    start: 4300, cap: 11500, sustain: 2400, grow: 320, starve: 40, grace: 150, reach: 270,
+    timeLimit: 300, hab: false, shocks: true,
+    minShocks: 4,
+    script: [
+      { t: 2, hi: true, text: 'the air here dries on a clock, and when it does the middle of this dish is not agar. it is a stove.' },
+      { t: 11, hi: true, text: 'the warning means leave the centre now. corners hold, the plain does not.' },
+      { t: 25, text: 'it lifts as fast as it came. cross back while it is open.' },
+      { t: 60, text: 'you are slowing before the warning fires. nobody rang a bell yet.' }
+    ],
+    ambient: [
+      'the middle of the dish keeps a schedule better than you do.',
+      'cool at the edges, hot in the middle, and the middle is where you started.',
+      'you have started flinching before the warning finishes.',
+      'the corners do not care what the centre is doing. that is the entire appeal of a corner.'
+    ],
+    win: 'All five flakes taken and four floods of the centre survived, the network learning to empty the middle before the warning finished and refill it before the window closed. The observer notes the timing held even on the cycles nobody announced twice. A drill, it turns out, is something you can get good at.',
+    lose: 'Caught in the middle when the floor went hot, more than once, until there was less network than there was schedule. The clock did not slow down to wait.'
+  },
+
+  {
+    code: 'EXP-20', name: 'THE LONG NIGHT',
+    blurb: 'The capstone: hold five stations, survive the shocks, and lose a wall along the way.',
+    brief: 'No paper for this one — this is the lab\'s own, run after everything else on the schedule. Five stations, and holding one is not the same as holding it at four in the morning: unattended ground skins over and has to be retaken. The air will still turn dry and dry faster each time. One wall you have leaned on since the start will be poured shut without notice, and something colder waits behind it. Nobody expects you to keep all five. Do.',
+    obj: 'Hold all five stations at once and outlast six dry cycles before the clock runs out.',
+    objShort: 'HELD',
+    chips: [['', 'hold all five'], ['', 'shocks accelerate'], ['', 'heat + one revision']],
+    inoc: { x: 210, y: 90 },
+    nodes: [
+      { x: 210, y: 34, r: 12, label: 'night bench' },
+      { x: 50, y: 40, r: 12, label: 'west rack' },
+      { x: 380, y: 40, r: 12, label: 'east rack' },
+      { x: 60, y: 220, r: 11, label: 'south cell' },
+      { x: 385, y: 225, r: 11, label: 'warm cell' }
+    ],
+    walls: [
+      [100, 150, 320, 8]
+    ],
+    hazards: [
+      { type: 'h', x: 330, y: 176, w: 20, h: 83 },
+      { type: 'h', x: 350, y: 176, w: 70, h: 20 }
+    ],
+    events: [
+      { t: 150, walls: [
+        [0, 150, 320, 8]
+      ], note: 'the near door is shutting. the far one was never locked, only walled — until now.', hi: true }
+    ],
+    shock: { first: 34, period: 34, warn: 7, dur: 6, dmg: 0.0011, accel: 0.93, minPeriod: 15 },
+    start: 5000, cap: 13500, sustain: 2500, grow: 320, starve: 14, grace: 200, reach: 280, engulf: 1.8,
+    timeLimit: 900, hab: false, shocks: true,
+    minShocks: 6, reseal: 20,
+    script: [
+      { t: 2, hi: true, text: 'five stations. holding one is not the same as having held it.' },
+      { t: 10, text: 'ground you leave alone for long enough remembers that you left.' },
+      { t: 20, hi: true, text: 'the southeast corner is warm on purpose. go in anyway.' },
+      { t: 35, text: 'the dry cycles are not on the same clock twice. each one arrives sooner.' }
+    ],
+    ambient: [
+      'the observer has stopped writing dates on this one.',
+      'five is not a large number until you are trying to be in five places.',
+      'warmth, like everything else in this dish, is a decision someone made for you.',
+      'the schedule does not slow down because you are tired. neither, it turns out, do you.'
+    ],
+    win: 'All five stations held at the moment the sixth cycle closed, the network still standing in the southeast corner it was never going to like. The wall came down where the notes said it would, and the culture went around it anyway. The observer writes the date, closes the notebook, and — this once — does not immediately open a new one.',
+    lose: 'One station skinned over while the culture held the other four, and the sixth cycle never came. The dish is logged, the lamp switched off, and the notebook left open to a page that was not quite finished.'
   }
 ];
 
