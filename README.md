@@ -90,7 +90,16 @@ sense–rotate–deposit loop (the discrete cousin of Jones' particle model of
 *Physarum* growth). Food sources bias deposition, the trail field diffuses
 and decays every tick, and reinforced paths simply persist while unused ones
 fade — which is what produces maze-shortening and network-thinning behavior
-without any pathfinding code telling it the answer. It's a real, if modest,
+without any pathfinding code telling it the answer.
+
+Two things happen on top of that loop, because a plasmodium is not only
+filaments. A front that reaches food stops being a front: it spreads across
+the flake and thickens into a pad, which is where absorption actually happens
+and is why the dish is eaten by contact area rather than by whichever tube
+happens to be passing. And where tubes meet or turn a hard corner, the network
+grows a lobe — a swelling of cytoplasm parked at the junction, marked by the
+agents that notice they are standing at one and built by the traffic that goes
+through it afterwards. Both are drawn as masses rather than as lines. It's a real, if modest,
 implementation of that model, not a hand-scripted imitation of one; don't
 expect anything close to a research-grade solver.
 
