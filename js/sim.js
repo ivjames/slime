@@ -1478,12 +1478,15 @@ var MAT_ADD = [7, 8, 11];     // slime mat, per unit of slimeF — ground only
 var BRUSH_PEAK = 1.15;        // the brush cone's tip, the most cueF/retF holds
 
 /* Every ground the body's shaded rim can border, worst case: each hazard
-   field (and bare agar), under a brush cone's full cue or retract haze, with
-   and without the slime mat's film on the unoccupied side. The mat is the
-   unkind one — it fades under tissue, so it lifts the ground WITHOUT lifting
+   field (and bare agar), under a brush cone's full cue haze, retract haze,
+   or BOTH — the brush writes one field without clearing the other, so a
+   mode switch mid-gesture (the second-finger override) leaves cue and
+   retract on the same cells, and the painter adds them both — with and
+   without the slime mat's film on the unoccupied side. The mat is the
+   unkind one: it fades under tissue, so it lifts the ground WITHOUT lifting
    the rim. Additive light compresses a contrast ratio from below, so the
    floor in applyTint is demanded against all of these, not against bare
-   agar. Twelve bases, each with a matless and a matted ground luminance;
+   agar. Sixteen bases, each with a matless and a matted ground luminance;
    the body beside them shares everything but the mat. All static, so built
    once. */
 var FLOOR_STACKS = (function () {
@@ -1491,7 +1494,10 @@ var FLOOR_STACKS = (function () {
   var overs = [
     [0, 0, 0],
     [CUE_ADD[0] * BRUSH_PEAK, CUE_ADD[1] * BRUSH_PEAK, CUE_ADD[2] * BRUSH_PEAK],
-    [RET_ADD[0] * BRUSH_PEAK, RET_ADD[1] * BRUSH_PEAK, RET_ADD[2] * BRUSH_PEAK]
+    [RET_ADD[0] * BRUSH_PEAK, RET_ADD[1] * BRUSH_PEAK, RET_ADD[2] * BRUSH_PEAK],
+    [(CUE_ADD[0] + RET_ADD[0]) * BRUSH_PEAK,
+     (CUE_ADD[1] + RET_ADD[1]) * BRUSH_PEAK,
+     (CUE_ADD[2] + RET_ADD[2]) * BRUSH_PEAK]
   ];
   for (var hz = 0; hz < 4; hz++) {
     var h = hz ? HAZ_ADD[hz] : [0, 0, 0];
