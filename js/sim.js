@@ -753,7 +753,7 @@ var EXPERIMENTS = [
       'behind the bar the agar is already cooling. you are not the first to notice.',
       'the schedule does not care what you were doing when it moved.'
     ],
-    win: 'Every flake taken, several of them twice — once ahead of the bar and once behind it. The observer notes a network that never stopped moving and so never lost much of anything. The bar kept its own schedule throughout and noticed none of this.',
+    win: 'Every flake taken, and the ground between them crossed twice over — once ahead of the bar and once behind it. The observer notes a network that never stopped moving and so never lost much of anything. The bar kept its own schedule throughout and noticed none of this.',
     lose: 'Ground was held past the point the bar allows, and the bar does not negotiate that point. The observer logs the time of the last retreat that came too late and leaves the rest of the page for the next culture.'
   },
 
@@ -901,7 +901,7 @@ var EXPERIMENTS = [
       'a flake left alone does not starve. it simply stops being yours.',
       'nothing is being sacrificed here. two things are simply not being reached.'
     ],
-    win: 'Six stations held at once, the far two abandoned early and without ceremony. The observer notes this was always the correct answer, not a shortfall met halfway. Eight was never on offer.',
+    win: 'Six stations held at once, the other two abandoned early and without ceremony. The observer notes the concession was always the correct answer, not a shortfall met halfway. Eight was never on offer.',
     lose: 'The network spread thin across all eight, held none of them long enough, and watched the reseal timers win every argument at once. Ambition, on this agar, is just starvation with better publicity.'
   },
 
