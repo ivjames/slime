@@ -1480,14 +1480,17 @@ var BODY_SOFT = 1.4;            // trail over which the edge resolves
    of stamping a band. Two throws are the whole feather; the field is coarse
    enough that more would buy nothing.
 
-   It is a multiply on the finished cell, so a shaded green is a darker green,
-   never grey — and it touches nothing but tissue: the agar carries no
-   coverage, so nothing is ever drawn OFF the body. That is the line every
-   earlier attempt crossed: shadows drawn along the veins, at any depth or
-   offset, traced the body's skeleton and summed to a drop shadow under the
-   whole network. The shape's own shadow lives on the shape. */
+   It is a multiply on the body's own contribution to the cell — not on the
+   finished pixel — so a shaded green is a darker green, never grey, and the
+   ground underneath keeps its own light: the agar, and the hazard glow that
+   bleeds through the organism on a heat, quinine or light field. It touches
+   nothing but tissue — the agar carries no coverage, so nothing is ever
+   drawn OFF the body. That is the line every earlier attempt crossed:
+   shadows drawn along the veins, at any depth or offset, traced the body's
+   skeleton and summed to a drop shadow under the whole network. The shape's
+   own shadow lives on the shape. */
 var ISH_D     = 2;      // throw, in cells, diagonally down-light per tap
-var ISH_DEPTH = 0.30;   // full-shade depth, as a multiply on the cell
+var ISH_DEPTH = 0.30;   // full-shade depth, on the body's contribution
 /* The depth the RUN actually paints with. Usually ISH_DEPTH; applyTint trims
    it for the rare seed whose tint cannot be walked light enough for its
    fully shaded edge to keep the 3:1 body floor (see the solve). Legibility
@@ -1543,10 +1546,16 @@ var INK_L  = relLum(20, 23, 13);
    that is the player's specimen line and the number they can write down.
    Saturation is clamped to a range a lab would tolerate near a microscope,
    and lightness is walked upward until the vein tone STILL clears WCAG
-   1.4.11 against the agar at the bottom of the inner shadow — the down-light
-   rim of the body is drawn at tint times (1 - ISH_DEPTH), and it is the rim,
-   not the sheet, that has to stay distinguishable from the dish — and the
-   hot tone clears 7:1. (The unshaded sheet then clears 3:1 a fortiori.)
+   1.4.11 against the agar at the bottom of the inner shadow — it is the
+   down-light rim of the body, not the sheet, that has to stay
+   distinguishable from the dish — and the hot tone clears 7:1. (The
+   unshaded sheet then clears 3:1 a fortiori.) The tone checked is tint
+   times (1 - ISH_DEPTH), a floor slightly UNDER anything actually painted:
+   the painter shades only the body's contribution above the ground, so the
+   rim lands brighter than this on plain agar and rides the ground's own
+   light on a hazard field — measured across the seed space, a tint passing
+   this bound keeps 3:1 against every ground the dish draws, hazard fields
+   included.
    Demanding it of the shaded tone roughly doubles what the old check asked,
    and the old check was already there because the seed is allowed to be any
    colour and "almost any" is not a guarantee: without it, four in ten seeds
@@ -2707,15 +2716,11 @@ function paintField() {
           var gi = (t * GAM_SCALE) | 0;
           if (gi < 0) gi = 0; else if (gi >= GAMN) gi = GAMN - 1;
           var vcov = GAM[gi];
-          var o = vcov * 3;
-          r += LUT[o] * FIELD_GAIN; g += LUT[o + 1] * FIELD_GAIN; b += LUT[o + 2] * FIELD_GAIN;
-          if (r > 255) r = 255;
-          if (g > 255) g = 255;
-          if (b > 255) b = 255;
           /* the inner shadow (see ISH_D above): how much of the body is
              missing one and two throws down-light of this cell. The last
              few rows and columns skip it rather than clamp it — they are
              against the dish wall, where the shade would be guesswork. */
+          var f = 1;
           var sx2 = i % GW, sy2 = (i / GW) | 0;
           if (vcov > 8 && sx2 < GW - 2 * ISH_D - 1 && sy2 < GH - 2 * ISH_D - 1) {
             var j1 = i + ISH_D * GW + ISH_D;
@@ -2729,11 +2734,23 @@ function paintField() {
             var g2 = (t2 * GAM_SCALE) | 0;
             if (g2 < 0) g2 = 0; else if (g2 >= GAMN) g2 = GAMN - 1;
             var sh = vcov * (255 - 0.55 * GAM[g1] - 0.45 * GAM[g2]);
-            if (sh > 0) {
-              var f = 1 - ishDepth * sh / 65025;
-              r *= f; g *= f; b *= f;
-            }
+            if (sh > 0) f = 1 - ishDepth * sh / 65025;
           }
+          /* The shade scales the ORGANISM'S contribution and nothing under
+             it. The ground keeps its own light — agar, and the hazard glow
+             that bleeds through the body — which is what holds the shaded
+             rim's contrast against every ground the dish can show: shading
+             the whole pixel put the rim under 3:1 against a lit hazard
+             field for a quarter of seed-and-ground pairs, while shading the
+             contribution alone clears the floor on all of them, because
+             rim and ground then ride on the same base. */
+          var o = vcov * 3;
+          r += LUT[o] * FIELD_GAIN * f;
+          g += LUT[o + 1] * FIELD_GAIN * f;
+          b += LUT[o + 2] * FIELD_GAIN * f;
+          if (r > 255) r = 255;
+          if (g > 255) g = 255;
+          if (b > 255) b = 255;
         }
       }
       /* the player's cue reads as a faint warm haze in the agar */
