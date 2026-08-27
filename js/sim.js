@@ -137,15 +137,11 @@ function mixWhite(c, k) {
           Math.round(c[1] + (255 - c[1]) * k),
           Math.round(c[2] + (255 - c[2]) * k)];
 }
-/* The other end of mixWhite: the tint with the light taken off it, for the
-   shadow a raised vein drops on the sheet beside it. Toward black in a
-   straight line for the same reason mixWhite goes toward white in one — a
-   straight line to either corner of the cube holds the hue, so a shaded green
-   is a darker green and never a neutral grey. */
-function mixBlack(c, k) {
-  var m = 1 - k;
-  return [Math.round(c[0] * m), Math.round(c[1] * m), Math.round(c[2] * m)];
-}
+/* Plain Rec.709 luma on the encoded channels, for weighing one visible step
+   against another on the same ground. relLum above linearises first, which is
+   what a WCAG measurement wants; for "how far off the sheet does this look"
+   the encoded weights are the better ruler, and the two must not be mixed. */
+function luma(c) { return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]; }
 function hex2(n) { var h = (n | 0).toString(16); return h.length < 2 ? '0' + h : h; }
 function hexOf(c) { return '#' + hex2(c[0]) + hex2(c[1]) + hex2(c[2]); }
 function rgba(c, a) { return 'rgba(' + c[0] + ',' + c[1] + ',' + c[2] + ',' + a + ')'; }
@@ -2771,15 +2767,21 @@ var RIDGE_REL = 0.14;  // ...as a fraction of the cell's own trail
    band now tops out around lightness 0.68, which is still plainly the
    brightest thing on the plate and still plainly the specimen's colour.
 
-   The brightness it gives up is returned as `cast`: how much shadow the band
-   drops on the sheet beside it, as an alpha. That is the better trade because
-   a highlight needs something to be a highlight OF. The tissue is one flat
-   threshold colour, so a bright line on it was the only tonal event in the
-   picture and read as something drawn ON the plate; a crest with a shade down
-   one side reads as a tube standing up out of it, at a fraction of the
-   brightness. `cast` rises with width because that is also what makes the
-   hierarchy legible: a trunk is a raised tube and throws a real shadow, a
-   hairline barely lifts off the sheet.
+   The brightness it gives up is returned as `cast`: the depth of the shade
+   the band drops on the sheet beside it, as a multiple of the band's OWN
+   lift. That is the better trade because a highlight needs something to be a
+   highlight OF. The tissue is one flat threshold colour, so a bright line on
+   it was the only tonal event in the picture and read as something drawn ON
+   the plate; a crest with a shade down one side reads as a tube standing up
+   out of it, at a fraction of the brightness. Chaining depth to lift is what
+   keeps the two halves of one lamp: a crest that barely rises off the sheet
+   gets a shade that barely dips below it, and the trunk, which catches the
+   most light, drops the deepest. The first cut fixed the depth by hand, and
+   on the default plate the shade ran nearly three times the lift — the dark
+   rim was the loudest mark on the dish, and a rim louder than the crest it
+   hugs stops reading as that crest's shading at all and attaches itself to
+   the silhouette it follows, which is the body. The ratios below sit just
+   past one: relief, not outline.
 
    The two finest bands throw none at all, for two separate reasons that
    happen to agree. `dim` has already sunk the finest BELOW the sheet, where a
@@ -2791,9 +2793,9 @@ var RIDGE_REL = 0.14;  // ...as a fraction of the cell's own trail
 var VEIN_BANDS = [
   { max: 6,        w: 0.34, hot: 0.00, dim: 0.86, alpha: 0.90, cast: 0.00, style: '', shadow: '' },
   { max: 10,       w: 0.62, hot: 0.09, dim: 1.00, alpha: 0.97, cast: 0.00, style: '', shadow: '' },
-  { max: 16,       w: 1.05, hot: 0.18, dim: 1.00, alpha: 1,    cast: 0.24, style: '', shadow: '' },
-  { max: 26,       w: 1.75, hot: 0.28, dim: 1.00, alpha: 1,    cast: 0.32, style: '', shadow: '' },
-  { max: Infinity, w: 2.70, hot: 0.40, dim: 1.00, alpha: 1,    cast: 0.40, style: '', shadow: '' }
+  { max: 16,       w: 1.05, hot: 0.18, dim: 1.00, alpha: 1,    cast: 0.90, style: '', shadow: '' },
+  { max: 26,       w: 1.75, hot: 0.28, dim: 1.00, alpha: 1,    cast: 1.05, style: '', shadow: '' },
+  { max: Infinity, w: 2.70, hot: 0.40, dim: 1.00, alpha: 1,    cast: 1.20, style: '', shadow: '' }
 ];
 /* The lamp: up and to the left of the bench, the way a plate is lit for a
    photograph. A unit vector in GRID cells, pointing the way shadows fall, so
@@ -2807,18 +2809,39 @@ var LIGHT_X = 0.7071, LIGHT_Y = 0.7071;
 var CAST_OFF  = 0.46;
 var CAST_GROW = 1.22;
 function tintVeins(vein) {
-  /* One shade for every band, not one per band: a shadow is the absence of
-     the lamp on the TISSUE, and the tissue is a single flat colour whatever
-     vein happens to sit on it. Depth is carried by `cast` and by how far each
-     band throws, which is where it belongs. */
-  var sh = mixBlack(vein, 0.60);
+  /* band.shadow is a MULTIPLIER, not a coat of paint: the grey that, stroked
+     in 'multiply', dims the sheet by cast times the band's own lift. Two
+     things fall out of that verb. It is the physically right one — a shadow
+     is the same pigment under less light — so the crescent keeps the
+     tissue's hue exactly, on the sheet and on anything else it grazes. And
+     the agar is immune: an alpha-blended shade LANDS on the near-black dish
+     as a lighter olive rim, and the first cut edged every filament's shadow
+     flank with one brighter against the dish (+27 luma) than the crest was
+     against the sheet (+20) — the body as a sticker casting a drop shadow
+     on the glass — where multiplying near-black moves it nowhere the eye
+     can follow.
+
+     Balanced per run as well as per band: a dark specimen has a big lift
+     and little sheet luma to spend on a shade, a light one the reverse, and
+     no fixed depth suits both. The cap is the dark-specimen case, where a
+     lift larger than the sheet's own luma would otherwise ask for a shade
+     the sheet cannot hold. */
+  var tl = luma(vein);
   for (var i = 0; i < VEIN_BANDS.length; i++) {
     var band = VEIN_BANDS[i];
     var c = mixWhite(vein, band.hot);
     band.style = 'rgba(' + Math.round(c[0] * band.dim) + ','
                          + Math.round(c[1] * band.dim) + ','
                          + Math.round(c[2] * band.dim) + ',' + band.alpha + ')';
-    band.shadow = band.cast ? rgba(sh, band.cast.toFixed(3)) : '';
+    band.shadow = '';
+    if (band.cast) {
+      var d = band.cast * (luma(c) * band.dim - tl) / tl;
+      if (d > 0.35) d = 0.35;
+      if (d > 0.005) {
+        var g = Math.round(255 * (1 - d));
+        band.shadow = 'rgb(' + g + ',' + g + ',' + g + ')';
+      }
+    }
   }
   TIP_STYLE = rgba(mixWhite(vein, 0.62), '0.34');
 }
@@ -3050,10 +3073,10 @@ function strokeVeins(sx, sy) {
      as it is drawn. Two passes cost one extra loop over five cached paths and
      buy the rule that makes the network read as one surface: nothing standing
      ABOVE the sheet can have a shadow laid on top of it. Interleaved, a
-     narrower band drawn later dropped its shade across the crest of the trunk
-     it joins, which on the default plate took about 2.6% of the second-widest
-     band's highlight pixels with it — small, but it is exactly the junctions
-     that lose them, and the junctions are where the hierarchy is read. */
+     narrower band drawn later multiplies its shade into the crest of the
+     trunk it joins — and it is exactly the junctions that lose, where the
+     hierarchy is read. */
+  ctx.globalCompositeOperation = 'multiply';
   for (b = VEIN_BANDS.length - 1; b >= 0; b--) {
     band = VEIN_BANDS[b];
     if (!veinPath[b] || !band.shadow) continue;
@@ -3068,6 +3091,7 @@ function strokeVeins(sx, sy) {
     ctx.stroke(veinPath[b]);
     ctx.restore();
   }
+  ctx.globalCompositeOperation = 'source-over';
   /* widest first, so the hairlines land on top of the trunks they join */
   for (b = VEIN_BANDS.length - 1; b >= 0; b--) {
     if (!veinPath[b]) continue;
