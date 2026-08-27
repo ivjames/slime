@@ -3753,6 +3753,14 @@ function feedTrace(s) {
   }
 }
 
+/* true if there was an open key list to close, so Escape can stop there. */
+function closeKeys() {
+  var k = $('keypop');
+  if (!k || !k.open) return false;
+  k.open = false;
+  return true;
+}
+
 function setReplayUI(on) {
   document.body.classList.toggle('replay', !!on);
   var x = $('s-exitrp');
@@ -4293,8 +4301,10 @@ function bindInput() {
   document.addEventListener('keydown', function (ev) {
     if (!$('scr-sim').classList.contains('on')) return;
     /* A focused button already answers Space and Enter itself; handling them
-       here as well would fire the control twice. */
-    var onBtn = !!(ev.target && ev.target.tagName === 'BUTTON');
+       here as well would fire the control twice. A <summary> — the key list's
+       disclosure — answers both the same way, so it counts as one. */
+    var t = ev.target, tag = t && t.tagName;
+    var onBtn = tag === 'BUTTON' || tag === 'SUMMARY';
 
     if (ev.code === 'Enter' || ev.code === 'NumpadEnter') {
       /* the primary action of the verdict panel: on with the schedule */
@@ -4313,10 +4323,20 @@ function bindInput() {
       if (S.idx >= 0) startRun(S.idx);
     } else if (ev.code === 'Escape') {
       ev.preventDefault();
+      /* Escape reads as "close the thing that is open", innermost first: the
+         key list, then the replay, and only then the dish itself. */
+      if (closeKeys()) return;
       if (REPLAY.on) exitReplay();
       else goTitle();
     }
   });
+
+  /* The key list is a panel floating over the bench, so anything else the
+     hand does — including the first cue laid on the dish — puts it away. */
+  document.addEventListener('pointerdown', function (ev) {
+    var k = $('keypop');
+    if (k && k.open && !k.contains(ev.target)) k.open = false;
+  }, true);
 
   window.addEventListener('resize', function () {
     if (!$('scr-sim').classList.contains('on')) return;
