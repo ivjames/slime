@@ -372,8 +372,112 @@ var MAX_ENGULF_RATE = 1 / 200; // a node takes >= 3.3s to consume however big th
    controls, where at 0.13 it is nearer 70s against 105s. The two dishes that
    came out genuinely too quick are corrected by their own `engulf` multiplier
    instead, which is the knob meant for per-dish pacing. */
-var ENGULF_SOFT = 0.13;
+var ENGULF_SOFT = 0.42;
 var ENGULF_DECAY = 0.0022; // an abandoned node re-forms: commit, or lose the ground
+
+/* ---- the fan on a flake ----
+   A plasmodium that reaches food does not file past it. It stops advancing
+   there and spreads over the flake as a sheet: a fan, then a pad of cytoplasm
+   covering as much of the surface as it can reach, because absorption happens
+   across the contact area and nowhere else. The filament model had no term
+   for that — a tube crossed a flake, kept its heading, and the meal was eaten
+   by whatever fraction of the front happened to be walking through it.
+   Measured on EXP-01 at the step the last flake went down, tissue covered
+   between a fifth and a half of each flake's own disc, and the picture was
+   four veins running through four circles.
+
+   Each constant here does one thing. FEED_R is how far past the rim the pad
+   may spread, since a real one overhangs the food it sits on. FEED_OUT and
+   FEED_HOLD are the two halves of the shape — outward across the flake, then
+   held inside the fan — and the reasoning for needing both is at the site
+   where they are applied. FEED_LAY is what a feeding agent lays while it is
+   there, charged per STEP rather than per cell travelled for the same reason
+   a tip's deposit is: this is cytoplasm ARRIVING somewhere, not cytoplasm
+   being dragged through. FEED_SPEED is the floor under its speed, because the
+   pad has to be able to spread before there is any trail under it to move on.
+
+   FEED_FILL is the release valve, and the pad is a trap without it. Retention
+   with no ceiling means the first flake found keeps every agent that touches
+   it for as long as it has food, and the rest of the dish is never explored.
+   So the hold is scaled by how much room is left in the pad: an uncovered
+   flake pulls its arrivals in hard, a covered one lets them wander off again.
+
+   It is a share of the flake's own area rather than a count of agents per
+   cell, and the difference is the whole value of the constant. Written as
+   agents-per-cell it reads like a packing limit and is not one — the
+   exclusion is on cells, but a pad's agents are moving, so a saturated pad
+   never approaches one agent per cell. Measured across a run, the peak load
+   on a flake's own disc is 0.19 to 0.34 of its area on EXP-01's four big
+   flakes and 0.55 to 0.76 on EXP-03's nine small ones. The first value here
+   was 1.10, which is above every one of those: the valve never opened, it
+   only sagged to two thirds of the hold on the dish where it mattered least.
+   At 0.55 it opens fully on the crowded dishes — the ones with enough flakes
+   for hoarding to cost the culture anything — and eases the hold on the
+   sparse ones, where there is nothing to hoard against. */
+var FEED_R     = 1.35; // fan radius, as a multiple of the flake's own
+var FEED_OUT   = 0.34; // share of the way toward the rim taken per step, at the centre
+var FEED_HOLD  = 0.55; // ...and back toward the centre, at the edge of the fan
+var FEED_FILL  = 0.55; // share of the flake's own area, in agents, that opens the valve
+var FEED_LAY   = 1.30; // trail a feeding agent lays per step (multiple of DEPOSIT)
+var FEED_SPEED = 0.30; // floor under a feeding agent's speed, so the pad can fill
+
+/* ---- lobes at the corners ----
+   The other structure the filament rule would not draw. A physarum network is
+   not tubes meeting at mathematical points: where three tubes meet, and where
+   one turns a hard corner, there is a visible swelling — a lobe of cytoplasm
+   parked at the junction, which is where the streaming reverses and where the
+   nuclei pile up between runs. They are the waypoints of the network, and a
+   drawing without them reads as a diagram of a network rather than a
+   photograph of one.
+
+   They are grown, not drawn. An agent inside the body occasionally asks
+   whether the cell it is standing on is a junction, by reading a ring of
+   samples at KNOT_R and counting how many contiguous ARMS of tube leave it:
+   three or more is a fork, exactly two closer together than KNOT_BEND is a
+   corner, and two opposite each other is a tube passing through, which is not
+   a junction at all. What a passing test does with that answer is the subject
+   of the second block below.
+
+   Two things keep this from eating the dish. The arm test is RELATIVE to the
+   trail under the agent, so the inside of a saturated sheet — where every
+   sample reads as high as the centre — comes back as one continuous arm and
+   is rejected. And a lobe grown past the ring radius covers its own sampling
+   ring, which is the same rejection: a swelling stops at about KNOT_R across,
+   with no size cap written anywhere. */
+var KNOT_P      = 0.06; // chance per step an interior agent tests its cell
+var KNOT_N      = 12;   // samples around the ring
+var KNOT_R      = 5.5;  // radius of the ring the test reads, cells
+var KNOT_MIN    = 26.0; // trail below which this is not tube and cannot be a junction
+var KNOT_ARM    = 0.55; // ring trail counting as an arm, as a fraction of the centre's
+var KNOT_BEND   = 2.40; // arms closer than this (rad) are a corner, not a through-tube
+var KNOT_SPREAD = 3.40; // radius of the lobe a passing test marks out, cells
+/* What a mark is worth, and how a lobe actually gets built.
+
+   The first version of this laid the lobe's trail directly, inside the test:
+   a qualifying agent dumped a disc of trail and that was the swelling. It
+   does not work, and the arithmetic says why before the picture does. A given
+   junction passes the test about once every fifty steps — the test is cheap
+   because it is rare, and it is rare because most interior cells are inside a
+   sheet or along a tube passing through — while a lobe held at four fifths of
+   the trail ceiling loses more than a unit per cell per step to decay alone.
+   Deposits fifty steps apart against a loss taken every step is not a
+   swelling, it is a twitch, and the field showed exactly that: nothing
+   anywhere in the dish above the level of an ordinary trunk.
+
+   So the test does not build the lobe. It MARKS one — writes a soft disc into
+   a field that says "there is a junction here" and decays slowly — and the
+   lobe is then built by the traffic that was going through the junction
+   anyway, which lays a heavier deposit for as long as the mark stands. That
+   is both the cheaper mechanism and the truer one: cytoplasm piles up at a
+   junction because that is where the streaming turns over, not because
+   something arrived and put it there.
+
+   It also closes the loop in the right direction. A lobe that grows past the
+   sampling ring reads as a sheet and stops being marked; the mark decays, the
+   lobe thins, and the ring can see arms leaving it again. Nothing in this
+   file caps the size of a lobe, and nothing needs to. */
+var KNOT_HOLD = 0.9975; // per-step decay of the junction mark
+var KNOT_GAIN = 2.60;   // extra deposit a marked cell takes, as a multiple
 
 /* ------------------------------------------------------------
    2. the five experiments
@@ -1424,7 +1528,19 @@ var retF  = new Float32Array(NCELL);
 var wallM = new Uint8Array(NCELL);
 var hazM  = new Uint8Array(NCELL);     // 0 none, 1 heat, 2 quinine, 3 light
 var slimeF = new Float32Array(NCELL);  // extracellular slime, laid and never lifted
+/* Where the network has a junction, and how strongly. Written by the ring
+   test, decayed every step, read by the deposit rule and by the renderer. It
+   is not sensed: what the organism senses is the tube, and the lobe is
+   already part of that. */
+var knotF = new Float32Array(NCELL);
 var nodeAt = new Int16Array(NCELL);    // cell -> node index, -1 for none
+/* And the same map at the fan's radius: which flake an agent standing here is
+   feeding on, which is a wider disc than the flake itself because a pad
+   overhangs its meal. Kept separate from nodeAt rather than widening it,
+   because nodeAt is what counts contact for engulfment and that has to stay
+   the flake's own area — a wider one would credit the culture for cytoplasm
+   sitting beside the food rather than on it. */
+var feedAt = new Int16Array(NCELL);
 /* One agent per cell. Without it the whole population collapses into whichever
    vein is currently strongest and the network is a single rope; with it a
    saturated tube spills sideways, which is exactly how the mesh gets its holes
@@ -1790,8 +1906,9 @@ function buildDish(e) {
   fieldDirty = true;
   dirtyFrames = REBUILD_EVERY;
   trail.fill(0); tmpF.fill(0); foodF.fill(0);
-  cueF.fill(0); retF.fill(0); slimeF.fill(0);
+  cueF.fill(0); retF.fill(0); slimeF.fill(0); knotF.fill(0);
   nodeAt.fill(-1);
+  feedAt.fill(-1);
 
   var i, y, x;
 
@@ -1808,13 +1925,24 @@ function buildDish(e) {
 
   for (var ni = 0; ni < e.nodes.length; ni++) {
     var nd = e.nodes[ni];
-    var y0 = clamp((nd.y - nd.r) | 0, 0, GH), y1 = clamp((nd.y + nd.r + 1) | 0, 0, GH);
-    var x0 = clamp((nd.x - nd.r) | 0, 0, GW), x1 = clamp((nd.x + nd.r + 1) | 0, 0, GW);
+    var fr = nd.r * FEED_R, fr2 = fr * fr, r2 = nd.r * nd.r;
+    var y0 = clamp((nd.y - fr) | 0, 0, GH), y1 = clamp((nd.y + fr + 1) | 0, 0, GH);
+    var x0 = clamp((nd.x - fr) | 0, 0, GW), x1 = clamp((nd.x + fr + 1) | 0, 0, GW);
     for (y = y0; y < y1; y++) {
       var dy = y - nd.y, row = y * GW;
       for (x = x0; x < x1; x++) {
-        var dx = x - nd.x;
-        if (dx * dx + dy * dy <= nd.r * nd.r) nodeAt[row + x] = ni;
+        var dx = x - nd.x, d2 = dx * dx + dy * dy;
+        if (d2 <= r2) nodeAt[row + x] = ni;
+        /* Nearest flake wins an overlap, so two flakes close enough for their
+           pads to meet do not hand the further one an agent to hold. */
+        if (d2 <= fr2) {
+          var was = feedAt[row + x];
+          if (was < 0) feedAt[row + x] = ni;
+          else {
+            var ox = x - e.nodes[was].x, oy = y - e.nodes[was].y;
+            if (d2 < ox * ox + oy * oy) feedAt[row + x] = ni;
+          }
+        }
       }
     }
   }
@@ -1840,7 +1968,12 @@ function applyEvent(e, ev) {
       if (wallM[ci]) {
         if (occ[ci]) occ[ci]--;
         nAgents--;
-        ax[k] = ax[nAgents]; ay[k] = ay[nAgents]; ah[k] = ah[nAgents];
+        /* atip travels with the rest of the agent. Left behind, the agent
+           moved down into this slot inherited the flag of the one the wall
+           just killed — a stray tip in the middle of the body for the fork
+           pool to spend growth on, and a whisker drawn where there is no
+           front, until the next step's frontier test corrected it. */
+        ax[k] = ax[nAgents]; ay[k] = ay[nAgents]; ah[k] = ah[nAgents]; atip[k] = atip[nAgents];
         continue;
       }
       k++;
@@ -2165,9 +2298,164 @@ function diffuseTrail() {
 }
 
 /* ------------------------------------------------------------
+   7b. junction lobes
+   ------------------------------------------------------------ */
+/* The marks fade far slower than a player field and are not blurred at all: a
+   lobe is a place, and a place does not spread. A crossroads the network has
+   abandoned loses its lobe over a few seconds, which is about how long the
+   tubes into it take to go.
+
+   Swept every KNOT_EVERY steps rather than folded into the field loop that
+   runs every step. It looks like it belongs there — it is one multiply per
+   cell, next to the two the player fields already take — and putting it there
+   cost a sixth of diffuseTrail, which is a seventh of the whole simulation:
+   109,200 cells is a lot of cells to touch sixty times a second for a field
+   whose half-life is measured in seconds and which is empty nearly
+   everywhere. Eight steps of decay applied once every eight steps is the same
+   curve sampled more coarsely, on a quantity nothing reads for an edge. */
+var KNOT_EVERY = 8;
+var KNOT_FADE = Math.pow(KNOT_HOLD, KNOT_EVERY);
+function decayKnots() {
+  for (var i = 0; i < NCELL; i++) {
+    var kf = knotF[i];
+    if (kf <= 0) continue;
+    kf = wallM[i] ? 0 : kf * KNOT_FADE;
+    knotF[i] = kf < 0.004 ? 0 : kf;
+  }
+}
+
+/* The ring the junction test reads: KNOT_N unit directions at KNOT_R, as
+   cell offsets and as the vectors they point along. Built once, because GW
+   does not change.
+
+   Twelve samples rather than eight, and the count is set by the radius
+   rather than by taste. A tube is about three cells wide, so two samples more
+   than three cells apart around the ring can straddle one and report a gap
+   where an arm is — at a radius of five and a half cells, eight samples sit
+   four and a quarter apart and miss tubes; twelve sit under three apart and
+   do not. The radius itself is what sets how big a lobe can get, since a
+   swelling that reaches the ring stops reading as a junction. */
+var KNOT_OFF = new Int32Array(KNOT_N);
+var KNOT_DX = new Float32Array(KNOT_N);
+var KNOT_DY = new Float32Array(KNOT_N);
+(function buildKnotRing() {
+  for (var d = 0; d < KNOT_N; d++) {
+    var a = d * Math.PI * 2 / KNOT_N;
+    KNOT_DX[d] = Math.cos(a); KNOT_DY[d] = Math.sin(a);
+    KNOT_OFF[d] = Math.round(Math.sin(a) * KNOT_R) * GW + Math.round(Math.cos(a) * KNOT_R);
+  }
+})();
+
+/* Mark a disc of the junction field, rather than adding to it. A junction
+   sits still, so an agent that passes the test again a hundred steps later is
+   re-stating the same fact rather than reporting a second one, and adding
+   would let a busy crossroads climb without limit while a quiet one never
+   arrives. Taking the maximum states it once: the mark is how strongly this
+   is a junction, and it is the decay, not the arithmetic here, that lets one
+   stop being one.
+
+   The bounds are taken with a ceiling and a floor rather than left as the
+   floats they are computed from. A loop counter that starts at a fraction
+   indexes a typed array at a fraction, and a typed array silently DISCARDS a
+   write to a fractional index — the disc drew nothing at all, at any
+   strength, with no error anywhere to say so. */
+function markDisc(cx, cy, amt, rad) {
+  var x0 = Math.ceil(cx - rad), x1 = Math.floor(cx + rad);
+  var y0 = Math.ceil(cy - rad), y1 = Math.floor(cy + rad);
+  if (x0 < 1) x0 = 1;
+  if (y0 < 1) y0 = 1;
+  if (x1 > GW - 2) x1 = GW - 2;
+  if (y1 > GH - 2) y1 = GH - 2;
+  var inv = 1 / rad;
+  for (var y = y0; y <= y1; y++) {
+    var dy = y - cy, row = y * GW;
+    for (var x = x0; x <= x1; x++) {
+      var dx = x - cx, d2 = dx * dx + dy * dy;
+      if (d2 > rad * rad) continue;
+      var i = row + x;
+      if (wallM[i]) continue;
+      /* smoothstep in from the rim, so a lobe has a shoulder rather than a
+         cliff and two overlapping marks read as one mass */
+      var u = 1 - Math.sqrt(d2) * inv;
+      var v = amt * u * u * (3 - 2 * u);
+      if (v > knotF[i]) knotF[i] = v;
+    }
+  }
+}
+
+/* Is this cell a junction or a corner, and if so, mark it. Counts contiguous
+   ARMS around the ring: a run of ring samples carrying tube, separated from
+   the next run by samples that do not. Three runs is a fork, two close
+   together is a corner, two opposite is a tube running through, one run is
+   the inside of a sheet and none is bare agar — and the last two are exactly
+   the cases that must not grow a lobe. */
+function markKnot(ci) {
+  var v = trail[ci];
+  if (v < KNOT_MIN) return;
+  var cx = ci % GW, cy = (ci / GW) | 0;
+  var edge = (KNOT_R | 0) + 2;
+  if (cx < edge || cy < edge || cx >= GW - edge || cy >= GH - edge) return;
+
+  var arm = KNOT_ARM * v;
+  var mask = 0, n = 0, d;
+  for (d = 0; d < KNOT_N; d++) {
+    var j = ci + KNOT_OFF[d];
+    if (!wallM[j] && trail[j] >= arm) { mask |= 1 << d; n++; }
+  }
+  if (n === 0 || n === KNOT_N) return;
+
+  /* Runs around the ring, and the direction each one points: the sum of the
+     unit vectors of its members, which is the arm's own bearing however many
+     samples wide it happens to be.
+
+     Traversed from a GAP rather than from sample zero, and it has to be. An
+     arm that straddles the wrap — samples eleven and zero, with ten clear —
+     is one run, but walked from zero its head arrives before any run has been
+     opened and lands in no sum at all, so the arm's bearing is computed from
+     whatever tail happens to sit before the wrap. The COUNT survives that (a
+     run is tallied where it starts, and a wrapped run starts at its tail), so
+     the bug is invisible in whether a junction is found and shows up only in
+     where its arms are pointing: the same corner, rotated, scores a different
+     separation and can fall the other side of KNOT_BEND. Since n is neither 0
+     nor KNOT_N there is always a clear sample to start after, and starting
+     there makes every run contiguous. */
+  var gap = 0;
+  while (mask & (1 << gap)) gap++;
+  var arms = 0, a0x = 0, a0y = 0, a1x = 0, a1y = 0;
+  for (var t = 1; t <= KNOT_N; t++) {
+    d = (gap + t) % KNOT_N;
+    if (!(mask & (1 << d))) continue;
+    var prev = (mask & (1 << ((d + KNOT_N - 1) % KNOT_N))) !== 0;
+    if (!prev) arms++;                       /* a run starts here */
+    if (arms === 1) { a0x += KNOT_DX[d]; a0y += KNOT_DY[d]; }
+    else if (arms === 2) { a1x += KNOT_DX[d]; a1y += KNOT_DY[d]; }
+  }
+  if (arms < 2) return;
+
+  var w;
+  if (arms >= 3) {
+    /* a fork, and the more ways out of it the more cytoplasm parks there */
+    w = 0.70 + 0.15 * (arms - 3);
+    if (w > 1) w = 1;
+  } else {
+    /* two arms: a corner only if they leave at an angle. The weight falls to
+       nothing as the two straighten into a single tube passing through. */
+    var m0 = Math.sqrt(a0x * a0x + a0y * a0y), m1 = Math.sqrt(a1x * a1x + a1y * a1y);
+    if (m0 < 1e-4 || m1 < 1e-4) return;
+    var cs = (a0x * a1x + a0y * a1y) / (m0 * m1);
+    if (cs < -1) cs = -1; else if (cs > 1) cs = 1;
+    var sep = Math.acos(cs);
+    if (sep > KNOT_BEND) return;
+    w = (KNOT_BEND - sep) / KNOT_BEND;
+  }
+  markDisc(cx, cy, w, KNOT_SPREAD);
+}
+
+/* ------------------------------------------------------------
    8. one simulation step
    ------------------------------------------------------------ */
 var nodeHits = new Int32Array(16);
+var nodeLoad = new Int32Array(16);   // ...and the same counts from the step before
 
 function step() {
   var e = S.exp;
@@ -2183,9 +2471,15 @@ function step() {
   }
 
   diffuseTrail();
+  if (stepsRun % KNOT_EVERY === 0) decayKnots();
 
   var i, k;
-  for (i = 0; i < nodeHits.length; i++) nodeHits[i] = 0;
+  /* Last step's contact counts, kept before this step's are zeroed: the fan
+     on a flake needs to know how full it already is, and the only honest
+     measure of that is how many agents were standing on the flake when it was
+     last counted. Reading the counter this step is building instead would
+     make an agent's retention depend on where it sits in the array. */
+  for (i = 0; i < nodeHits.length; i++) { nodeLoad[i] = nodeHits[i]; nodeHits[i] = 0; }
 
   /* --- anticipation (EXP-05) ---
      After two cycles the interval has been felt often enough that the culture
@@ -2294,6 +2588,18 @@ function step() {
       }
       if (feed < TIP_MIN) tip = false;  /* come adrift: cytoplasm, not a front */
     }
+    /* On food, and there is still food there. A front that has arrived stops
+       being a front: it has found what it was looking for, and what it does
+       next is spread over it. Clearing the tip flag here rather than merely
+       slowing the agent is what stops a filament walking out the far side of
+       a flake with its long sensors and its heavy tube deposit still on — and
+       it takes the agent out of the fork pool at the same time, so the growth
+       budget is not spent launching new branches out of the middle of a meal.
+       The moment the flake is spent the whole regime lapses and the agents
+       standing on it are ordinary cytoplasm again. */
+    var fi = feedAt[here];
+    var feeding = fi >= 0 && !S.nodeDone[fi];
+    if (feeding) tip = false;
     atip[k] = tip ? 1 : 0;
     var sd = tip ? TIP_SENS : SENS_D;
 
@@ -2321,6 +2627,47 @@ function step() {
       h += TURN;
     }
     h += (rnd() - 0.5) * (tip ? TIP_JIT : JITTER);
+
+    /* Spread to the rim, then stay inside it — the two halves of what a pad
+       does, and it needs both. Retention alone was tried first and builds the
+       wrong shape: agents arrive along one tube, are turned back toward the
+       centre as soon as they pass it, and the pad grows as a sausage lying
+       along the direction the front came in from, covering a third of the
+       flake with the meal already half eaten. A pad spreads ACROSS its food.
+       So the inner half of the flake pushes outward, hardest at the centre,
+       and only past the flake's own rim does anything pull back — arrivals
+       are carried over the surface rather than piling up where they landed,
+       and what they run into at the far side is the hold.
+
+       The hold is scaled by the room left in the pad, which is the release
+       valve: at the flake's own area of agents there is nothing holding
+       anything and new arrivals pass straight through, so a covered flake
+       stops taking cytoplasm the rest of the dish could be using. */
+    if (feeding) {
+      var fnd = e.nodes[fi];
+      var fdx = x - fnd.x, fdy = y - fnd.y;
+      var fdd = Math.sqrt(fdx * fdx + fdy * fdy);
+      if (fdd > 0.001) {
+        var fturn = 0, fwant = 0;
+        if (fdd < fnd.r) {
+          fturn = FEED_OUT * (1 - fdd / fnd.r);
+          fwant = Math.atan2(fdy, fdx);            /* outward */
+        } else {
+          var frim = fnd.r * FEED_R;
+          var fout = (fdd - fnd.r) / (frim - fnd.r);
+          if (fout > 1) fout = 1;
+          var froom = 1 - nodeLoad[fi] / (FEED_FILL * Math.PI * fnd.r * fnd.r);
+          if (froom > 0) fturn = FEED_HOLD * fout * froom;
+          fwant = Math.atan2(-fdy, -fdx);          /* back toward the middle */
+        }
+        if (fturn > 0) {
+          var fda = fwant - h;
+          while (fda > Math.PI) fda -= Math.PI * 2;
+          while (fda < -Math.PI) fda += Math.PI * 2;
+          h += fda * fturn;
+        }
+      }
+    }
 
     var oldIdx = here;
     /* Speed is how much cytoplasm is behind the tip: established trail, or the
@@ -2354,6 +2701,12 @@ function step() {
       spd = stepSpeed * sup;
     } else {
       spd = stepSpeed * (lt >= 1 ? 1 : VOID_SPEED + (1 - VOID_SPEED) * lt);
+      /* A pad has to be able to fill before there is any trail under it to
+         buy speed with. Without the floor the first arrivals on a fresh flake
+         are on bare agar at VOID_SPEED, creep a twentieth of a cell a step,
+         and the fan takes longer to spread across a flake than the flake
+         takes to be eaten. */
+      if (feeding) { var fs2 = stepSpeed * FEED_SPEED; if (spd < fs2) spd = fs2; }
     }
     /* round to Float32 before anything reads a cell from it: ax/ay are
        Float32Arrays, so an unrounded double a hair under an integer can test
@@ -2385,12 +2738,38 @@ function step() {
       ax[k] = nx; ay[k] = ny; ah[k] = h;
       if (idx !== oldIdx) { occ[oldIdx]--; occ[idx]++; }
       cell = idx;
-      var tv = trail[cell];
-      if (tv < TRAIL_MAX) {
-        var dep = stepDeposit * (tip ? TIP_LAY : spd / SPEED);
-        trail[cell] = tv + dep > TRAIL_MAX ? TRAIL_MAX : tv + dep;
-      }
     }
+    /* Deposit. Movement-only for ordinary cytoplasm, for the reason set out
+       above; per-step for a tip, because a tip is a bulge being filled rather
+       than a particle being dragged; and per-step for a feeding agent, for
+       exactly that reason again. A pad on a flake is dense enough that most
+       of its agents are blocked by their neighbours on any given step, and
+       charging only the ones that found a free cell builds the pad at a
+       fraction of the rate the front is actually delivering cytoplasm at.
+       Safe against the grey wash that per-step deposit otherwise causes,
+       because it is confined to the footprint of a flake that still has food
+       in it — an area the dish itself defines and that stops existing the
+       moment the flake is engulfed. */
+    var kn = knotF[cell];
+    var dep = 0;
+    if (feeding) dep = stepDeposit * FEED_LAY;
+    else if (!blocked) dep = stepDeposit * (tip ? TIP_LAY : spd / SPEED);
+    /* Traffic through a marked junction leaves more of itself there than
+       traffic through a tube does, and leaves it whether or not the agent
+       found a free cell to step into: an agent stalled in a crossroads is
+       precisely the cytoplasm a crossroads accumulates. Halved when it is
+       stalled all the same, so a jam is worth less than a flow. */
+    if (kn > 0) dep += stepDeposit * KNOT_GAIN * kn * (blocked ? 0.5 : 1);
+    if (dep > 0) {
+      var tv = trail[cell];
+      if (tv < TRAIL_MAX) trail[cell] = tv + dep > TRAIL_MAX ? TRAIL_MAX : tv + dep;
+    }
+
+    /* And the lobes: an interior agent, now and then, asks whether it is
+       standing at a junction. Only the interior — a tip has no network behind
+       it to be a junction of, and a feeding agent is inside a pad, which is
+       already the thing a lobe is trying to be. */
+    if (!tip && !feeding && rnd() < KNOT_P) markKnot(cell);
 
     var ni = nodeAt[cell];
     if (ni >= 0) nodeHits[ni]++;
@@ -2955,6 +3334,47 @@ var VEIN_BANDS = [
   { max: 26,       w: 1.75, hot: 0.28, dim: 1.00, alpha: 1 },
   { max: Infinity, w: 2.70, hot: 0.40, dim: 1.00, alpha: 1 }
 ];
+/* The lobe layer: the swellings, drawn as swellings.
+
+   The line layer above draws the network where the network is a LINE, and
+   correctly draws nothing where it is not: the ridge test finds no ridge on a
+   plateau, so a pad of cytoplasm sitting on a flake and a lobe parked at a
+   junction both came through as bare field — flat tissue colour, no crest, no
+   hierarchy, indistinguishable from a wide smear of body. The organism's two
+   most characteristic masses were the two things the renderer had no pen for.
+
+   This is that pen, and it asks the simulation where the masses are rather
+   than trying to infer them from the field. The first attempt did infer them
+   — any cell whose blurred trail was high and had stayed high under a wider
+   blur — and it drew the wrong picture for a reason worth keeping: the
+   densest tissue in a dish is not a lobe at all, it is the inoculation drop
+   and the packed sheet around it, so the layer painted a single pale mass
+   across the middle of the plate and lost the lobes it was written for inside
+   it. The simulation knows exactly which cells are junction and which are
+   meal. Asking it is both cheaper and right.
+
+   Like the bands above it, this is a HIGHLIGHT and nothing else. A first
+   version filled an offset dark copy under each mass, which is the same
+   mistake the vein shadows were: a swelling drawn with its own cast shadow
+   is a sticker on the plate, and the shading that makes it read as raised is
+   the field's inner shadow (section 9, ISH_D), which already covers it —
+   a lobe is body, so the shape's own shadow shades it along with everything
+   else the mold is made of.
+
+   Drawn as a union of overlapping discs on a two-cell lattice rather than as
+   a fitted outline: the masses are not circles, and a union of discs takes
+   whatever shape the field has while a fitted circle imposes one. */
+var LOBE_MARK = 0.30;  // junction mark at which a lobe is drawn
+var LOBE_PAD  = 24;    // ...and the blurred trail a pad needs to be drawn at all
+var LOBE_DOT  = 1.9;   // radius of each disc in the union, cells
+/* One slot per cell of the two-cell lattice, so the list cannot overflow and
+   there is no cap to test against inside the loop that fills it. */
+var LOBE_CAP  = ((GW >> 1) + 1) * ((GH >> 1) + 1);
+var lseg = new Float32Array(LOBE_CAP * 2);
+var lsegN = 0;
+var lobePath = null;
+var LOBE_STYLE = '';
+
 function tintVeins(vein) {
   for (var i = 0; i < VEIN_BANDS.length; i++) {
     var band = VEIN_BANDS[i];
@@ -2964,6 +3384,11 @@ function tintVeins(vein) {
                          + Math.round(c[2] * band.dim) + ',' + band.alpha + ')';
   }
   TIP_STYLE = rgba(mixWhite(vein, 0.62), '0.34');
+  /* A mass catches the lamp about as hard as the second-widest band does: it
+     is the same tissue standing at about the same height, and taking it any
+     brighter walks a pad the size of a flake toward white, which is the one
+     tone on this plate that never means tissue. */
+  LOBE_STYLE = rgba(mixWhite(vein, 0.24), '1');
 }
 var VEIN_CAP = 200000;                 /* floats held per band per rebuild */
 var vseg = [], vsegN = [], veinPath = [];
@@ -3051,6 +3476,7 @@ var TIP_W = 0.17;
 function buildVeins() {
   var b, i, x, y;
   for (b = 0; b < VEIN_BANDS.length; b++) vsegN[b] = 0;
+  lsegN = 0;
 
   /* --- pass one: which cells are on a ridge, and which way it runs --- */
   rdir.fill(255);
@@ -3069,6 +3495,33 @@ function buildVeins() {
         if (kk > bestK && kk > RIDGE_REL * v) { bestK = kk; bestD = d; }
       }
       if (bestD >= 0) rdir[i] = bestD;
+    }
+  }
+
+  /* --- pass 1b: where the masses are --- */
+  /* Every other cell in each direction, so a pad the size of a flake costs a
+     few hundred discs rather than a few thousand; the discs are wider than
+     the lattice they sit on, so the union is still solid.
+
+     A mass is drawn only where there is tissue to draw it out of: a junction
+     mark outlives by a few seconds the tubes that made it, and a flake
+     nothing has reached yet is not a pad. The trail is the whole gate on a
+     pad, and deliberately — whether the flake has been ENGULFED says nothing
+     about whether the cytoplasm is still sitting on it. Gating on that was
+     the first version, and it took the pads off the plate at exactly the
+     wrong moments: the instant a flake went down, and, because every flake is
+     down by then, across the whole verdict screen. Feeding stops at
+     engulfment and the pad thins over the next couple of seconds; the drawing
+     follows it down instead of switching it off. */
+  for (y = 2; y < GH - 2; y += 2) {
+    var rowL = y * GW;
+    for (x = 2; x < GW - 2; x += 2) {
+      i = rowL + x;
+      var lv = shpA[i];
+      if (lv < BODY_T) continue;
+      var mass = knotF[i] > LOBE_MARK || (lv > LOBE_PAD && feedAt[i] >= 0);
+      if (!mass) continue;
+      lseg[lsegN * 2] = x + 0.5; lseg[lsegN * 2 + 1] = y + 0.5; lsegN++;
     }
   }
 
@@ -3171,6 +3624,18 @@ function buildVeins() {
     veinPath[b] = pth;
   }
 
+  /* --- the masses: one disc per marked cell, baked as one path --- */
+  if (lsegN) {
+    var lp = new Path2D();
+    for (i = 0; i < lsegN; i++) {
+      lp.moveTo(lseg[i * 2] + LOBE_DOT, lseg[i * 2 + 1]);
+      lp.arc(lseg[i * 2], lseg[i * 2 + 1], LOBE_DOT, 0, Math.PI * 2);
+    }
+    lobePath = lp;
+  } else {
+    lobePath = null;
+  }
+
   /* --- the front: one whisker per tip --- */
   var wp = new Path2D(), any = false;
   for (var k = 0; k < nAgents; k++) {
@@ -3188,6 +3653,14 @@ function strokeVeins(sx, sy) {
   ctx.setTransform(sx, 0, 0, sy, 0, 0);
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
+  /* The masses first, so the crests of the veins running into one land on
+     top of it rather than under it. One fill, no offset copy: what makes a
+     lobe read as raised is the field's inner shadow, which has already
+     shaded it as part of the shape. */
+  if (lobePath) {
+    ctx.fillStyle = LOBE_STYLE;
+    ctx.fill(lobePath);
+  }
   /* widest first, so the hairlines land on top of the trunks they join */
   for (var b = VEIN_BANDS.length - 1; b >= 0; b--) {
     if (!veinPath[b]) continue;
@@ -3829,6 +4302,7 @@ function exitReplay() {
     trail.set(FINAL_STATE.trail);
     cueF.set(FINAL_STATE.cueF); retF.set(FINAL_STATE.retF);
     if (FINAL_STATE.slimeF) slimeF.set(FINAL_STATE.slimeF);
+    if (FINAL_STATE.knotF) knotF.set(FINAL_STATE.knotF);
     nAgents = FINAL_STATE.n;
     fieldDirty = true;
     ax.set(FINAL_STATE.ax); ay.set(FINAL_STATE.ay);
@@ -3912,6 +4386,8 @@ function startRun(i, seed, trace) {
   S.nodeDone = new Array(e.nodes.length);
   for (var q = 0; q < e.nodes.length; q++) S.nodeDone[q] = false;
   if (nodeHits.length < e.nodes.length) nodeHits = new Int32Array(e.nodes.length);
+  if (nodeLoad.length < e.nodes.length) nodeLoad = new Int32Array(e.nodes.length);
+  nodeHits.fill(0); nodeLoad.fill(0);
   S.engulfed = 0;
   S.hab = 0; S.habPeak = 0; S.habBuilt = -1; S.fused = false;
   S.dietP = 0; S.dietC = 0;
@@ -4143,6 +4619,10 @@ function showResult(won) {
     trail: new Float32Array(trail),
     cueF: new Float32Array(cueF), retF: new Float32Array(retF),
     slimeF: new Float32Array(slimeF),
+    /* the junction marks too: the lobe layer draws from them, so restoring
+       the trail without them puts the finished network back under swellings
+       belonging to the abandoned replay */
+    knotF: new Float32Array(knotF),
     n: nAgents,
     ax: ax.slice(0, nAgents), ay: ay.slice(0, nAgents),
     ah: ah.slice(0, nAgents), atip: atip.slice(0, nAgents),
