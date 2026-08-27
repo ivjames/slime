@@ -1522,6 +1522,20 @@ function exitReplay() {
   $('pauseveil').classList.remove('on');
   setPausedLabel(false);
   setReplayUI(false);
+  /* put the original completed dish back so the lattice, biomass, nodes and
+     clock agree with the verdict below them */
+  if (FINAL_STATE) {
+    trail.set(FINAL_STATE.trail);
+    nAgents = FINAL_STATE.n;
+    S.simT = FINAL_STATE.simT; S.peak = FINAL_STATE.peak; S.cues = FINAL_STATE.cues;
+    S.engulfed = FINAL_STATE.engulfed;
+    S.hab = FINAL_STATE.hab; S.habPeak = FINAL_STATE.habPeak;
+    S.shocksSurvived = FINAL_STATE.shocksSurvived;
+    S.shockActive = FINAL_STATE.shockActive; S.shockWarn = FINAL_STATE.shockWarn;
+    if (FINAL_STATE.nodeProg) S.nodeProg = FINAL_STATE.nodeProg.slice();
+    if (FINAL_STATE.nodeDone) S.nodeDone = FINAL_STATE.nodeDone.slice();
+    S.note = FINAL_STATE.note; S.failReason = FINAL_STATE.failReason;
+  }
   if (LAST_RESULT) { paintResult(LAST_RESULT); openResult(); }
   render();
   updateHUD(true);
@@ -1671,6 +1685,7 @@ function finish(won, reason) {
    LAST_RESULT and can be put back without re-deriving it from a run state
    that has since been overwritten. */
 var LAST_RESULT = null;
+var FINAL_STATE = null;
 
 function buildResult(won) {
   var e = S.exp;
@@ -1769,6 +1784,19 @@ function resultOpen() {
 }
 
 function showResult(won) {
+  /* Snapshot what the finished dish looks like, so aborting a replay can put
+     the ORIGINAL final lattice and HUD figures back under the verdict instead
+     of leaving the replay's partial state on display. */
+  FINAL_STATE = {
+    trail: new Float32Array(trail),
+    n: nAgents,
+    simT: S.simT, peak: S.peak, cues: S.cues, engulfed: S.engulfed,
+    hab: S.hab, habPeak: S.habPeak, shocksSurvived: S.shocksSurvived,
+    shockActive: S.shockActive, shockWarn: S.shockWarn,
+    nodeProg: S.nodeProg ? S.nodeProg.slice() : null,
+    nodeDone: S.nodeDone ? S.nodeDone.slice() : null,
+    note: S.note, failReason: S.failReason
+  };
   LAST_RESULT = buildResult(won);
   paintResult(LAST_RESULT);
   openResult();
