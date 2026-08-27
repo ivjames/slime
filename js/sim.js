@@ -782,14 +782,31 @@ function emit(nx, ny, nh) {
    spending the growth budget on one produces a fatter tube instead of a new
    filament. Food and the player's cue still bias which front gets the
    cytoplasm, so a cue held out on open agar draws branches toward it. */
+/* Draws taken looking for a tip to fork. Tips are a small minority — measured
+   across a run, four to eighteen per cent of the population, since only the
+   frontier of the culture is a frontier — so a handful of uniform draws mostly
+   comes back with none and the branching budget falls through to thickening
+   instead. At one in ten, five draws find a tip 41% of the time and twenty
+   find one 88%, which is the difference between a culture that branches and
+   one that mostly just fattens. It is only a few dozen extra draws per spawn
+   against roughly five per agent per step, so the cost is nothing. */
+var FORK_DRAWS = 20;
+
 function forkTip() {
   var best = -1, bestV = -1e9;
-  for (var t = 0; t < 5; t++) {
+  for (var t = 0; t < FORK_DRAWS; t++) {
     var k = (rnd() * nAgents) | 0;
+    /* Ask whether it IS a tip, rather than inferring it from the trail under
+       it. That inference — anything below a trail of 36 — predates the tip
+       flag and had gone quietly backwards: a supplied tip lays a heavy tube as
+       it advances, so it often stands on MORE trail than the threshold allows,
+       while a detached scrap out on clean agar stands on almost none. The test
+       was therefore rejecting the fronts it wanted and admitting the interior
+       and the strays, and the budget went on daughters spawned somewhere in
+       the middle of the culture that had no filament to extend. */
+    if (!atip[k]) continue;
     var ci = ((ay[k] | 0) * GW + (ax[k] | 0));
-    var tr = trail[ci];
-    if (tr > TIP_TRAIL * 4.0) continue;             /* deep inside a tube */
-    var v = foodF[ci] + cueF[ci] * 0.8 - tr * 0.06;
+    var v = foodF[ci] + cueF[ci] * 0.8;
     if (v > bestV) { bestV = v; best = k; }
   }
   if (best < 0) return false;
@@ -2660,6 +2677,8 @@ function init() {
     touchMode: function () { return touchMode; },
     isTouch: function () { return TOUCH; },
     agents: function () { return nAgents; },
+    /* how many of them are at the front — the population forkTip draws from */
+    tips: function () { var c = 0; for (var k = 0; k < nAgents; k++) if (atip[k]) c++; return c; },
     prog: function () { return S.nodeProg ? Array.prototype.slice.call(S.nodeProg) : []; },
     front: function () {
       if (!nAgents) return null;
