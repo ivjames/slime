@@ -1642,11 +1642,11 @@ var BODY_T    = 9.0;            // trail at which tissue begins
 var BODY_SOFT = 1.4;            // trail over which the edge resolves
 /* The floor the same edge resolves from along a BRIDGE — see buildBridges.
    A tube thin enough to need bridging sits well under BODY_T by definition,
-   so measuring it against BODY_T would draw nothing. Sampled over two seeds at
-   900 and 2000 steps, the drawn field along a bridge runs p10 3.0, median 5.2,
-   p90 7.9. Anchoring the ramp here puts the median at full tissue and still
-   lets the rare cell that crosses genuinely empty agar fade out rather than be
-   asserted. */
+   so measuring it against BODY_T would draw nothing. Sampled over three seeds
+   at 900 and 2000 steps, shpA along a bridge — which is what paintField reads
+   for one, and see there for why it is not t — runs p05 3.3, median 5.3.
+   Anchoring the ramp here puts all of that at or near full tissue while still
+   leaving somewhere for a cell over genuinely empty agar to fade out to. */
 var BODY_LO   = 2.0;            // ...and the floor it resolves from on a bridge
 
 /* Everything the dish can ADD to a cell, named in one place, because the
@@ -3601,8 +3601,29 @@ function paintField() {
           /* A bridged cell is under BODY_T by construction, so GAM would hand
              back nothing; it is drawn through the ramp anchored at BODY_LO
              instead, which is the whole of what the bridge pass changes about
-             this loop. */
-          var vcov = br ? GAM_LO[gi] : GAM[gi];
+             this loop.
+
+             And it is measured against shpA rather than against t. The ridge
+             lift is a local mean subtracted from a narrow one, so it drives
+             the flanks of anything bright NEGATIVE — which is what separates
+             two veins running side by side, and is also exactly wrong for a
+             thin strand leaving a thick trunk, the one shape this pass exists
+             to draw. Sampled on corridor cells, t runs p05 2.3 against a
+             BODY_LO of 2.0: 1.7% to 3.4% of them come out with no coverage at
+             all and as many again below a quarter, so a route the flood
+             qualified on the trail field could still be painted as a hole.
+             shpA is the same field one step earlier, before the lift, and over
+             the same samples not one corridor cell falls under BODY_LO — p05
+             3.3, median 5.3. The body keeps the lift; the strand does not
+             need separating from anything. */
+          var vcov;
+          if (br) {
+            var ga = (a * GAM_SCALE) | 0;
+            if (ga < 0) ga = 0; else if (ga >= GAMN) ga = GAMN - 1;
+            vcov = GAM_LO[ga];
+          } else {
+            vcov = GAM[gi];
+          }
           /* the inner shadow (see ISH_D above): how much of the body is
              missing one and two throws down-light of this cell. The last
              few rows and columns skip it rather than clamp it — they are
