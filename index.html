@@ -81,6 +81,8 @@ h1,h2,h3{font-weight:600;margin:0}
 .btn.pri:hover{background:var(--slime-hot);border-color:var(--slime-hot);color:#14170d}
 .btn.ghost{border-color:#242820;color:var(--dim)}
 .btn.ghost:hover{color:var(--ink);border-color:var(--line)}
+/* time-lapse, lit while the shutter is open longer than real time */
+.btn.lapse-on{border-color:var(--slime);color:var(--slime)}
 
 /* ---------- brief / result cards ---------- */
 .card{max-width:760px;margin:0 auto;padding:22px 26px 24px}
@@ -231,12 +233,14 @@ body.touch .dish{min-height:132px}
           <b>hold left / drag</b><span>emit a growth cue &mdash; the exploratory front flows toward it</span>
           <b>hold right / shift</b><span>retract &mdash; pull cytoplasm back out of a region</span>
           <b>space</b><span>hold the clock</span>
+          <b>F</b><span>time-lapse &mdash; cycle the dish clock &times;1 / &times;4 / &times;12</span>
           <b>R</b><span>reset the dish</span>
         </div>
         <div class="keys keys-touch">
           <b>hold / drag</b><span>emit a growth cue &mdash; the exploratory front flows toward your finger</span>
           <b>RETRACT pad</b><span>switch the verb, then hold to pull cytoplasm back out of a region</span>
           <b>two fingers</b><span>retract without switching pads &mdash; a second finger flips that drag</span>
+          <b>TIME-LAPSE</b><span>the button under the dish winds the clock to &times;4 or &times;12 &mdash; same dish, watched faster</span>
           <b>HOLD / RESET</b><span>the buttons under the dish stop the clock and restart the plate</span>
         </div>
       </div>
@@ -274,11 +278,12 @@ body.touch .dish{min-height:132px}
     </div>
     <div class="simbar">
       <div class="hint">
-        <span class="hint-fine"><b>Hold</b> to lay a growth cue &middot; <b>right-click / shift</b> to retract &middot; <b>space</b> pause &middot; <b>R</b> reset</span>
-        <span class="hint-touch"><b>Hold or drag</b> on the dish to lay a growth cue &middot; tap <b>RETRACT</b> (or use <b>two fingers</b>) to pull back &middot; <b>Hold</b> / <b>Reset</b> below</span>
+        <span class="hint-fine"><b>Hold</b> to lay a growth cue &middot; <b>right-click / shift</b> to retract &middot; <b>space</b> pause &middot; <b>F</b> time-lapse &middot; <b>R</b> reset</span>
+        <span class="hint-touch"><b>Hold or drag</b> on the dish to lay a growth cue &middot; tap <b>RETRACT</b> (or use <b>two fingers</b>) to pull back &middot; <b>Hold</b> / <b>Time-lapse</b> / <b>Reset</b> below</span>
       </div>
       <div class="row">
         <button class="btn ghost" id="s-pause" type="button">Hold</button>
+        <button class="btn ghost" id="s-speed" type="button">Time-lapse &times;1</button>
         <button class="btn ghost" id="s-reset" type="button">Reset</button>
         <button class="btn ghost" id="s-abort">Abandon dish</button>
       </div>
