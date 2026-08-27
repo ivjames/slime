@@ -3452,6 +3452,44 @@ var raf = 0, lastTs = 0, acc = 0;
 var TURBO = 1;
 var SPEEDS = [1, 4, 12];
 
+/* Ceiling on the stepping work ONE frame may do, in milliseconds of wall
+   clock. The step budget below it is a COUNT, and a count is the wrong unit
+   to bound a frame with: at x12 it permits 48 steps back to back — around
+   90ms on the machine these numbers were measured on — with a single paint at
+   the end of them. The dish advances the whole time and almost none of it is
+   drawn. Measured at x12 on EXP-01: 10fps, and 456 steps a second against the
+   720 the multiplier asks for, since a machine that cannot make the rate
+   drops the backlog either way.
+
+   Bounding the same loop by TIME paints in the middle of that second instead.
+   Same run, same machine: 30fps and 299 steps a second. Three times the frame
+   rate for two thirds of the step rate, and worth it, because the frame rate
+   is what a time-lapse IS. A run that advances half again as fast while
+   showing ten frames a second is a slideshow of a dish, and the reason to
+   watch a network form at twelve times real time is to watch it form.
+
+   Most of what that costs is not the extra paints, which are 3ms each against
+   a step's 2ms. It is vsync idle: 20ms of stepping plus a paint lands near
+   25ms and the frame then waits out the rest of its 33.3ms. Filling that gap
+   means running at the deadline, and a frame that overruns it by a
+   millisecond does not gain a millisecond — it waits a further 16.7ms.
+   Measured across boxes from 10 to 24ms, 24 tips the median frame to 50ms and
+   gives back the step rate it reached for, and everything below 20 clips x4,
+   which is a speed this machine otherwise holds exactly. 20 is the value that
+   leaves x4 alone and still lands x12 inside two vsyncs.
+
+   It is a ceiling, not a policy. Where a frame's steps already fit inside it
+   nothing here does anything at all, and that is most hardware at most
+   speeds: x12 wants twelve steps in a 60Hz frame, which is 20ms only if a
+   step costs 1.7ms. Below that the box never closes and x12 runs at x12.
+
+   None of it touches what a step does. Steps run in order at a fixed DT, and
+   a seed run to the same step count holds a bit-identical dish at any speed,
+   with the box at any value or none — verified on EXP-04 at step 1500 across
+   x1/x4/x12 and boxes of 6ms, 24ms and off, which agree to the last bit of
+   the trail field. */
+var STEP_MS = 20;
+
 /* Steps executed this run, and an optional harness stop. stepsRun is the
    x-axis determinism is defined over: two runs of the same seed that have
    executed the same number of steps hold identical state, whatever speed or
@@ -3904,6 +3942,7 @@ function frame(ts) {
        once per STEP, not once per frame — that is what keeps a cued run
        identical between speeds. */
     var steps = 0, budget = 4 * TURBO;
+    var boxT0 = performance.now(), boxed = false;
     while (acc >= DT && steps < budget && S.running &&
            (!stepTarget || stepsRun < stepTarget)) {
       /* Replay drives the brush from the tape; a played run records what the
@@ -3915,11 +3954,46 @@ function frame(ts) {
         if (!REPLAY.on) recordBrush(stepsRun, ptr.mode, ptr.gx, ptr.gy);
       }
       step(); stepsRun++; acc -= DT; steps++;
+      /* Checked after the step rather than before it, so a frame always makes
+         progress: a box smaller than a single step still runs one, and the
+         loop cannot livelock stepping nothing on a slow enough machine. The
+         clock read is tens of nanoseconds against a step's two milliseconds. */
+      if (performance.now() - boxT0 >= STEP_MS) { boxed = true; break; }
     }
-    /* Backlog past the budget is dropped: a device that cannot keep up runs
-       fewer steps per real second rather than spiralling. It changes how far
-       a run gets in a given wall-clock second, never what any step does. */
-    if (acc > DT * budget) acc = 0;
+    /* Backlog past what this frame could actually run is dropped: a device
+       that cannot keep up runs fewer steps per real second rather than
+       spiralling. It changes how far a run gets in a given wall-clock second,
+       never what any step does — steps still execute in order at a fixed DT,
+       and two runs of a seed that have run the same number of them still hold
+       the same dish.
+
+       The box has to drop it too, and for the same reason the count does. Left
+       to accumulate, a backlog the box refuses to spend this frame is still
+       there next frame, so the dish stutters forward in bursts whose size is
+       set by how far behind it has fallen — which is the spiral the drop is
+       here to prevent, wearing the box as a disguise.
+
+       Only when there IS a backlog, though, and `boxed` alone does not say
+       there is one. The box is tested after the step and after acc -= DT, so
+       a frame that ran its last due step and only then crossed the deadline
+       sets it with acc already below DT. What is left there is not a backlog:
+       it is the sub-step remainder a fixed timestep runs on, the fraction of a
+       DT that carries into the next frame and becomes a whole step a few
+       frames later. Zeroing that discards sim time the frame fully intended to
+       spend, and discards it again every frame the deadline lands in the same
+       place — a slow drift, not a dropped burst, and one that only ever runs
+       the dish slower than the multiplier asks.
+
+       It is a small number at the box this ships with and not a small one in
+       general. Counted over six seconds at x12 and STEP_MS 20, the box closed
+       on 162 frames and not one of them had an empty accumulator; at x4 it
+       closed on five, four of them empty, worth 11ms of sim time a second
+       against the 4000 that speed is asking for. Wind the box down to 16ms and
+       it closes on 51 frames at x4 with 39 empty, worth 82ms a second — half a
+       per cent of the rate, then two per cent. The guard is here because a
+       fixed-timestep accumulator must not throw its remainder away, not
+       because two per cent was visible. */
+    if ((boxed && acc >= DT) || acc > DT * budget) acc = 0;
     if (stepTarget && stepsRun >= stepTarget && S.running && !S.over) {
       /* one-shot: consume the target so Resume resumes and later runs run */
       stepTarget = 0;
