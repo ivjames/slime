@@ -438,8 +438,8 @@ var EXPERIMENTS = [
 
   {
     code: 'EXP-06', name: 'THE U-TRAP',
-    blurb: 'A U-shaped trap between you and food. Escaping means walking away from it first.',
-    brief: 'Reid, 2012. Behind a U-shaped wall, the food is close enough to smell and impossible to reach in a straight line — the only way out is backward, through the mouth you came in by. A plasmodium that avoids its own abandoned ground escapes efficiently; one bathed first in its own slime, with nothing left to tell searched from unsearched, wanders the trap until it starves. You have the first culture\'s advantage, if you use it. Push at the back wall once, then stop pushing there — remember it, and go around instead.',
+    blurb: 'A U-shaped trap between you and food. Escaping means moving away from the food first.',
+    brief: 'Reid, 2012. Behind a U-shaped wall, the food is close enough to smell and impossible to reach in a straight line — the only way out is backward, through the mouth you came in by. A plasmodium that avoids its own abandoned ground escapes efficiently; one bathed first in its own slime, with nothing left to tell searched from unsearched, wanders the trap until it starves. You are the first culture. Push at the back wall once, then leave it alone and go the long way.',
     obj: 'Retreat out of the trap\'s dead end and engulf both flakes on the far side of the wall.',
     objShort: 'FLAKES',
     chips: [['', 'u-shaped trap wall'], ['', 'old ground repels'], ['ok', '2 flakes beyond it']],
@@ -469,7 +469,7 @@ var EXPERIMENTS = [
       'searched and un-searched are, it turns out, different smells.',
       'the shortest way to dinner is currently a wall. the second-shortest works.'
     ],
-    win: 'Both flakes taken by a network that never returned to the wall it first tried. The dead end reads, in the trail record, as a single thick stub and nothing built past it — the culture found the door by remembering every place that wasn\'t one. The observer notes the irony of an organism with no memory keeping such careful books.',
+    win: 'Both flakes taken by a network that never returned to the wall it first tried. The dead end reads, in the trail record, as one thick stub with nothing built past it — the door was found by ruling out every place that wasn\'t one. The observer notes that nothing here has anywhere to keep a memory, and files the trail record as one.',
     lose: 'The front spent itself pressing on the same stretch of wall long after the wall had made its point, and there was nothing left to send around it. The dish records a very determined failure to learn.'
   },
 
@@ -506,20 +506,20 @@ var EXPERIMENTS = [
       { t: 20, text: 'the dark corridor costs nothing but time, and time is also a cost.' }
     ],
     ambient: [
-      'brightness is not a wall. it only has a price tag.',
+      'the lit corridor gets shorter every time you measure it. it does not get cheaper.',
       'the dark route sits open and mostly ignored.',
       'something in you keeps a running tab on the light.',
-      'shortest was never the only variable in this equation.'
+      'shortest was never the only variable.'
     ],
-    win: 'Both blocks taken, and the log shows a front that spent real biomass crossing the lit corridor rather than routing around it every time. The dark detour saw traffic too — the network hedged, the way the paper\'s plasmodia did. The observer notes the two routes never fully agreed on which was cheaper.',
+    win: 'Both blocks taken, and the log shows a front that paid real biomass to cross the lit corridor rather than route around it every time. The dark detour saw traffic too — the network hedged, the way the paper\'s plasmodia did. The observer notes the two routes never fully agreed on which was cheaper.',
     lose: 'The culture bled itself thin in the light, crossing and recrossing a shortcut it never learned to avoid. The dark corridor sat open the whole time.'
   },
 
   {
     code: 'EXP-08', name: 'THE DIET',
     blurb: 'Eight lopsided blends. Eat the right four, not all eight.',
-    brief: 'Dussutour, 2010. Offered many protein:carbohydrate blends across a dish, the plasmodium in the paper composed its own diet — straddling several imperfect foods to land close to a two-to-one protein-to-carbohydrate intake, no matter which blends were on offer. Eight blends ring this dish, from nearly pure protein to nearly pure sugar. Eating all eight misses the target by a wide margin. You will need to choose a handful, in proportion, and retract from whatever the ratio doesn\'t want.',
-    obj: 'Take four blends that land the protein:carbohydrate mix near two to one, and leave the rest alone.',
+    brief: 'Dussutour, 2010. Offered many protein:carbohydrate blends across a dish, the plasmodium in the paper composed its own diet — straddling several imperfect foods to land close to a two-to-one protein-to-carbohydrate intake, no matter which blends were on offer. Eight blends ring this dish, from nearly pure protein to nearly pure sugar. Eating all eight misses the target by a wide margin. Choose a handful in the right proportions, and retract from whatever the ratio does not want.',
+    obj: 'Take four blends that land the mix near two parts protein to one, and leave the rest.',
     objShort: 'BLENDS',
     chips: [['ok', '8 blend nodes'], ['ok', 'open dish'], ['', 'target ratio 2:1']],
     inoc: { x: 210, y: 130 },
@@ -548,7 +548,7 @@ var EXPERIMENTS = [
       'protein and carbohydrate, and an appetite doing the arithmetic nobody taught it.',
       'too much of a good blend is only a bad blend, later.',
       'the tongue you do not have has opinions anyway.',
-      'a diet, it turns out, is just another shape to hold.'
+      'a diet is only another shape to hold.'
     ],
     win: 'Four blends held, the protein:carbohydrate ratio settling near two to one — inside the band, and nowhere close to what all eight nodes together would have produced. The observer notes that the untouched flakes were the important decision, not the eaten ones.',
     lose: 'The culture took whatever blend sat nearest until the ratio drifted past saving, or ran out of clock still short of four. The observer writes appetite, not diet, and closes the notebook.'
@@ -557,7 +557,7 @@ var EXPERIMENTS = [
   {
     code: 'EXP-09', name: 'THE DECOY',
     blurb: 'Two good meals far apart, one bad one close by. Preference is not supposed to flip.',
-    brief: 'Latty &amp; Beekman, 2011. Give the plasmodium two good meals and it splits its attention evenly. Add a third, worse option nearby and the preference between the first two flips, a small violation of independence of irrelevant alternatives that human economists were not expecting from an organism with no brain. Today\'s dish repeats the trick from the inside: two real meals sit far apart on opposite ends of the agar, and one small, close, mostly-cellulose scrap waits between you and neither of them. It is nearer. It is not the assignment. Retract before you commit to it.',
+    brief: 'Latty &amp; Beekman, 2011. Give the plasmodium two good meals and it splits its attention evenly. Add a third, worse option nearby and the preference between the first two flips, a small violation of independence of irrelevant alternatives that human economists were not expecting from an organism with no brain. Today\'s dish repeats the trick from the inside: two real meals sit far apart on opposite ends of the agar, and one small, close, mostly-cellulose scrap waits between you and neither of them. It is nearer. It is not the assignment.',
     obj: 'Engulf the two far meals; the near one is not required.',
     objShort: 'BASINS',
     chips: [['ok', 'two required meals'], ['', 'one decoy, close'], ['', 'engulf costs mass']],
@@ -583,8 +583,8 @@ var EXPERIMENTS = [
       'somewhere an economist is taking this personally.',
       'two good meals, unrelated to a third, ought to stay unrelated.'
     ],
-    win: 'North and south basins both taken, whatever became of the crumb between them left to the record or not. The two meals that mattered were reached without the third one getting a vote. Latty and Beekman would want the mechanism; the notebook only has room for the outcome.',
-    lose: 'The near crumb went first, then most of an afternoon, and the far basins stayed exactly as far as they started. A preference got reversed. Nobody consulted the culture about it, which was rather the point.'
+    win: 'Both basins taken. What became of the crumb between them the notebook does not record, only that the third option never got a vote on the other two. Latty and Beekman would want the mechanism; the page has room for the outcome.',
+    lose: 'The near crumb went first, then most of an afternoon, and the far basins stayed exactly as far as they started. A preference got reversed by something that was never on the menu.'
   },
 
   {
@@ -627,7 +627,7 @@ var EXPERIMENTS = [
   {
     code: 'EXP-11', name: 'THE WARM ROOM',
     blurb: 'No walls at all — the dish is partitioned by heat, and heat can be crossed.',
-    brief: 'No citation on this one — nobody has published it yet. The lab wanted to know what happens when the walls are made of heat instead of agar: five rooms, no partition you can\'t cross, only bands of warm agar joining them at odd offsets. You can shove straight through a strip and pay for it in biomass, or find the cool seam between two rooms and cross for free. This dish is teaching you the ledger before the dishes that make you keep it.',
+    brief: 'No citation on this one; the lab has started running its own. Somebody wanted to know what happens when the walls are made of heat instead of agar: five rooms, no partition you cannot cross, only bands of warm agar joining them at odd offsets. You can shove straight through a strip and pay for it in biomass, or find the cool seam between two rooms and cross for nothing. Both work. Only one of them works twice.',
     obj: 'Engulf all five flakes scattered across the warm rooms.',
     objShort: 'FLAKES',
     chips: [['', 'heat, not walls'], ['', 'crossable, at a cost'], ['ok', '5 flakes, 5 rooms']],
@@ -649,23 +649,23 @@ var EXPERIMENTS = [
     timeLimit: 640, hab: false, shocks: false,
     script: [
       { t: 1.5, hi: true, text: 'the warm patches are not walls. cross them and you pay for it in cytoplasm.' },
-      { t: 10, text: 'a front left sitting in the heat keeps paying. move through, don\'t camp.' },
+      { t: 10, text: 'a front left sitting in the heat keeps paying. cross it, do not settle in it.' },
       { t: 22, text: 'the gaps between the warm strips are the only agar that costs nothing at all.' }
     ],
     ambient: [
       'the thermometer in here has opinions about where you go.',
-      'heat is not a wall. it only behaves like one if you flinch.',
+      'a room is only a room because of what it costs to leave.',
       'the cool ground is a corridor, not a destination.',
       'somewhere a technician is adjusting a dial and calling it architecture.'
     ],
-    win: 'All five rooms taken, the network threading the gaps between the warm strips instead of through them. The observer notes the front never lingered in the heat long enough to be charged for it. Efficient, and — this being a budget line — the more important of the two.',
+    win: 'All five rooms taken, the network threading the gaps between the warm strips instead of through them. The front never lingered in the heat long enough to be charged much for it. The observer records the whole run under consumables.',
     lose: 'The culture parked itself on a warm strip and burned down to nothing arguing the point. The heat did not have to move.'
   },
 
   {
     code: 'EXP-12', name: 'THE SWEEP',
     blurb: 'A wall of warmth sweeps the dish end to end. Grow where it isn\'t, not where it was.',
-    brief: 'Nobody has published this one — the lab is running its own follow-ups. A full-height bar of heat crosses the dish left to right on a fixed clock, and when it reaches the far wall it resets to the near one and starts again. Food sits on both flanks, and no ground stays cool for long. You cannot out-argue the schedule, only leave ground before the bar arrives and take it back once it has passed. The dish rewards timing. It does not reward loyalty to a patch of agar.',
+    brief: 'Still nothing to cite. A full-height bar of heat crosses the dish left to right on a fixed clock, and when it reaches the far wall it resets to the near one and starts again. Food sits on both flanks, and no ground stays cool for long. You cannot out-argue the schedule, only leave ground before the bar arrives and take it back once it has passed. The dish rewards timing. It does not reward loyalty to a patch of agar.',
     obj: 'Engulf all six oat flakes before the dish times out.',
     objShort: 'FLAKES',
     chips: [['', 'heat bar sweeps'], ['', 'no ground stays cool'], ['ok', 'six oat flakes']],
@@ -749,7 +749,7 @@ var EXPERIMENTS = [
   {
     code: 'EXP-13', name: 'THE MISSED BEAT',
     blurb: 'The dry shocks keep a fixed beat. On schedule, the fourth one doesn\'t land.',
-    brief: 'Nobody has published this one yet. The lab already knows a dry shock on a fixed period teaches you to slow down before it lands — you did that yourself, once. This dish keeps the beat, then breaks it: the fourth scheduled shock is announced by the same warning window, the same held breath, and then nothing crosses the agar at all. The meter keeps counting; the schedule does not stop for your confusion. Hold ground on what you have already taken, and wait to find out whether you can tell the difference.',
+    brief: 'The lab is checking its own work now. It already knows a dry shock on a fixed period teaches you to slow down before it lands — you did that yourself, once. This dish keeps the beat, then breaks it: the fourth scheduled shock is announced by the same warning window, the same held breath, and then nothing crosses the agar at all. Hold ground on what you have already taken, and wait to find out whether you can tell the difference.',
     obj: 'Engulf every flake and outlast six dry cycles, including the one that never lands.',
     objShort: 'FLAKES',
     chips: [['', 'dry shock every ~22s'], ['', 'one shock withheld'], ['ok', 'engulfed agar holds water']],
@@ -779,14 +779,14 @@ var EXPERIMENTS = [
       'somewhere a clock is being trusted more than it has earned.',
       'not every held breath ends in something. this might be one of those.'
     ],
-    win: 'Six flakes taken, six scheduled cycles logged, and the fourth one never came — the culture slowed for it anyway, on time, into an empty interval. The observer notes anticipation surviving contact with an absent stimulus, which was rather the point of building a switch that could be left unthrown. The rhythm resumed on the next beat as if nothing had been withheld, which is either resilience or a short memory.',
+    win: 'Six flakes taken, six scheduled cycles logged, and the fourth one never came — the culture slowed for it anyway, on time, into an empty interval. The observer writes down anticipation surviving contact with nothing at all. The rhythm resumed on the next beat as if nothing had been withheld, which is either resilience or a short memory.',
     lose: 'The culture never slowed for anything, dry or otherwise, and spent itself flat against the next real cycle. The schedule kept its appointment; the culture did not keep pace with it.'
   },
 
   {
     code: 'EXP-14', name: 'THE SYNCOPATION',
     blurb: 'Dry shocks on a shrinking clock. Build your refuges before the rhythm outruns you.',
-    brief: 'Nobody has published this one — the lab is just curious what happens when the interval itself is the variable. The dry cycles start slow, practically generous, and each one arrives sooner than the last. Anticipation still gets its warning window; only the gap it has to work with keeps shrinking. Get your engulfed flakes doing double duty as refuges now, while there is still room between beats — the schedule you can out-think early is the one that outpaces you late.',
+    brief: 'Another of the lab\'s own, with the interval itself as the variable this time. The dry cycles start slow, practically generous, and each one arrives sooner than the last. Anticipation still gets its warning window; only the gap it has to work with keeps shrinking. Get your engulfed flakes doing double duty as refuges now, while there is still room between beats — the schedule you can out-think early is the one that outpaces you late.',
     obj: 'Engulf every flake and outlast seven accelerating dry cycles.',
     objShort: 'FLAKES',
     chips: [['', 'dry shock, shrinking gap'], ['', '7 cycles required'], ['ok', 'engulfed agar = refuge']],
@@ -812,7 +812,7 @@ var EXPERIMENTS = [
     ],
     ambient: [
       'the interval used to feel generous. it no longer does.',
-      'somewhere a clock is being wound tighter, not reset.',
+      'the metronome is being wound tighter, not reset.',
       'you count the gap before it counts you.',
       'the refuges do not care what tempo it is outside them.'
     ],
@@ -847,19 +847,19 @@ var EXPERIMENTS = [
       { t: 40, text: 'a network that only visits is not the same as a network that stays.' }
     ],
     ambient: [
-      'agar has no memory of gratitude. it only remembers attention.',
+      'agar is not grateful. agar is only recently touched, or not.',
       'the tide is not water. the tide is you, elsewhere.',
       'every station you are not touching is quietly reconsidering.',
       'six mouths, one cytoplasm, and nowhere it can afford to stop.'
     ],
-    win: 'All six stations held at once, the network finally still instead of touring. The observer notes that holding is a different verb from finding, and a harder one. Nothing in the dish reverted on the way to press time.',
+    win: 'All six stations held at once, the network finally still instead of touring. The observer notes that holding is a different verb from finding, and a harder one. Nothing in the dish reverted while the note was being written.',
     lose: 'Something was always mid-reversion. The observer counts five held, one skinning over, and writes down that six is not five plus patience.'
   },
 
   {
     code: 'EXP-16', name: 'THE TRIAGE',
-    blurb: 'Eight flakes, six hands. Hold the ones you can, and let the reseal take the rest.',
-    brief: 'Eight patches of agar, and only six of you to go around once the reseal clock starts running. Nobody has published this one yet — the lab is just curious what a plasmodium does when holding everything is arithmetically impossible. Spread wide if you like. Watch what happens to the far corners while you are elsewhere. Then choose your six, and stop pretending the other two were ever coming with you.',
+    blurb: 'Eight flakes, and enough of you for six. Choose which two you were never going to keep.',
+    brief: 'Eight patches of agar, and only six of you to go around once idle ground starts sealing over. The lab is curious what a plasmodium does when holding everything is flatly impossible. Spread wide if you like, and watch what happens to the far corners while you are elsewhere. Then choose your six, and stop pretending the other two were ever coming with you.',
     obj: 'Hold six of the eight stations at once.',
     objShort: 'FLAKES',
     chips: [['', 'hold 6 of 8'], ['', 'idle ground reseals'], ['ok', 'no hazards']],
@@ -888,7 +888,7 @@ var EXPERIMENTS = [
       'six is not a compromise. six is the number that was always available.',
       'the far bench costs more just to remember it exists.',
       'a flake left alone does not starve. it simply stops being yours.',
-      'triage, in the end, is just arithmetic wearing a lab coat.'
+      'nothing is being sacrificed here. two things are simply not being reached.'
     ],
     win: 'Six stations held at once, the far two abandoned early and without ceremony. The observer notes this was always the correct answer, not a shortfall met halfway. Eight was never on offer.',
     lose: 'The network spread thin across all eight, held none of them long enough, and watched the reseal timers win every argument at once. Ambition, on this agar, is just starvation with better publicity.'
@@ -897,7 +897,7 @@ var EXPERIMENTS = [
   {
     code: 'EXP-17', name: 'THE REVISION',
     blurb: 'A labyrinth re-cut twice mid-run. Trust nothing you have already built.',
-    brief: 'Nobody has published this one — it is the lab\'s own follow-up to the labyrinth dish, run because someone wondered what your network remembers when the maze itself starts lying to it. Two agar blocks, cut corridors, the usual crawl. Then, twice, the walls change: a route you thickened into dissolves and a route you never tried opens somewhere else. The notebook\'s real question is whether the shortest path lives in your tubes or gets rebuilt from nothing each time the agar is repoured. Regrow. Do not sulk about it.',
+    brief: 'The lab\'s own follow-up to the labyrinth dish, run because someone wondered what your network remembers when the maze itself starts lying to it. Two agar blocks, cut corridors, the usual crawl. Then, twice, the walls change: a route you thickened into dissolves and a route you never tried opens somewhere else. The notebook\'s real question is whether the shortest path lives in your tubes or gets rebuilt from nothing each time the agar is repoured. Regrow. Do not sulk about it.',
     obj: 'Engulf both agar blocks; the maze will be re-cut twice along the way.',
     objShort: 'BLOCKS',
     chips: [['', 'cut labyrinth'], ['', 'walls recut mid-run'], ['ok', 'two agar blocks']],
@@ -943,23 +943,23 @@ var EXPERIMENTS = [
     timeLimit: 820, hab: false, shocks: false,
     script: [
       { t: 2, hi: true, text: 'a labyrinth again. this one is not finished being cut.' },
-      { t: 15, text: 'dead ends cost cytoplasm. retract out of them.' },
+      { t: 15, text: 'dead ends still cost cytoplasm. retract out of them.' },
       { t: 80, hi: true, text: 'the walls you have not tested yet are the ones that matter most.' }
     ],
     ambient: [
       'a corridor this well-worn should be permanent. it is not.',
       'the tubes remember a shape the walls no longer have.',
       'concrete would be kinder. concrete would also be data-poor.',
-      'somewhere a graduate student is enjoying this far too much.'
+      'a map is only useful while the room agrees with it.'
     ],
     win: 'Both blocks taken, the network rebuilt twice over without complaint. The tubes that carried you through the second revision were laid after it, not before — whatever survived the repour was in the organism, not the plumbing. The observer writes this down and immediately wants to run it a third time.',
-    lose: 'The culture kept feeding a corridor that had already been poured shut. Loyalty, in this dish, was never a survival trait.'
+    lose: 'The culture kept feeding a corridor that had already been poured shut. The observer notes that the tubes were entirely correct about a dish that no longer existed.'
   },
 
   {
     code: 'EXP-18', name: 'THE DRAWBRIDGE',
     blurb: 'A wall down the middle, two doors, one open at a time. Time the crossing.',
-    brief: 'Nobody has published this one yet. The lab poured a wall down the centre of the dish and left two doors in it, and rigged the doors to trade places — north open while south seals, then south open while north seals, on a half-minute switch nobody consulted you about. Food waits on both sides of that wall, plus a little kept close so you are not starving while you learn the rhythm. Crossing is not a pathfinding problem. It is a scheduling problem, and the door does not check who is still standing in the frame when it shuts.',
+    brief: 'No paper, no precedent. The lab poured a wall down the centre of the dish and left two doors in it, and rigged the doors to trade places — north open while south seals, then south open while north seals, on a half-minute switch nobody consulted you about. Food waits on both sides of that wall, plus a little kept close so you are not starving while you learn the rhythm. Crossing is not a question of route. It is a question of timing, and the door does not check who is still standing in the frame when it shuts.',
     obj: 'Engulf all three agar patches, timing each crossing to an open gate.',
     objShort: 'AGAR',
     chips: [['', 'gated centre wall'], ['', '~30s door cycle'], ['ok', '3 agar patches']],
@@ -1136,7 +1136,7 @@ var EXPERIMENTS = [
   {
     code: 'EXP-19', name: 'THE FIRE DRILL',
     blurb: 'Dry shocks flood the centre with heat too. Anticipate, contract, re-expand.',
-    brief: 'Nobody has published this one yet. Two drills run on the same clock: the dry-air shock from a dish further back in this lab\'s schedule, and underneath it, timed to the same beat, the floor across the centre of the plate floods with heat. Five flakes sit in the corners, outside the flood line. The rhythm asks two things at once — pull in before the warning ends, and push back out the instant it lifts, because the crossing does not stay open, and it does not stay cool either.',
+    brief: 'The lab\'s own again, and this time it runs two drills on one clock: the dry-air shock you have met before, and underneath it, on the same beat, the floor across the centre of the plate floods with heat. Five flakes sit in the corners, outside the flood line. The rhythm asks two things at once — pull in before the warning ends, and push back out the instant it lifts. The crossing does not stay open, and it does not stay cool either.',
     obj: 'Engulf all five flakes and survive at least four heat drills.',
     objShort: 'FLAKES',
     chips: [['', 'dry shock every ~25 s'], ['', 'centre floods with heat'], ['ok', 'corners hold cool']],
@@ -1224,13 +1224,13 @@ var EXPERIMENTS = [
       'you have started flinching before the warning finishes.',
       'the corners do not care what the centre is doing. that is the entire appeal of a corner.'
     ],
-    win: 'All five flakes taken and four floods of the centre survived, the network learning to empty the middle before the warning finished and refill it before the window closed. The observer notes the timing held even on the cycles nobody announced twice. A drill, it turns out, is something you can get good at.',
+    win: 'All five flakes taken and four floods of the centre survived, the network learning to empty the middle before the warning finished and refill it before the window closed. Nobody told the culture the schedule. A drill, it turns out, is something you can get good at.',
     lose: 'Caught in the middle when the floor went hot, more than once, until there was less network than there was schedule. The clock did not slow down to wait.'
   },
 
   {
     code: 'EXP-20', name: 'THE LONG NIGHT',
-    blurb: 'The capstone: hold five stations, survive the shocks, and lose a wall along the way.',
+    blurb: 'Hold five stations, survive the shocks, and lose a wall along the way.',
     brief: 'No paper for this one — this is the lab\'s own, run after everything else on the schedule. Five stations, and holding one is not the same as holding it at four in the morning: unattended ground skins over and has to be retaken. The air will still turn dry and dry faster each time. One wall you have leaned on since the start will be poured shut without notice, and something colder waits behind it. Nobody expects you to keep all five. Do.',
     obj: 'Hold all five stations at once and outlast six dry cycles before the clock runs out.',
     objShort: 'HELD',
@@ -1269,7 +1269,7 @@ var EXPERIMENTS = [
       'the observer has stopped writing dates on this one.',
       'five is not a large number until you are trying to be in five places.',
       'warmth, like everything else in this dish, is a decision someone made for you.',
-      'the schedule does not slow down because you are tired. neither, it turns out, do you.'
+      'the schedule does not slow down because you are tired. neither have you, which nobody planned for.'
     ],
     win: 'All five stations held at the moment the sixth cycle closed, the network still standing in the southeast corner it was never going to like. The wall came down where the notes said it would, and the culture went around it anyway. The observer writes the date, closes the notebook, and — this once — does not immediately open a new one.',
     lose: 'One station skinned over while the culture held the other four, and the sixth cycle never came. The dish is logged, the lamp switched off, and the notebook left open to a page that was not quite finished.'
