@@ -3971,8 +3971,29 @@ function frame(ts) {
        to accumulate, a backlog the box refuses to spend this frame is still
        there next frame, so the dish stutters forward in bursts whose size is
        set by how far behind it has fallen — which is the spiral the drop is
-       here to prevent, wearing the box as a disguise. */
-    if (boxed || acc > DT * budget) acc = 0;
+       here to prevent, wearing the box as a disguise.
+
+       Only when there IS a backlog, though, and `boxed` alone does not say
+       there is one. The box is tested after the step and after acc -= DT, so
+       a frame that ran its last due step and only then crossed the deadline
+       sets it with acc already below DT. What is left there is not a backlog:
+       it is the sub-step remainder a fixed timestep runs on, the fraction of a
+       DT that carries into the next frame and becomes a whole step a few
+       frames later. Zeroing that discards sim time the frame fully intended to
+       spend, and discards it again every frame the deadline lands in the same
+       place — a slow drift, not a dropped burst, and one that only ever runs
+       the dish slower than the multiplier asks.
+
+       It is a small number at the box this ships with and not a small one in
+       general. Counted over six seconds at x12 and STEP_MS 20, the box closed
+       on 162 frames and not one of them had an empty accumulator; at x4 it
+       closed on five, four of them empty, worth 11ms of sim time a second
+       against the 4000 that speed is asking for. Wind the box down to 16ms and
+       it closes on 51 frames at x4 with 39 empty, worth 82ms a second — half a
+       per cent of the rate, then two per cent. The guard is here because a
+       fixed-timestep accumulator must not throw its remainder away, not
+       because two per cent was visible. */
+    if ((boxed && acc >= DT) || acc > DT * budget) acc = 0;
     if (stepTarget && stepsRun >= stepTarget && S.running && !S.over) {
       /* one-shot: consume the target so Resume resumes and later runs run */
       stepTarget = 0;
