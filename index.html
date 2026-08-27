@@ -96,6 +96,7 @@ h1,h2,h3{font-weight:600;margin:0}
   padding:2px 9px;border-radius:2px;font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;margin:0 6px 6px 0}
 .hz.q{border-color:var(--quin);color:var(--quin)}
 .hz.ok{border-color:var(--cyto);color:var(--cyto)}
+.hz.l{border-color:#9fb4c9;color:#9fb4c9}
 .keys{display:grid;grid-template-columns:auto 1fr;gap:6px 14px;margin-top:8px;font-size:12.5px;color:#9ba384}
 .keys b{color:var(--ink);font-weight:600;white-space:nowrap}
 
@@ -212,7 +213,7 @@ body.touch .dish{min-height:132px}
       The laboratory has some questions. Answer them from the inside.</p>
     </div>
     <div class="slab">
-      <div class="slab-h"><span>Experiment schedule</span><span id="progress">0 / 5 logged</span></div>
+      <div class="slab-h"><span>Experiment schedule</span><span id="progress">0 / 20 logged</span></div>
       <div class="dishes" id="dishes"></div>
     </div>
     <div class="row" style="margin-top:14px;justify-content:center">
@@ -266,7 +267,7 @@ body.touch .dish{min-height:132px}
         <div class="meter mass"><div class="lab"><span>Biomass</span><span id="h-mass">0</span></div>
           <div class="bar"><div class="fill" id="h-massbar"></div></div></div>
         <div class="meter hab" id="h-habwrap" style="display:none">
-          <div class="lab"><span>Habituation</span><span id="h-hab">0%</span></div>
+          <div class="lab"><span id="h-meterlab">Habituation</span><span id="h-hab">0%</span></div>
           <div class="bar"><div class="fill" id="h-habbar"></div></div></div>
       </div>
       <div class="hud hud-br" id="h-note"></div>

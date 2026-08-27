@@ -78,6 +78,69 @@ function seedLabel(s) {
 
 function pick(arr) { return arr[(rnd() * arr.length) | 0]; }
 
+/* ------------------------------------------------------------
+   0c. colour: HSL, WCAG contrast
+   ------------------------------------------------------------
+   The run seed is printed as a hex colour, so the organism is grown in that
+   colour. Which means a seed can name any colour at all, including ones that
+   vanish against a nearly black dish or turn the dark-on-accent buttons into
+   mud. Everything below exists so the specimen line can own the palette
+   without the palette becoming unreadable: contrast is COMPUTED against the
+   real backgrounds and the lightness is walked until it clears the bar.
+   Pure arithmetic, no draws — the tint must not perturb the sim stream. */
+function srgbLin(c) {
+  c = c / 255;
+  return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+}
+function relLum(r, g, b) {
+  return 0.2126 * srgbLin(r) + 0.7152 * srgbLin(g) + 0.0722 * srgbLin(b);
+}
+function contrast(l1, l2) {
+  var hi = l1 > l2 ? l1 : l2, lo = l1 > l2 ? l2 : l1;
+  return (hi + 0.05) / (lo + 0.05);
+}
+function rgbToHsl(r, g, b) {
+  r /= 255; g /= 255; b /= 255;
+  var mx = Math.max(r, g, b), mn = Math.min(r, g, b);
+  var h = 0, s = 0, l = (mx + mn) / 2, d = mx - mn;
+  if (d > 0) {
+    s = l > 0.5 ? d / (2 - mx - mn) : d / (mx + mn);
+    if (mx === r) h = (g - b) / d + (g < b ? 6 : 0);
+    else if (mx === g) h = (b - r) / d + 2;
+    else h = (r - g) / d + 4;
+    h /= 6;
+  }
+  return [h, s, l];
+}
+function hue2rgb(p, q, t) {
+  if (t < 0) t += 1;
+  if (t > 1) t -= 1;
+  if (t < 1 / 6) return p + (q - p) * 6 * t;
+  if (t < 1 / 2) return q;
+  if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
+  return p;
+}
+function hslToRgb(h, s, l) {
+  var r, g, b;
+  if (s === 0) { r = l; g = l; b = l; }
+  else {
+    var q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+    var p = 2 * l - q;
+    r = hue2rgb(p, q, h + 1 / 3);
+    g = hue2rgb(p, q, h);
+    b = hue2rgb(p, q, h - 1 / 3);
+  }
+  return [Math.round(r * 255), Math.round(g * 255), Math.round(b * 255)];
+}
+function mixWhite(c, k) {
+  return [Math.round(c[0] + (255 - c[0]) * k),
+          Math.round(c[1] + (255 - c[1]) * k),
+          Math.round(c[2] + (255 - c[2]) * k)];
+}
+function hex2(n) { var h = (n | 0).toString(16); return h.length < 2 ? '0' + h : h; }
+function hexOf(c) { return '#' + hex2(c[0]) + hex2(c[1]) + hex2(c[2]); }
+function rgba(c, a) { return 'rgba(' + c[0] + ',' + c[1] + ',' + c[2] + ',' + a + ')'; }
+
 /* Coarse pointer = phone/tablet. Feature-tested, never UA-sniffed: the media
    query answers for the primary pointer, the touch-point count catches a
    touchscreen the query calls fine. Latched on, so a laptop that is both
@@ -169,6 +232,14 @@ var CUE_R = 52;
 
 var HAZ_HEAT = 9.0;    // repulsion of a heat zone
 var HAZ_QUIN = 5.2;    // repulsion of a quinine zone (scaled by 1 - habituation)
+
+/* Extracellular slime. A plasmodium leaves a non-living mat behind it and will
+   not re-search ground that carries one — memory held outside the organism
+   rather than inside it, which is the only kind it has. It never decays: that
+   is the point. Deposit is small because every agent lays it every step,
+   moved or blocked, so a front crossing once is enough to mark the ground. */
+var SLIME_DEP = 0.015;
+var SLIMEW    = 1.0;   // sensed cost of fully-coated agar; the dish sets the dial
 
 var SPENT_FOOD = 0.30; // an engulfed node's remaining pull (a refuge, not a beacon)
 var SPENT_FALL = 34;   // and only over this reach, so spent food cannot outbid fresh
@@ -380,7 +451,8 @@ var statF = new Float32Array(NCELL);   // food*FOODW - hazard repel + wall penal
 var cueF  = new Float32Array(NCELL);
 var retF  = new Float32Array(NCELL);
 var wallM = new Uint8Array(NCELL);
-var hazM  = new Uint8Array(NCELL);     // 0 none, 1 heat, 2 quinine
+var hazM  = new Uint8Array(NCELL);     // 0 none, 1 heat, 2 quinine, 3 light
+var slimeF = new Float32Array(NCELL);  // extracellular slime, laid and never lifted
 var nodeAt = new Int16Array(NCELL);    // cell -> node index, -1 for none
 /* One agent per cell. Without it the whole population collapses into whichever
    vein is currently strongest and the network is a single rope; with it a
@@ -402,7 +474,9 @@ var ay = new Float32Array(MAXA);
 var ah = new Float32Array(MAXA);
 var nAgents = 0;
 
-/* colour lookup for the slime body: faint olive -> yellow -> white hot */
+/* Colour lookup for the slime body: near-black -> dimmed tint -> vein tone ->
+   white hot. The tint is the run's own, derived from the seed in startRun, so
+   the ramp is rebuilt per run rather than baked in. */
 var LUT = new Uint8Array(256 * 3);
 /* Trail -> LUT index, gamma 0.45. Linear mapping is what made the lattice
    invisible: a vein carrying a tenth of a trunk's traffic landed three steps
@@ -419,15 +493,20 @@ var GAM_SCALE = (GAMN - 1) / TRAIL_MAX;
     GAM[j] = v > 255 ? 255 : (v | 0);
   }
 })();
-(function buildLUT() {
+/* The stop positions and the gamma above are what make the fine mesh visible;
+   only the colours are the run's. Ratios of the tint keep the shape of the old
+   olive ramp — dark low decade, saturated middle, near-white top — so the
+   default tint reproduces roughly what the file shipped with. */
+function buildLUT(tr, tg, tb) {
+  var hot = mixWhite([tr, tg, tb], 0.70);
   var stops = [
-    [0.00,   0,   0,   0],
-    [0.05,  16,  18,   8],
-    [0.14,  38,  40,  14],
-    [0.30,  84,  80,  22],
-    [0.54, 152, 138,  38],
-    [0.78, 220, 204,  74],
-    [1.00, 255, 246, 190]
+    [0.00, 0, 0, 0],
+    [0.05, tr * 0.07, tg * 0.07, tb * 0.07],
+    [0.14, tr * 0.17, tg * 0.17, tb * 0.17],
+    [0.30, tr * 0.37, tg * 0.37, tb * 0.37],
+    [0.54, tr * 0.67, tg * 0.67, tb * 0.67],
+    [0.78, tr * 0.97, tg * 0.97, tb * 0.97],
+    [1.00, hot[0], hot[1], hot[2]]
   ];
   for (var i = 0; i < 256; i++) {
     var t = i / 255, a = stops[0], b = stops[stops.length - 1];
@@ -440,7 +519,66 @@ var GAM_SCALE = (GAMN - 1) / TRAIL_MAX;
     LUT[i * 3 + 1] = (a[2] + (b[2] - a[2]) * k) | 0;
     LUT[i * 3 + 2] = (a[3] + (b[3] - a[3]) * k) | 0;
   }
-})();
+}
+
+/* The default plate colour, and the tone every derived string starts at, so
+   the first paint before any run is the one the stylesheet declares. */
+var TINT = [227, 210, 74];
+var ACC_CUE = rgba(TINT, '.75');
+var ACC_ARC = rgba(TINT, '.85');
+buildLUT(TINT[0], TINT[1], TINT[2]);
+
+/* The two backgrounds the accent has to survive: the page ground, and the dark
+   ink the primary button paints ITSELF onto the accent. Both are floors rather
+   than a window, but they are different floors, so both get measured. */
+var DISH_L = relLum(7, 9, 6);
+var PAGE_L = relLum(11, 13, 12);
+var INK_L  = relLum(20, 23, 13);
+
+/* Derive the run's palette from its 24-bit seed. Hue is preserved exactly —
+   that is the player's specimen line and the number they can write down.
+   Saturation is clamped to a range a lab would tolerate near a microscope,
+   and lightness is walked upward until the vein tone clears WCAG 1.4.11
+   against the agar and the hot tone clears 7:1. With a floor this dark almost
+   any lightness passes; it is measured anyway, because the seed is allowed to
+   be any colour and "almost any" is not a guarantee. */
+function applyTint(seed) {
+  var hsl = rgbToHsl((seed >>> 16) & 255, (seed >>> 8) & 255, seed & 255);
+  var hue = hsl[0], sat = clamp(hsl[1], 0.35, 0.80);
+  var l = clamp(hsl[2], 0.45, 0.72);
+  var vein = hslToRgb(hue, sat, l), hot = mixWhite(vein, 0.70), i;
+  for (i = 0; i < 24; i++) {
+    vein = hslToRgb(hue, sat, l);
+    hot = mixWhite(vein, 0.70);
+    if (contrast(relLum(vein[0], vein[1], vein[2]), DISH_L) >= 3.0 &&
+        contrast(relLum(hot[0], hot[1], hot[2]), DISH_L) >= 7.0) break;
+    if (l >= 0.72) break;
+    l = Math.min(0.72, l + 0.02);
+  }
+  TINT = vein;
+  buildLUT(vein[0], vein[1], vein[2]);
+  ACC_CUE = rgba(vein, '.75');
+  ACC_ARC = rgba(vein, '.85');
+
+  /* The UI accent is a separate solve: it is text on the page ground AND the
+     background under dark button ink, so it has to clear both at 4.5:1. */
+  var ul = l, ui = vein;
+  for (i = 0; i < 30; i++) {
+    ui = hslToRgb(hue, sat, ul);
+    var uL = relLum(ui[0], ui[1], ui[2]);
+    if (contrast(uL, PAGE_L) >= 4.5 && contrast(uL, INK_L) >= 4.5) break;
+    if (ul >= 0.92) break;
+    ul = Math.min(0.92, ul + 0.02);
+  }
+  setAccent(hexOf(ui), hexOf(mixWhite(ui, 0.75)));
+}
+
+function setAccent(a, hotA) {
+  var root = document.documentElement;
+  if (!root || !root.style || !root.style.setProperty) return;
+  root.style.setProperty('--slime', a);
+  root.style.setProperty('--slime-hot', hotA);
+}
 
 /* ------------------------------------------------------------
    4. run state
@@ -449,14 +587,24 @@ var S = {
   exp: null, idx: -1, seed: 0,
   running: false, paused: false, over: false,
   simT: 0, peak: 0, cues: 0,
-  nodeProg: null, nodeDone: null, engulfed: 0,
-  hab: 0, habPeak: 0, habBuilt: -1,
+  nodeProg: null, nodeDone: null, nodeIdle: null, engulfed: 0,
+  hab: 0, habPeak: 0, habBuilt: -1, fused: false,
+  dietP: 0, dietC: 0,
   growAcc: 0, starveAcc: 0,
   shockNext: 0, shockActive: false, shockWarn: false, shocksSurvived: 0,
-  shockWarned: -1, quinTime: 0, slow: 1, anticipated: false,
+  shockWarned: -1, shockCycle: 0, shockPeriod: 0,
+  quinTime: 0, slow: 1, anticipated: false,
+  /* the ACTIVE wall and hazard lists. They start as the experiment's own and
+     are replaced by dish events, which is why they live here: the experiment
+     object is shared across every run of that dish and must not be written to. */
+  walls: [], hazards: [], eventIdx: 0,
   ambientAt: 0, scriptIdx: 0,
   note: '', failReason: ''
 };
+
+/* Hoisted out of S for the inner loop: sense() runs three times per agent per
+   step and reads this on every call, so it is a plain number, not a lookup. */
+var SLIME_W = 0;
 
 /* ------------------------------------------------------------
    5. building the dish
@@ -470,20 +618,47 @@ function fillRect(arr, val, rx, ry, rw, rh) {
   }
 }
 
+/* Masks from the ACTIVE lists, not the experiment's. Startup and a mid-run
+   dish event are the same operation — stamp from scratch — so they share it
+   rather than one of them growing its own half-correct copy. */
+function stampMasks() {
+  var i;
+  wallM.fill(0); hazM.fill(0);
+  for (i = 0; i < S.walls.length; i++) {
+    var w = S.walls[i];
+    fillRect(wallM, 1, w[0], w[1], w[2], w[3]);
+  }
+  for (i = 0; i < S.hazards.length; i++) {
+    var hz = S.hazards[i];
+    fillRect(hazM, hz.type === 'q' ? 2 : (hz.type === 'l' ? 3 : 1), hz.x, hz.y, hz.w, hz.h);
+  }
+}
+
+/* Everything downstream of the walls: distance along open agar, then the
+   static field built from it. A few SPFA sweeps, so it runs at dish setup and
+   at event times and nowhere else. */
+function rebuildGeo(e) {
+  nodeDist = [];
+  for (var nq = 0; nq < e.nodes.length; nq++) nodeDist.push(geodesicFrom(e.nodes[nq]));
+  buildFood();
+}
+
 function buildDish(e) {
   trail.fill(0); tmpF.fill(0); foodF.fill(0);
-  cueF.fill(0); retF.fill(0);
-  wallM.fill(0); hazM.fill(0); nodeAt.fill(-1);
+  cueF.fill(0); retF.fill(0); slimeF.fill(0);
+  nodeAt.fill(-1);
 
   var i, y, x;
 
-  for (i = 0; i < e.walls.length; i++) {
-    var w = e.walls[i];
-    fillRect(wallM, 1, w[0], w[1], w[2], w[3]);
-  }
-  for (i = 0; i < e.hazards.length; i++) {
-    var hz = e.hazards[i];
-    fillRect(hazM, hz.type === 'q' ? 2 : 1, hz.x, hz.y, hz.w, hz.h);
+  stampMasks();
+
+  /* A dish can arrive already smelling searched — the control condition, where
+     the mat is there but the culture did not lay it. */
+  if (e.preSlime) {
+    for (i = 0; i < e.preSlime.length; i++) {
+      var pr = e.preSlime[i];
+      fillRect(slimeF, 1, pr[0], pr[1], pr[2], pr[3]);
+    }
   }
 
   for (var ni = 0; ni < e.nodes.length; ni++) {
@@ -498,10 +673,33 @@ function buildDish(e) {
       }
     }
   }
-  nodeDist = [];
-  for (var nq = 0; nq < e.nodes.length; nq++) nodeDist.push(geodesicFrom(e.nodes[nq]));
+  rebuildGeo(e);
+}
 
-  buildFood();
+/* A dish event: the plate is re-cut, or a lamp comes on, part-way through the
+   run. The replacement lists become the active ones, everything derived from
+   them is rebuilt, and anything standing where a wall now is does not survive
+   being enclosed by it. */
+function applyEvent(e, ev) {
+  var changed = false;
+  if (ev.walls) { S.walls = ev.walls; changed = true; }
+  if (ev.hazards) { S.hazards = ev.hazards; changed = true; }
+  if (changed) {
+    stampMasks();
+    var k = 0;
+    while (k < nAgents) {
+      var ci = (ay[k] | 0) * GW + (ax[k] | 0);
+      if (wallM[ci]) {
+        if (occ[ci]) occ[ci]--;
+        nAgents--;
+        ax[k] = ax[nAgents]; ay[k] = ay[nAgents]; ah[k] = ah[nAgents];
+        continue;
+      }
+      k++;
+    }
+    rebuildGeo(e);
+  }
+  if (ev.note) logLine(ev.note, !!ev.hi);
 }
 
 /* Geodesic distance from a node, flooding only through open agar. A radial
@@ -597,10 +795,13 @@ function buildFood() {
    food attraction, hazard repulsion (quinine scaled by habituation), walls. */
 function rebuildStatic() {
   var qs = HAZ_QUIN * (1 - S.hab * 0.92);
+  /* Light and heat are the same aversion with different scenery: a dish that
+     wants a gentler or fiercer field says so once and both follow. */
+  var hs = (S.exp && S.exp.heatRepel != null) ? S.exp.heatRepel : HAZ_HEAT;
   for (var i = 0; i < NCELL; i++) {
     var v = foodF[i] * FOODW;
     var h = hazM[i];
-    if (h === 1) v -= HAZ_HEAT;
+    if (h === 1 || h === 3) v -= hs;
     else if (h === 2) v -= qs;
     if (wallM[i]) v += WALL_PEN;
     statF[i] = v;
@@ -692,7 +893,20 @@ function killRandom() {
 function sense(x, y) {
   if (x < 0 || y < 0 || x >= GW || y >= GH) return WALL_PEN;
   var i = (y | 0) * GW + (x | 0);
-  return trail[i] + statF[i] + cueF[i] * CUEW - retF[i] * RETW;
+  var v = trail[i] + statF[i] + cueF[i] * CUEW - retF[i] * RETW;
+  /* Slime aversion, where a dish has asked for it. The organism must not flee
+     its own living tubes: a vein carrying traffic is home, and the mat only
+     repels where the trail has gone thin — abandoned ground, not occupied
+     ground. One multiply-add, and a single comparison when the dish is off. */
+  if (SLIME_W > 0) {
+    var sm = slimeF[i];
+    if (sm > 0) {
+      var occupied = trail[i] * 0.125;
+      if (occupied > 1) occupied = 1;
+      v -= SLIME_W * sm * SLIMEW * (1 - occupied);
+    }
+  }
+  return v;
 }
 
 /* ------------------------------------------------------------
@@ -735,6 +949,14 @@ function step() {
   var e = S.exp;
   S.simT += DT;
 
+  /* Dish events, at most one a step and strictly in order, before anything
+     else reads the masks — so the trail under a wall that has just appeared is
+     zeroed by this step's diffusion rather than the next one's. */
+  if (e.events && S.eventIdx < e.events.length && S.simT >= e.events[S.eventIdx].t) {
+    applyEvent(e, e.events[S.eventIdx]);
+    S.eventIdx++;
+  }
+
   diffuseTrail();
 
   var i, k;
@@ -771,8 +993,16 @@ function step() {
      bitter edge before it could learn anything — which is the one outcome
      this dish must not have. */
   var quinDmg = 0.011 * (1 - S.hab);
-  var heatDmg = 0.010;
+  var heatDmg = (e.heatDmg == null) ? 0.010 : e.heatDmg;
   var inQuin = 0;
+
+  /* The stranger's culture, hoisted to three numbers so the test in the loop
+     is two multiplies and a compare. Everything about fusion is off unless a
+     dish has put another organism on the plate. */
+  var donor = e.donor;
+  var donX = 0, donY = 0, donR2 = 0, donHits = 0;
+  if (donor) { donX = donor.x; donY = donor.y; donR2 = donor.r * donor.r; }
+  var slimeOn = SLIME_W > 0;
 
   /* restamp the occupancy counts for this step from where the agents actually
      are — the one line that guarantees the counts cannot drift across frames */
@@ -854,12 +1084,24 @@ function step() {
     var ni = nodeAt[cell];
     if (ni >= 0) nodeHits[ni]++;
 
+    /* The mat is laid wherever the organism IS, not only where it moved: a
+       front jammed against a wall has still been there, and the ground still
+       remembers it. */
+    if (slimeOn) {
+      var sm2 = slimeF[cell] + SLIME_DEP;
+      slimeF[cell] = sm2 > 1 ? 1 : sm2;
+    }
+    if (donor) {
+      var ddx = (cell % GW) - donX, ddy = ((cell / GW) | 0) - donY;
+      if (ddx * ddx + ddy * ddy <= donR2) donHits++;
+    }
+
     var dead = false;
     var hz = hazM[cell];
     if (hz === 2) {
       inQuin++;
       if (quinDmg > 0 && rnd() < quinDmg) dead = true;
-    } else if (hz === 1) {
+    } else if (hz === 1 || hz === 3) {
       if (rnd() < heatDmg) dead = true;
     }
     if (!dead && shockOn) {
@@ -878,10 +1120,14 @@ function step() {
 
   /* --- habituation --- */
   if (e.hab) {
+    /* habRate scales first-hand learning only. A dish that wants the lesson to
+       arrive from somewhere else can turn this down to nearly nothing without
+       touching what a donor culture is worth. */
+    var hrate = (e.habRate == null) ? 1 : e.habRate;
     if (nAgents > 0 && inQuin > 0) {
       S.quinTime += DT;
       var frac = inQuin / nAgents;
-      S.hab = clamp(S.hab + frac * 1.5 * DT + 0.020 * DT, 0, 1);
+      S.hab = clamp(S.hab + frac * 1.5 * DT * hrate + 0.020 * DT * hrate, 0, 1);
     } else {
       S.hab = clamp(S.hab - 0.012 * DT, 0, 1);
     }
@@ -889,9 +1135,48 @@ function step() {
     if (Math.abs(S.hab - S.habBuilt) > 0.03) rebuildStatic();
   }
 
+  /* --- fusion with the donor culture ---
+     Two plasmodia that touch do not compete; they anastomose, and after that
+     there is one organism holding both memories. Eight agents in contact is a
+     tube rather than a stray tip, and what crosses is the stranger's
+     habituation, ramped rather than granted. */
+  if (donor && donHits >= 8) {
+    if (!S.fused) {
+      S.fused = true;
+      logLine('the two fronts meet and do not stop at each other. one tube now, and it remembers things you never did.', true);
+    }
+    if (S.hab < donor.hab) {
+      S.hab = Math.min(donor.hab, S.hab + 0.10 * DT);
+      if (S.hab > S.habPeak) S.habPeak = S.hab;
+      if (Math.abs(S.hab - S.habBuilt) > 0.03) rebuildStatic();
+    }
+  }
+
   /* --- node engulfment --- */
+  var resealT = e.reseal || 0;
   for (i = 0; i < e.nodes.length; i++) {
-    if (S.nodeDone[i]) continue;
+    if (S.nodeDone[i]) {
+      /* A taken node is not taken for good: leave it and the flake skins over.
+         The dish that asks for this is asking the culture to HOLD ground, which
+         is a different problem from reaching it. */
+      if (resealT > 0) {
+        if (nodeHits[i] > 0) {
+          S.nodeIdle[i] = 0;
+        } else {
+          S.nodeIdle[i] += DT;
+          if (S.nodeIdle[i] >= resealT) {
+            S.nodeIdle[i] = 0;
+            S.nodeDone[i] = false;
+            S.nodeProg[i] = 0.35;
+            S.engulfed--;
+            buildFood();
+            onReseal(i);
+          }
+        }
+      }
+      continue;
+    }
+    S.nodeIdle[i] = 0;
     var hits = nodeHits[i];
     if (hits === 0) {
       /* abandoned ground is lost again: commit to a flake or leave it alone */
@@ -938,8 +1223,35 @@ function step() {
 
   /* --- end conditions --- */
   if (nAgents <= 0) { finish(false, 'starved'); return; }
-  if (S.engulfed >= e.nodes.length && cyclesMet(e) && !S.shockActive) { finish(true, ''); return; }
+  if (winMet(e)) { finish(true, ''); return; }
   if (e.timeLimit && S.simT >= e.timeLimit) { finish(false, 'timeout'); return; }
+}
+
+/* What the dish actually asks for. Every dish asks for the food gate and, if
+   it runs a schedule, for cycles; the rest are opt-in and absent by default,
+   so a plate that names none of them is gated exactly as it always was. */
+function engulfGate(e) {
+  if (e.required) {
+    for (var i = 0; i < e.required.length; i++) if (!S.nodeDone[e.required[i]]) return false;
+    return true;
+  }
+  if (e.holdWin) return S.engulfed >= e.holdWin;
+  return S.engulfed >= e.nodes.length;
+}
+
+/* Protein against carbohydrate. A plasmodium offered a choice of foods does
+   not maximise either one; it holds a ratio, and holding it is the result. */
+function dietMet(e) {
+  var d = e.diet;
+  if (!d) return true;
+  if (S.engulfed < (d.min | 0)) return false;
+  if (S.dietC <= 0) return false;
+  var ratio = S.dietP / S.dietC;
+  return ratio >= d.target - d.tol && ratio <= d.target + d.tol;
+}
+
+function winMet(e) {
+  return engulfGate(e) && cyclesMet(e) && dietMet(e) && !S.shockActive;
 }
 
 /* A dish that runs on a schedule is not won by food alone: the win text claims
@@ -952,12 +1264,33 @@ function cyclesLeft(e) {
   return Math.max(0, (e.minShocks | 0) - S.shocksSurvived);
 }
 
+/* One cycle is over — fired or withheld, both count. The live period lives in
+   S rather than on the experiment, which is shared across every run of the
+   dish and would otherwise carry one run's acceleration into the next. */
+function advanceShock(sh) {
+  S.shocksSurvived++;
+  S.shockCycle++;
+  if (sh.accel) S.shockPeriod = Math.max(sh.minPeriod || 1, S.shockPeriod * sh.accel);
+  S.shockNext += S.shockPeriod;
+}
+
 function updateShocks(e) {
   var sh = e.shock;
   if (S.shockNext === 0) S.shockNext = sh.first;
+  if (S.shockPeriod === 0) S.shockPeriod = sh.period;
+
+  /* A withheld shock is the cruellest version of the experiment and the one
+     that proves the point: the warning runs in full, the culture thickens for
+     it, and then nothing arrives. The anticipation was real either way. */
+  var skip = false;
+  if (sh.skip) {
+    var cyc = S.shockCycle + 1;
+    for (var si = 0; si < sh.skip.length; si++) if (sh.skip[si] === cyc) { skip = true; break; }
+  }
 
   var was = S.shockActive;
-  var active = S.simT >= S.shockNext && S.simT < S.shockNext + sh.dur;
+  var reached = S.simT >= S.shockNext;
+  var active = !skip && reached && S.simT < S.shockNext + sh.dur;
   var warn = !active && S.simT >= S.shockNext - sh.warn && S.simT < S.shockNext;
 
   if (warn && S.shockWarned !== S.shockNext) {
@@ -972,9 +1305,11 @@ function updateShocks(e) {
     logLine('DRY SHOCK — everything not on engulfed agar is losing water.', true);
   }
   if (!active && was) {
-    S.shocksSurvived++;
-    S.shockNext += sh.period;
+    advanceShock(sh);
     logLine('the air comes back. shock ' + S.shocksSurvived + ' survived.');
+  } else if (skip && reached) {
+    advanceShock(sh);
+    logLine('the observer holds the switch. the dry air never comes.', true);
   }
   S.shockActive = active;
   S.shockWarn = warn;
@@ -1019,7 +1354,22 @@ function paintField() {
       var hz = hazM[i];
       if (hz === 1) { r += 38; g += 20; b += 9; }
       else if (hz === 2) { r += 27; g += 12; b += 40; }
+      /* a lit field, not an ember: the same aversion, told cold */
+      else if (hz === 3) { r += 30; g += 34; b += 40; }
       var t = trail[i];
+      /* The mat, where a dish is running on it. Cool, grey and much fainter
+         than any hazard — it is the record of where the organism has been,
+         not a thing on the plate — and it fades out under live tube, because
+         under live tube it is not something the player needs to see. */
+      if (SLIME_W > 0) {
+        var sv = slimeF[i];
+        if (sv > 0.05) {
+          var thin = 1 - (t > 8 ? 1 : t * 0.125);
+          if (thin > 0) {
+            r += sv * 7 * thin; g += sv * 8 * thin; b += sv * 11 * thin;
+          }
+        }
+      }
       if (t > 0.004) {
         var gi = (t * GAM_SCALE) | 0;
         if (gi >= GAMN) gi = GAMN - 1;
@@ -1066,6 +1416,24 @@ function render() {
   ctx.setTransform(sx, 0, 0, sy, 0, 0);
 
   var e = S.exp;
+
+  /* The stranger. Drawn under the nodes so a flake sitting on it still reads,
+     and pulsed off sim time rather than the wall clock so a time-lapse run and
+     a real-time one show the same frame at the same step. */
+  if (e.donor) {
+    var dn = e.donor;
+    var puls = 0.5 + 0.5 * Math.sin(S.simT * 1.7);
+    ctx.beginPath();
+    ctx.arc(dn.x, dn.y, dn.r * 0.72, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(127,209,185,' + (0.05 + 0.05 * puls).toFixed(3) + ')';
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(dn.x, dn.y, dn.r, 0, Math.PI * 2);
+    ctx.lineWidth = 1.4;
+    ctx.strokeStyle = 'rgba(127,209,185,' + (0.30 + 0.34 * puls).toFixed(3) + ')';
+    ctx.stroke();
+  }
+
   for (var i = 0; i < e.nodes.length; i++) {
     var nd = e.nodes[i];
     var done = S.nodeDone[i];
@@ -1079,7 +1447,7 @@ function render() {
       ctx.beginPath();
       ctx.arc(nd.x, nd.y, nd.r, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * S.nodeProg[i]);
       ctx.lineWidth = 2.2;
-      ctx.strokeStyle = 'rgba(227,210,74,.85)';
+      ctx.strokeStyle = ACC_ARC;
       ctx.stroke();
     }
 
@@ -1093,7 +1461,7 @@ function render() {
     ctx.beginPath();
     ctx.arc(ptr.gx, ptr.gy, CUE_R, 0, Math.PI * 2);
     ctx.lineWidth = 1.1;
-    ctx.strokeStyle = ptr.mode === 2 ? 'rgba(199,75,106,.75)' : 'rgba(227,210,74,.75)';
+    ctx.strokeStyle = ptr.mode === 2 ? 'rgba(199,75,106,.75)' : ACC_CUE;
     ctx.stroke();
   }
 
@@ -1162,15 +1530,35 @@ function onEngulf(i) {
   var e = S.exp, nd = e.nodes[i];
   var dir = dirWord(e.inoc.x, e.inoc.y, nd.x, nd.y);
   var left = e.nodes.length - S.engulfed;
+  /* What the flake actually was, in the two numbers the organism balances */
+  if (nd.nut) { S.dietP += nd.nut[0]; S.dietC += nd.nut[1]; }
   var lines = [
     'something rich to the ' + dir + '. folded in.',
     nd.label + ' engulfed — the tube to the ' + dir + ' thickens.',
     'contact ' + dir + '. that one is inside you now.'
   ];
   logLine(pick(lines), true);
+  /* A decoy costs what reaching it cost. It still counts as engulfed, because
+     the organism did engulf it; it simply was not worth engulfing. */
+  if (nd.trap) {
+    var toll = Math.floor(nAgents * (e.trapCost || 0.22));
+    for (var t = 0; t < toll; t++) killRandom();
+    logLine('mostly cellulose. the tube that reached ' + nd.label + ' is being reabsorbed, and a good deal of you with it.', true);
+  }
   if (left === 0) logLine('all of it. every last flake.', true);
   else if (left === 1) logLine('one left.');
   flashNodeRow(i);
+  refreshNodeRows();
+}
+
+function onReseal(i) {
+  var nd = S.exp.nodes[i];
+  var lines = [
+    nd.label + ' skins over. you stopped holding it and the agar closed.',
+    'the flake at ' + nd.label + ' re-forms. ground is only yours while you are standing on it.',
+    nd.label + ' seals again — not lost, but to be taken a second time.'
+  ];
+  logLine(pick(lines), true);
   refreshNodeRows();
 }
 
@@ -1215,6 +1603,9 @@ function refreshNodeRows() {
       if (el.className.indexOf('hit') < 0) el.className = 'n hit';
       el.textContent = lbl + ' ●';
     } else {
+      /* a node can go back the other way where a dish reseals, so the row has
+         to be able to un-light rather than only ever lighting up once */
+      if (el.className.indexOf('hit') >= 0) el.className = 'n';
       el.textContent = lbl + ' ' + Math.floor(S.nodeProg[i] * 100) + '%';
     }
   }
@@ -1252,6 +1643,11 @@ function updateHUD() {
   if (e.hab) {
     $('h-hab').textContent = Math.round(S.hab * 100) + '%';
     $('h-habbar').style.width = (S.hab * 100).toFixed(1) + '%';
+  } else if (e.diet) {
+    /* The meter is a position, not a quantity: the band the dish wants sits in
+       the middle, and either side of centre is a different way of being wrong. */
+    $('h-hab').textContent = 'p ' + Math.round(S.dietP) + ' · c ' + Math.round(S.dietC);
+    $('h-habbar').style.width = dietPos(e).toFixed(1) + '%';
   }
 
   $('h-obj').textContent = objText(e);
@@ -1259,8 +1655,31 @@ function updateHUD() {
   $('h-note').textContent = noteText(e);
 }
 
+/* Band centre at 50%, band edges at 25 and 75 — so the meter is read the way
+   the gate is written, and sitting in the middle is the whole instruction. */
+function dietPos(e) {
+  if (S.dietC <= 0) return 0;
+  var d = e.diet;
+  return clamp(50 + 25 * (S.dietP / S.dietC - d.target) / (d.tol || 1), 0, 100);
+}
+function dietRatio() {
+  return S.dietC > 0 ? (S.dietP / S.dietC).toFixed(1) : '—';
+}
+
+/* The objective line counts what the win actually counts. A dish where only
+   four of nine flakes matter must not report nine, and one that asks for
+   simultaneous holding must not report a running total. */
 function objText(e) {
-  var s = e.objShort + ' ' + S.engulfed + ' / ' + e.nodes.length;
+  var s, i, d;
+  if (e.required) {
+    d = 0;
+    for (i = 0; i < e.required.length; i++) if (S.nodeDone[e.required[i]]) d++;
+    s = e.objShort + ' ' + d + ' / ' + e.required.length;
+  } else if (e.holdWin) {
+    s = 'HELD ' + S.engulfed + ' / ' + e.holdWin;
+  } else {
+    s = e.objShort + ' ' + S.engulfed + ' / ' + e.nodes.length;
+  }
   if (e.minShocks) s += ' · CYCLES ' + Math.min(S.shocksSurvived, e.minShocks) + ' / ' + e.minShocks;
   return s;
 }
@@ -1269,7 +1688,13 @@ function noteText(e) {
   if (S.shockActive) return 'DRY SHOCK — hold the refuges';
   if (S.shockWarn && S.slow < 0.98) return 'thickening early — the interval has a shape';
   if (S.shockWarn) return 'humidity falling — ' + Math.max(0, Math.ceil(S.shockNext - S.simT)) + 's';
-  if (e.minShocks && S.engulfed >= e.nodes.length) {
+  /* Only when the ratio is the one thing left in the way — otherwise it is a
+     number on screen that the player cannot yet act on. */
+  if (e.diet && engulfGate(e) && !dietMet(e)) {
+    if (S.engulfed < (e.diet.min | 0)) return 'fed, but not on enough — ' + S.engulfed + ' / ' + (e.diet.min | 0) + ' sources';
+    return 'p:c ' + dietRatio() + ' — wanted ' + e.diet.target.toFixed(1) + ' ±' + e.diet.tol;
+  }
+  if (e.minShocks && engulfGate(e)) {
     var c = cyclesLeft(e);
     return c > 0 ? 'every flake taken — ' + c + ' more dry cycle' + (c === 1 ? '' : 's') + ' to outlast'
                  : 'every flake taken — hold through this cycle';
@@ -1442,21 +1867,32 @@ function startRun(i, seed) {
      standing before anything in the dish is placed. */
   S.seed = (seed == null || seed === '') ? freshSeed(i) : normSeed(seed);
   rndSeed(mix32(S.seed, 0x9E3779B9, 0x85EBCA6B));
+  /* The plate number and the plate colour are the same number. Pure
+     arithmetic on the seed, drawing nothing, so the stream is untouched. */
+  applyTint(S.seed);
   stepsRun = 0;
   stepTarget = 0;
   setSpeed(1);
   S.running = true; S.paused = false; S.over = false;
   S.simT = 0; S.peak = 0; S.cues = 0;
   S.nodeProg = new Float32Array(e.nodes.length);
+  S.nodeIdle = new Float32Array(e.nodes.length);
   S.nodeDone = new Array(e.nodes.length);
   for (var q = 0; q < e.nodes.length; q++) S.nodeDone[q] = false;
+  if (nodeHits.length < e.nodes.length) nodeHits = new Int32Array(e.nodes.length);
   S.engulfed = 0;
-  S.hab = 0; S.habPeak = 0; S.habBuilt = -1;
+  S.hab = 0; S.habPeak = 0; S.habBuilt = -1; S.fused = false;
+  S.dietP = 0; S.dietC = 0;
   S.growAcc = 0; S.starveAcc = 0;
   S.shockNext = e.shock ? e.shock.first : 0;
+  S.shockPeriod = e.shock ? e.shock.period : 0;
   S.shockActive = false; S.shockWarn = false; S.shocksSurvived = 0;
-  S.shockWarned = -1; S.quinTime = 0; S.slow = 1; S.anticipated = false;
+  S.shockWarned = -1; S.shockCycle = 0;
+  S.quinTime = 0; S.slow = 1; S.anticipated = false;
   S.ambientAt = 14; S.scriptIdx = 0; S.failReason = '';
+  /* The active plate, before anything reads it: buildDish stamps from these. */
+  S.walls = e.walls; S.hazards = e.hazards; S.eventIdx = 0;
+  SLIME_W = e.slimeAvoid || 0;
 
   buildDish(e);
   inoculate(e);
@@ -1469,8 +1905,10 @@ function startRun(i, seed) {
   $('h-obj').textContent = objText(e);
   $('h-time').textContent = '00:00';
   $('h-note').textContent = '';
-  $('h-habwrap').style.display = e.hab ? '' : 'none';
-  $('h-hab').textContent = '0%';
+  /* One second meter, whichever of the two the dish is about. */
+  $('h-habwrap').style.display = (e.hab || e.diet) ? '' : 'none';
+  $('h-meterlab').textContent = e.diet && !e.hab ? 'P : C' : 'Habituation';
+  $('h-hab').textContent = e.diet && !e.hab ? 'p 0 · c 0' : '0%';
   $('h-habbar').style.width = '0%';
   $('pauseveil').classList.remove('on');
 
@@ -1547,12 +1985,15 @@ function showResult(won) {
     rows.push(['Habituation reached', Math.round(S.habPeak * 100) + '%']);
     rows.push(['Time in contact', fmtTime(S.quinTime)]);
   }
+  if (e.donor) rows.push(['Fusion', S.fused ? 'achieved' : 'never made contact']);
+  if (e.diet) rows.push(['Diet', 'P ' + Math.round(S.dietP) + ' · C ' + Math.round(S.dietC) + ' · ratio ' + dietRatio()]);
   if (e.shocks) rows.push(['Dry shocks survived', String(S.shocksSurvived)]);
   if (won && save.best[e.code] != null) rows.push(['Best run', fmtTime(save.best[e.code])]);
   /* The plate's provenance, last, the way a notebook records it: this dish is
      reproducible from that number alone — SLIME.start(idx, '#a3f2c1') runs it
-     again, cell for cell, at any time-lapse setting. */
-  rows.push(['Specimen line', seedLabel(S.seed)]);
+     again, cell for cell, at any time-lapse setting. The swatch is the same
+     number again, as the colour the culture was actually grown in. */
+  rows.push(['Specimen line', seedLabel(S.seed), hexOf(TINT)]);
 
   var stats = $('r-stats');
   stats.innerHTML = '';
@@ -1562,6 +2003,12 @@ function showResult(won) {
     k.className = 'mono-dim';
     k.textContent = rows[i][0] + ' — ';
     d.appendChild(k);
+    if (rows[i][2]) {
+      var sw = document.createElement('span');
+      sw.style.cssText = 'display:inline-block;width:10px;height:10px;margin-right:7px;' +
+        'vertical-align:-1px;border:1px solid var(--line);background:' + rows[i][2];
+      d.appendChild(sw);
+    }
     d.appendChild(document.createTextNode(rows[i][1]));
     stats.appendChild(d);
   }
@@ -1755,6 +2202,9 @@ function bindButtons() {
 
 function init() {
   loadSave();
+  /* Declare the default palette on the element rather than leaving it to the
+     stylesheet, so the first paint and every later run come from one place. */
+  setAccent('#e3d24a', '#fff6b0');
   if (detectCoarse()) markTouch();
   initCanvas();
   bindInput();
@@ -1788,6 +2238,12 @@ function init() {
     /* the seed of the current run, raw and as the notebook prints it */
     seed: function () { return S.seed; },
     seedLabel: function () { return seedLabel(S.seed); },
+    /* the vein tone the seed resolved to, after the contrast solve */
+    tint: function () { return hexOf(TINT); },
+    hab: function () { return S.hab; },
+    diet: function () { return { p: S.dietP, c: S.dietC }; },
+    engulfed: function () { return S.engulfed; },
+    shocks: function () { return S.shocksSurvived; },
     /* sim steps executed this run — the axis determinism is defined over */
     steps: function () { return stepsRun; },
     /* harness only: pause once exactly n steps have run (0 clears it), so two
