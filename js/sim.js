@@ -137,6 +137,15 @@ function mixWhite(c, k) {
           Math.round(c[1] + (255 - c[1]) * k),
           Math.round(c[2] + (255 - c[2]) * k)];
 }
+/* The other end of mixWhite: the tint with the light taken off it, for the
+   shadow a raised vein drops on the sheet beside it. Toward black in a
+   straight line for the same reason mixWhite goes toward white in one — a
+   straight line to either corner of the cube holds the hue, so a shaded green
+   is a darker green and never a neutral grey. */
+function mixBlack(c, k) {
+  var m = 1 - k;
+  return [Math.round(c[0] * m), Math.round(c[1] * m), Math.round(c[2] * m)];
+}
 function hex2(n) { var h = (n | 0).toString(16); return h.length < 2 ? '0' + h : h; }
 function hexOf(c) { return '#' + hex2(c[0]) + hex2(c[1]) + hex2(c[2]); }
 function rgba(c, a) { return 'rgba(' + c[0] + ',' + c[1] + ',' + c[2] + ',' + a + ')'; }
@@ -1510,15 +1519,35 @@ var INK_L  = relLum(20, 23, 13);
    and lightness is walked upward until the vein tone clears WCAG 1.4.11
    against the agar and the hot tone clears 7:1. With a floor this dark almost
    any lightness passes; it is measured anyway, because the seed is allowed to
-   be any colour and "almost any" is not a guarantee. */
+   be any colour and "almost any" is not a guarantee.
+
+   The hot tone MUST be the one the widest band actually strokes, and is read
+   off VEIN_BANDS rather than written here as a number so it cannot drift from
+   it. A brighter stand-in does not make the test safer: the agar is dark, so
+   contrast RISES with brightness, and asking 7:1 of a tone brighter than
+   anything drawn is a weaker demand than asking it of the band itself. That
+   was a live gap and not a theoretical one — this solve tested mixWhite 0.70
+   against a band drawn at 0.48, which happened to hold across the seed space
+   by luck rather than by construction, and the moment the band came down to
+   0.40 the trunk fell under 7:1 for a fifth of all seeds while the solve went
+   on reporting success. Reading the band closes it by construction.
+
+   VEIN_BANDS is a var initialised further down the file, so this reads it at
+   CALL time, not definition time. The only caller is startRun, long after the
+   file has finished evaluating; the fallback covers a future caller that runs
+   earlier rather than any path that exists today. */
+function hotBandK() {
+  return VEIN_BANDS ? VEIN_BANDS[VEIN_BANDS.length - 1].hot : 0.40;
+}
 function applyTint(seed) {
   var hsl = rgbToHsl((seed >>> 16) & 255, (seed >>> 8) & 255, seed & 255);
   var hue = hsl[0], sat = clamp(hsl[1], 0.35, 0.80);
   var l = clamp(hsl[2], 0.45, 0.72);
-  var vein = hslToRgb(hue, sat, l), hot = mixWhite(vein, 0.70), i;
+  var hotK = hotBandK();
+  var vein = hslToRgb(hue, sat, l), hot = mixWhite(vein, hotK), i;
   for (i = 0; i < 24; i++) {
     vein = hslToRgb(hue, sat, l);
-    hot = mixWhite(vein, 0.70);
+    hot = mixWhite(vein, hotK);
     if (contrast(relLum(vein[0], vein[1], vein[2]), DISH_L) >= 3.0 &&
         contrast(relLum(hot[0], hot[1], hot[2]), DISH_L) >= 7.0) break;
     if (l >= 0.72) break;
@@ -2722,36 +2751,74 @@ var RIDGE_REL = 0.14;  // ...as a fraction of the cell's own trail
    bright hairline; a trunk is broad, and pale because it is carrying
    everything. */
 /* Five generations of vein, because the organism has about that many and the
-   hierarchy is most of what the picture is. Thin veins are drawn a shade
-   duller: in the photograph a fine vein is thin enough to be translucent and
-   sits closer to the agar in tone, while a trunk is opaque chrome yellow with
-   a highlight along it. Widths span roughly seven to one, which is the ratio
-   the real thing shows between its finest branches and its trunk. */
-/* Five generations of vein, because the organism has about that many and the
    hierarchy is most of what the picture is. Widths span roughly eight to one,
    the ratio the real thing shows between its finest branches and its trunk.
 
    The COLOURS are the run's, and have to be: the body is tinted from the seed,
    so a fixed yellow set here would draw a blue specimen with yellow veins.
    Each band is the tint walked toward white by its own amount — a fine vein is
-   thin enough to be translucent and sits near the tissue tone, a trunk is
-   opaque and carries the highlight — and `dim` pulls the finest band back
-   under the tissue so it reads as a vein in the sheet rather than on top of
-   it. Rebuilt per run alongside the LUT. */
+   thin enough to be translucent and sits near the tissue tone, a trunk stands
+   proudest and catches the most light — and `dim` pulls the finest band back
+   under the tissue so it reads as a groove in the sheet rather than a tube on
+   top of it. Rebuilt per run alongside the LUT.
+
+   `hot` used to run half again as far, and that is what the white streaks
+   were. The walk toward white holds the hue and holds HSL saturation; what it
+   cannot hold is CHROMA, because there is less and less room for any at the
+   top of the cube. A trunk at hot 0.48 landed on lightness 0.75, where a
+   saturated green has a quarter of the colour it started with, and the eye
+   reads a line that light as white however green the number says it is. The
+   band now tops out around lightness 0.68, which is still plainly the
+   brightest thing on the plate and still plainly the specimen's colour.
+
+   The brightness it gives up is returned as `cast`: how much shadow the band
+   drops on the sheet beside it, as an alpha. That is the better trade because
+   a highlight needs something to be a highlight OF. The tissue is one flat
+   threshold colour, so a bright line on it was the only tonal event in the
+   picture and read as something drawn ON the plate; a crest with a shade down
+   one side reads as a tube standing up out of it, at a fraction of the
+   brightness. `cast` rises with width because that is also what makes the
+   hierarchy legible: a trunk is a raised tube and throws a real shadow, a
+   hairline barely lifts off the sheet.
+
+   The two finest bands throw none at all, for two separate reasons that
+   happen to agree. `dim` has already sunk the finest BELOW the sheet, where a
+   cast shadow would be a contradiction. And a shadow is only a shadow if you
+   can see which way it fell — the throw scales with the band's own width, so
+   below about a cell it lands under its own crest on both sides and draws an
+   OUTLINE. A dish full of outlined hairlines reads as cut paper, which is a
+   worse failure than the streaks this is fixing. */
 var VEIN_BANDS = [
-  { max: 6,        w: 0.34, hot: 0.00, dim: 0.86, alpha: 0.90, style: '' },
-  { max: 10,       w: 0.62, hot: 0.10, dim: 1.00, alpha: 0.97, style: '' },
-  { max: 16,       w: 1.05, hot: 0.22, dim: 1.00, alpha: 1 },
-  { max: 26,       w: 1.75, hot: 0.34, dim: 1.00, alpha: 1 },
-  { max: Infinity, w: 2.70, hot: 0.48, dim: 1.00, alpha: 1 }
+  { max: 6,        w: 0.34, hot: 0.00, dim: 0.86, alpha: 0.90, cast: 0.00, style: '', shadow: '' },
+  { max: 10,       w: 0.62, hot: 0.09, dim: 1.00, alpha: 0.97, cast: 0.00, style: '', shadow: '' },
+  { max: 16,       w: 1.05, hot: 0.18, dim: 1.00, alpha: 1,    cast: 0.24, style: '', shadow: '' },
+  { max: 26,       w: 1.75, hot: 0.28, dim: 1.00, alpha: 1,    cast: 0.32, style: '', shadow: '' },
+  { max: Infinity, w: 2.70, hot: 0.40, dim: 1.00, alpha: 1,    cast: 0.40, style: '', shadow: '' }
 ];
+/* The lamp: up and to the left of the bench, the way a plate is lit for a
+   photograph. A unit vector in GRID cells, pointing the way shadows fall, so
+   the offsets below scale with the dish and survive a resize along with the
+   baked paths. */
+var LIGHT_X = 0.7071, LIGHT_Y = 0.7071;
+/* How far a band's shadow slides out from under it, and how much wider it is
+   drawn, both as multiples of the band's own line width. Kept small: this is
+   a tube a fraction of a millimetre proud of the agar, not a pipe on a table,
+   and a longer throw immediately reads as a drop shadow under a sticker. */
+var CAST_OFF  = 0.46;
+var CAST_GROW = 1.22;
 function tintVeins(vein) {
+  /* One shade for every band, not one per band: a shadow is the absence of
+     the lamp on the TISSUE, and the tissue is a single flat colour whatever
+     vein happens to sit on it. Depth is carried by `cast` and by how far each
+     band throws, which is where it belongs. */
+  var sh = mixBlack(vein, 0.60);
   for (var i = 0; i < VEIN_BANDS.length; i++) {
     var band = VEIN_BANDS[i];
     var c = mixWhite(vein, band.hot);
     band.style = 'rgba(' + Math.round(c[0] * band.dim) + ','
                          + Math.round(c[1] * band.dim) + ','
                          + Math.round(c[2] * band.dim) + ',' + band.alpha + ')';
+    band.shadow = band.cast ? rgba(sh, band.cast.toFixed(3)) : '';
   }
   TIP_STYLE = rgba(mixWhite(vein, 0.62), '0.34');
 }
@@ -2978,8 +3045,31 @@ function strokeVeins(sx, sy) {
   ctx.setTransform(sx, 0, 0, sy, 0, 0);
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
+  var b, band;
+  /* Every shadow first, then every highlight — rather than shading each band
+     as it is drawn. Two passes cost one extra loop over five cached paths and
+     buy the rule that makes the network read as one surface: nothing standing
+     ABOVE the sheet can have a shadow laid on top of it. Interleaved, a
+     narrower band drawn later dropped its shade across the crest of the trunk
+     it joins, which on the default plate took about 2.6% of the second-widest
+     band's highlight pixels with it — small, but it is exactly the junctions
+     that lose them, and the junctions are where the hierarchy is read. */
+  for (b = VEIN_BANDS.length - 1; b >= 0; b--) {
+    band = VEIN_BANDS[b];
+    if (!veinPath[b] || !band.shadow) continue;
+    /* Offset only the shadow, never the crest. The crest IS the vein — the
+       ridge walk put it on the centreline and moving it would draw the
+       network somewhere the simulation does not have one. Sliding the shade
+       out from under it is what leaves a dark crescent down one side. */
+    ctx.save();
+    ctx.translate(band.w * CAST_OFF * LIGHT_X, band.w * CAST_OFF * LIGHT_Y);
+    ctx.lineWidth = band.w * CAST_GROW;
+    ctx.strokeStyle = band.shadow;
+    ctx.stroke(veinPath[b]);
+    ctx.restore();
+  }
   /* widest first, so the hairlines land on top of the trunks they join */
-  for (var b = VEIN_BANDS.length - 1; b >= 0; b--) {
+  for (b = VEIN_BANDS.length - 1; b >= 0; b--) {
     if (!veinPath[b]) continue;
     ctx.lineWidth = VEIN_BANDS[b].w;
     ctx.strokeStyle = VEIN_BANDS[b].style;
