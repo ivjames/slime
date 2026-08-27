@@ -455,7 +455,7 @@ var EXPERIMENTS = [
     ],
     hazards: [],
     start: 5000, cap: 11000, sustain: 5000, grow: 320, starve: 16, grace: 180, reach: 280, engulf: 1.7,
-    timeLimit: 480, hab: false, shocks: false,
+    timeLimit: 620, hab: false, shocks: false,
     slimeAvoid: 2.5,
     preSlime: [[98, 76, 50, 108]],
     script: [
@@ -535,8 +535,8 @@ var EXPERIMENTS = [
     ],
     walls: [],
     hazards: [],
-    start: 4200, cap: 11000, sustain: 2200, grow: 310, starve: 40, grace: 45, reach: 260, engulf: 2.5,
-    timeLimit: 320, hab: false, shocks: false,
+    start: 4200, cap: 11000, sustain: 2200, grow: 310, starve: 40, grace: 45, engulf: 2.5,
+    timeLimit: 420, hab: false, shocks: false,
     holdWin: 4,
     diet: { target: 2, tol: 0.4, min: 4 },
     script: [
@@ -606,8 +606,8 @@ var EXPERIMENTS = [
       { type: 'q', x: 256, y: 0, w: 34, h: 260 }
     ],
     donor: { x: 66, y: 222, r: 18, hab: 0.85 },
-    start: 5000, cap: 11000, sustain: 4200, grow: 320, starve: 20, grace: 160, reach: 300,
-    timeLimit: 520, hab: true, shocks: false,
+    start: 5000, cap: 11000, sustain: 4200, grow: 320, starve: 12, grace: 260, reach: 300,
+    timeLimit: 560, hab: true, shocks: false,
     habRate: 0.12,
     script: [
       { t: 2, hi: true, text: 'two bitter strips ahead, and a second ring of cytoplasm in the corner that is not yet yours.' },
