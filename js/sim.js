@@ -1534,6 +1534,8 @@ function exitReplay() {
     if (fs.nodeDone) S.nodeDone = fs.nodeDone.slice();
     /* the run is a finished exhibit, whatever the snapshot said mid-frame */
     S.running = false; S.paused = false; S.over = true;
+    $('log').innerHTML = FINAL_STATE.logHTML;
+    setSpeed(FINAL_STATE.turbo);
   }
   if (LAST_RESULT) { paintResult(LAST_RESULT); openResult(); }
   render();
@@ -1796,6 +1798,8 @@ function showResult(won) {
     trail: new Float32Array(trail),
     cueF: new Float32Array(cueF), retF: new Float32Array(retF),
     n: nAgents,
+    logHTML: $('log').innerHTML,
+    turbo: TURBO,
     S: snap
   };
   LAST_RESULT = buildResult(won);
