@@ -339,6 +339,42 @@ var HAZ_QUIN = 5.2;    // repulsion of a quinine zone (scaled by 1 - habituation
    moved or blocked, so a front crossing once is enough to mark the ground. */
 var SLIME_DEP = 0.015;
 
+/* ---- the filamental trace ----
+   The slime mat's living opposite. A pioneering filament is a supply chain
+   with one weak link: the tube behind the tip decays on the same clock as
+   every other tube, and if cytoplasm does not follow the filament in before
+   that tube thins past TIP_MIN, the tip comes adrift and is reabsorbed — the
+   chain breaks not because the direction was wrong but because nothing knew
+   to follow. The trail field cannot carry that message: a young tube is
+   faint, and faint trail is exactly what an agent's sensors rank last.
+
+   So a tip that is actually supplied leaves a second mark as it runs — a
+   trace saying "a filament passed here, moments ago" — and the trace is what
+   other nuclei follow. It is laid three cells wide because it is READ by
+   point sensors: a one-cell line at sensor range is a lottery, a three-cell
+   corridor is a signal. It decays in a couple of seconds, so it recruits
+   followers onto ground the front holds NOW and never becomes a map of
+   everywhere the front has ever been. And it is weighted so that it wins on
+   thin ground and loses inside the body: the sensed term is scaled down by
+   the trail under it, the same shape as the slime mat's aversion, so a vein
+   that has become established stops advertising and the followers it pulled
+   in go back to reading the tube itself.
+
+   Three fields now say three different things about a cell: trail is the
+   tube (sensed, fast-decaying), the trace is the recent front (sensed,
+   seconds), slime is the searched past (sensed where a dish asks, never
+   fades). The knot field is the odd one out on purpose — a lobe is read from
+   the tube it sits in, so marking one is not a message to anybody.
+
+   None of this touches the supply test itself: a tip's feed is still read
+   from the trail, so a filament nothing follows still starves and the
+   pruning the game is built on still happens. The trace only gives the
+   network a fair chance to keep the chain fed — inhibition, not immunity. */
+var TRACE_DEP  = 0.50;  // trace a supplied tip lays into its own cell per step
+var TRACE_SIDE = 0.50;  // ...and this fraction of it into the four neighbours
+var TRACE_W    = 7.0;   // sensed weight of a full-strength trace
+var TRACE_HOLD = 0.995; // per-step decay: half-life ~2.3s at 60 steps/s
+
 var SPENT_FOOD = 0.30; // an engulfed node's remaining pull (a refuge, not a beacon)
 var SPENT_FALL = 34;   // and only over this reach, so spent food cannot outbid fresh
 var MAX_ENGULF_RATE = 1 / 200; // a node takes >= 3.3s to consume however big the front
@@ -1501,6 +1537,9 @@ var slimeF = new Float32Array(NCELL);  // extracellular slime, laid and never li
    is not sensed: what the organism senses is the tube, and the lobe is
    already part of that. */
 var knotF = new Float32Array(NCELL);
+/* Where the front has just been: laid by supplied tips, followed by the
+   cytoplasm behind them, gone in seconds. See the trace block in section 1. */
+var traceF = new Float32Array(NCELL);
 var nodeAt = new Int16Array(NCELL);    // cell -> node index, -1 for none
 /* And the same map at the fan's radius: which flake an agent standing here is
    feeding on, which is a wider disc than the flake itself because a pad
@@ -1874,7 +1913,7 @@ function buildDish(e) {
   fieldDirty = true;
   dirtyFrames = REBUILD_EVERY;
   trail.fill(0); tmpF.fill(0); foodF.fill(0);
-  cueF.fill(0); retF.fill(0); slimeF.fill(0); knotF.fill(0);
+  cueF.fill(0); retF.fill(0); slimeF.fill(0); knotF.fill(0); traceF.fill(0);
   nodeAt.fill(-1);
   feedAt.fill(-1);
 
@@ -2231,6 +2270,17 @@ function sense(x, y) {
       v -= SLIME_W * sm * (1 - occupied);
     }
   }
+  /* The filamental trace, scaled by the same occupancy the slime mat uses,
+     with the opposite sign: fresh front pulls, established tube does not need
+     to. Where a dish runs both, a filament crossing old ground reads as trace
+     minus slime — a pioneer can lead followers back across searched ground,
+     but only while it is actually out there leading. */
+  var tf = traceF[i];
+  if (tf > 0) {
+    var est = trail[i] * 0.125;
+    if (est > 1) est = 1;
+    v += TRACE_W * tf * (1 - est);
+  }
   return v;
 }
 
@@ -2283,12 +2333,22 @@ function diffuseTrail() {
    curve sampled more coarsely, on a quantity nothing reads for an edge. */
 var KNOT_EVERY = 8;
 var KNOT_FADE = Math.pow(KNOT_HOLD, KNOT_EVERY);
+/* The trace rides the same coarse clock, for the same reason: a field whose
+   half-life is seconds does not need sixty samples of its own curve a second,
+   and this way the two slow fields cost one sweep between them. */
+var TRACE_FADE = Math.pow(TRACE_HOLD, KNOT_EVERY);
 function decayKnots() {
   for (var i = 0; i < NCELL; i++) {
     var kf = knotF[i];
-    if (kf <= 0) continue;
-    kf = wallM[i] ? 0 : kf * KNOT_FADE;
-    knotF[i] = kf < 0.004 ? 0 : kf;
+    if (kf > 0) {
+      kf = wallM[i] ? 0 : kf * KNOT_FADE;
+      knotF[i] = kf < 0.004 ? 0 : kf;
+    }
+    var tf = traceF[i];
+    if (tf > 0) {
+      tf = wallM[i] ? 0 : tf * TRACE_FADE;
+      traceF[i] = tf < 0.01 ? 0 : tf;
+    }
   }
 }
 
@@ -2733,6 +2793,24 @@ function step() {
     if (slimeOn) {
       var sm2 = slimeF[cell] + SLIME_DEP;
       slimeF[cell] = sm2 > 1 ? 1 : sm2;
+    }
+    /* The trace is laid only by an agent that is a tip RIGHT NOW — supplied,
+       at the front, not feeding — and like the mat it is laid whether or not
+       the step found a free cell, since a jammed tip is still the front. The
+       cross footprint is what makes it findable (see the trace block in
+       section 1); the bounds test is for the flood-filled inoculation drop,
+       the one placer that can put an agent on the dish's outermost ring. */
+    if (tip) {
+      var tcx = cell % GW, tcy = (cell / GW) | 0;
+      var tv2 = traceF[cell] + TRACE_DEP;
+      traceF[cell] = tv2 > 1 ? 1 : tv2;
+      if (tcx > 0 && tcy > 0 && tcx < GW - 1 && tcy < GH - 1) {
+        var tside = TRACE_DEP * TRACE_SIDE;
+        tv2 = traceF[cell - 1] + tside;  traceF[cell - 1]  = tv2 > 1 ? 1 : tv2;
+        tv2 = traceF[cell + 1] + tside;  traceF[cell + 1]  = tv2 > 1 ? 1 : tv2;
+        tv2 = traceF[cell - GW] + tside; traceF[cell - GW] = tv2 > 1 ? 1 : tv2;
+        tv2 = traceF[cell + GW] + tside; traceF[cell + GW] = tv2 > 1 ? 1 : tv2;
+      }
     }
     if (donor) {
       var ddx = (cell % GW) - donX, ddy = ((cell / GW) | 0) - donY;
@@ -4236,6 +4314,7 @@ function exitReplay() {
     cueF.set(FINAL_STATE.cueF); retF.set(FINAL_STATE.retF);
     if (FINAL_STATE.slimeF) slimeF.set(FINAL_STATE.slimeF);
     if (FINAL_STATE.knotF) knotF.set(FINAL_STATE.knotF);
+    if (FINAL_STATE.traceF) traceF.set(FINAL_STATE.traceF);
     nAgents = FINAL_STATE.n;
     fieldDirty = true;
     ax.set(FINAL_STATE.ax); ay.set(FINAL_STATE.ay);
@@ -4553,6 +4632,7 @@ function showResult(won) {
        the trail without them puts the finished network back under swellings
        belonging to the abandoned replay */
     knotF: new Float32Array(knotF),
+    traceF: new Float32Array(traceF),
     n: nAgents,
     ax: ax.slice(0, nAgents), ay: ay.slice(0, nAgents),
     ah: ah.slice(0, nAgents), atip: atip.slice(0, nAgents),

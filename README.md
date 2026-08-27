@@ -99,7 +99,12 @@ and is why the dish is eaten by contact area rather than by whichever tube
 happens to be passing. And where tubes meet or turn a hard corner, the network
 grows a lobe — a swelling of cytoplasm parked at the junction, marked by the
 agents that notice they are standing at one and built by the traffic that goes
-through it afterwards. Both are drawn as masses rather than as lines. It's a real, if modest,
+through it afterwards. Both are drawn as masses rather than as lines. And an
+exploratory filament leaves a short-lived trace as it runs, which the nuclei
+behind it follow: cytoplasm streams out along a pioneer's line and keeps its
+young tube supplied, instead of letting it decay behind the tip and strand the
+front — the chain still breaks for filaments nothing follows, which is the
+pruning, but no longer for want of being noticed. It's a real, if modest,
 implementation of that model, not a hand-scripted imitation of one; don't
 expect anything close to a research-grade solver.
 
