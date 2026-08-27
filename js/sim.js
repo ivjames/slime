@@ -153,6 +153,27 @@ function detectCoarse() {
   if (navigator && (navigator.maxTouchPoints | 0) > 0) return true;
   return ('ontouchstart' in window);
 }
+/* A page zoomed before the guard above existed — or zoomed deliberately
+   somewhere else and never zoomed back — opens the dish showing a corner of
+   it. There is no API for "set the scale to 1", so this does the one thing
+   that works: pins maximum-scale for a few frames, which makes the page
+   re-lay out at 1, then hands zooming straight back. It fires only when the
+   page is actually zoomed in, and nothing is left pinned afterwards. */
+var zoomPinned = false;
+function resetZoom() {
+  var vv = window.visualViewport;
+  if (zoomPinned || !vv || !(vv.scale > 1.01)) return;
+  var m = document.querySelector('meta[name=viewport]');
+  if (!m) return;
+  var was = m.getAttribute('content');
+  zoomPinned = true;
+  m.setAttribute('content', was + ',maximum-scale=1');
+  window.setTimeout(function () {
+    m.setAttribute('content', was);
+    zoomPinned = false;
+  }, 350);
+}
+
 function markTouch() {
   if (TOUCH) return;
   TOUCH = true;
@@ -4116,11 +4137,20 @@ function doneCount() {
 var SCREENS = ['scr-title', 'scr-brief', 'scr-sim'];
 
 function show(id) {
+  var changed = false;
   for (var i = 0; i < SCREENS.length; i++) {
     var el = $(SCREENS[i]);
-    if (SCREENS[i] === id) el.classList.add('on');
+    var want = SCREENS[i] === id;
+    if (el.classList.contains('on') !== want) changed = true;
+    if (want) el.classList.add('on');
     else el.classList.remove('on');
   }
+  /* A screen swap replaces the whole page, so it starts at the top of the new
+     one. Without this, leaving a verdict you had scrolled down to read drops
+     you into the next dish already scrolled past the top of the plate — the
+     other half of arriving at part of the map. Only on an actual swap: calling
+     show for the screen already up must not yank the page. */
+  if (changed && window.scrollTo) window.scrollTo(0, 0);
 }
 
 /* ---------- title ---------- */
@@ -4304,6 +4334,14 @@ function feedTrace(s) {
   }
 }
 
+/* true if there was an open key list to close, so Escape can stop there. */
+function closeKeys() {
+  var k = $('keypop');
+  if (!k || !k.open) return false;
+  k.open = false;
+  return true;
+}
+
 function setReplayUI(on) {
   document.body.classList.toggle('replay', !!on);
   var x = $('s-exitrp');
@@ -4465,6 +4503,9 @@ function startRun(i, seed, trace) {
   $('pauseveil').classList.remove('on');
 
   show('scr-sim');
+  /* the dish is sized to fit the window, so arriving at one zoomed in is
+     arriving at part of it */
+  resetZoom();
   resizeCanvas();
   buildNodeRows();
   updateHUD();
@@ -4787,6 +4828,34 @@ function bindInput() {
 
   stage.addEventListener('contextmenu', function (ev) { ev.preventDefault(); });
 
+  /* Pinch-zoom is not covered by touch-action on iOS: Safari runs the page
+     zoom off its own gesture events, and zooms a surface that has opted out of
+     every touch behaviour there is. On a normal page that is a minor nuisance.
+     Here two fingers on the dish is a game verb — retract — so every retract
+     was also a pinch, and the player came out of it looking at a quarter of
+     the plate with no way back except pinching out again by hand.
+
+     Blocked on the dish and on the verb pads directly under it, which is where
+     a second finger lands; NOT on the page, because a player who wants to zoom
+     the schedule or read the brief closer is doing something reasonable and
+     1.4.4 says they get to. gesture* are WebKit-only — nothing else fires
+     them, so the listeners cost those browsers nothing. */
+  var GESTURES = ['gesturestart', 'gesturechange', 'gestureend'];
+  var noZoom = function (ev) { ev.preventDefault(); };
+  var surfaces = [stage, $('touchbar')], si, gi;
+  for (si = 0; si < surfaces.length; si++) {
+    if (!surfaces[si]) continue;
+    for (gi = 0; gi < GESTURES.length; gi++) {
+      surfaces[si].addEventListener(GESTURES[gi], noZoom, { passive: false });
+    }
+    /* and for the engines that route a two-finger drag through touch events
+       instead: touch-action already asks for this, the listener is what makes
+       it true where the ask is ignored */
+    surfaces[si].addEventListener('touchmove', function (ev) {
+      if (ev.touches && ev.touches.length > 1) ev.preventDefault();
+    }, { passive: false });
+  }
+
   stage.addEventListener('pointerdown', function (ev) {
     if (ev.pointerType === 'touch') markTouch();
     if (!S.running) return;
@@ -4853,8 +4922,10 @@ function bindInput() {
   document.addEventListener('keydown', function (ev) {
     if (!$('scr-sim').classList.contains('on')) return;
     /* A focused button already answers Space and Enter itself; handling them
-       here as well would fire the control twice. */
-    var onBtn = !!(ev.target && ev.target.tagName === 'BUTTON');
+       here as well would fire the control twice. A <summary> — the key list's
+       disclosure — answers both the same way, so it counts as one. */
+    var t = ev.target, tag = t && t.tagName;
+    var onBtn = tag === 'BUTTON' || tag === 'SUMMARY';
 
     if (ev.code === 'Enter' || ev.code === 'NumpadEnter') {
       /* the primary action of the verdict panel: on with the schedule */
@@ -4873,10 +4944,20 @@ function bindInput() {
       if (S.idx >= 0) startRun(S.idx);
     } else if (ev.code === 'Escape') {
       ev.preventDefault();
+      /* Escape reads as "close the thing that is open", innermost first: the
+         key list, then the replay, and only then the dish itself. */
+      if (closeKeys()) return;
       if (REPLAY.on) exitReplay();
       else goTitle();
     }
   });
+
+  /* The key list is a panel floating over the bench, so anything else the
+     hand does — including the first cue laid on the dish — puts it away. */
+  document.addEventListener('pointerdown', function (ev) {
+    var k = $('keypop');
+    if (k && k.open && !k.contains(ev.target)) k.open = false;
+  }, true);
 
   window.addEventListener('resize', function () {
     if (!$('scr-sim').classList.contains('on')) return;
