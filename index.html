@@ -314,12 +314,26 @@ body.touch .dish{min-height:132px}
 @media(max-width:640px){
   .hud-bl{width:58%}
   .hud-tl .lt,.hud-tl .rt{font-size:10px}
-  .hud-br{left:12px;right:auto;top:46px;bottom:auto;text-align:left;max-width:72%;font-size:10px;padding:6px 8px}
+  /* The note and the node list share the top of a narrow dish, one from each
+     edge, so their widths have to add up to less than the dish or one plate
+     covers the other — which is worse now than it was when they were bare text
+     over the agar. 48 + 42 leaves the two insets and a gap between them. The
+     note wraps to two lines at that width, and the longest node row ("flake
+     beyond 100%") wraps on the narrowest phones; both beat an overlap. */
+  .hud-br{left:12px;right:auto;top:46px;bottom:auto;text-align:left;max-width:48%;font-size:10px;padding:6px 8px}
+  .nodes{max-width:42%}
 }
 @container dish (max-width:640px){
   .hud-bl{width:58%}
   .hud-tl .lt,.hud-tl .rt{font-size:10px}
-  .hud-br{left:12px;right:auto;top:46px;bottom:auto;text-align:left;max-width:72%;font-size:10px;padding:6px 8px}
+  /* The note and the node list share the top of a narrow dish, one from each
+     edge, so their widths have to add up to less than the dish or one plate
+     covers the other — which is worse now than it was when they were bare text
+     over the agar. 48 + 42 leaves the two insets and a gap between them. The
+     note wraps to two lines at that width, and the longest node row ("flake
+     beyond 100%") wraps on the narrowest phones; both beat an overlap. */
+  .hud-br{left:12px;right:auto;top:46px;bottom:auto;text-align:left;max-width:48%;font-size:10px;padding:6px 8px}
+  .nodes{max-width:42%}
 }
 @media(max-width:520px){
   #app{padding:12px;gap:10px}
