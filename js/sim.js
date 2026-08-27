@@ -1528,14 +1528,12 @@ function exitReplay() {
     trail.set(FINAL_STATE.trail);
     cueF.set(FINAL_STATE.cueF); retF.set(FINAL_STATE.retF);
     nAgents = FINAL_STATE.n;
-    S.simT = FINAL_STATE.simT; S.peak = FINAL_STATE.peak; S.cues = FINAL_STATE.cues;
-    S.engulfed = FINAL_STATE.engulfed;
-    S.hab = FINAL_STATE.hab; S.habPeak = FINAL_STATE.habPeak;
-    S.shocksSurvived = FINAL_STATE.shocksSurvived;
-    S.shockActive = FINAL_STATE.shockActive; S.shockWarn = FINAL_STATE.shockWarn;
-    if (FINAL_STATE.nodeProg) S.nodeProg = FINAL_STATE.nodeProg.slice();
-    if (FINAL_STATE.nodeDone) S.nodeDone = FINAL_STATE.nodeDone.slice();
-    S.note = FINAL_STATE.note; S.failReason = FINAL_STATE.failReason;
+    var fs = FINAL_STATE.S;
+    for (var rk in fs) S[rk] = fs[rk];
+    if (fs.nodeProg) S.nodeProg = fs.nodeProg.slice();
+    if (fs.nodeDone) S.nodeDone = fs.nodeDone.slice();
+    /* the run is a finished exhibit, whatever the snapshot said mid-frame */
+    S.running = false; S.paused = false; S.over = true;
   }
   if (LAST_RESULT) { paintResult(LAST_RESULT); openResult(); }
   render();
@@ -1788,16 +1786,17 @@ function showResult(won) {
   /* Snapshot what the finished dish looks like, so aborting a replay can put
      the ORIGINAL final lattice and HUD figures back under the verdict instead
      of leaving the replay's partial state on display. */
+  /* copy EVERY field of S, not a hand-picked list — noteText/objText read a
+     wide, growing set of them and each omission has been its own bug */
+  var snap = {};
+  for (var sk in S) snap[sk] = S[sk];
+  snap.nodeProg = S.nodeProg ? S.nodeProg.slice() : null;
+  snap.nodeDone = S.nodeDone ? S.nodeDone.slice() : null;
   FINAL_STATE = {
     trail: new Float32Array(trail),
     cueF: new Float32Array(cueF), retF: new Float32Array(retF),
     n: nAgents,
-    simT: S.simT, peak: S.peak, cues: S.cues, engulfed: S.engulfed,
-    hab: S.hab, habPeak: S.habPeak, shocksSurvived: S.shocksSurvived,
-    shockActive: S.shockActive, shockWarn: S.shockWarn,
-    nodeProg: S.nodeProg ? S.nodeProg.slice() : null,
-    nodeDone: S.nodeDone ? S.nodeDone.slice() : null,
-    note: S.note, failReason: S.failReason
+    S: snap
   };
   LAST_RESULT = buildResult(won);
   paintResult(LAST_RESULT);
