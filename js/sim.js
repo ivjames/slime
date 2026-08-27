@@ -991,10 +991,20 @@ function step() {
        a tube keeps the short-range Jones rule that resolves the mesh. */
     var here = (y | 0) * GW + (x | 0);
     var cf = Math.cos(h), sf = Math.sin(h);
+    /* A wall is not open agar, and the trail field cannot say so: diffuseTrail
+       zeroes every wall cell, so a bare "is there little trail ahead" test
+       reads a baffle as the most inviting frontier in the dish. In EXP-02's
+       maze that handed the whole tip regime — the long sensors, the apical
+       bias, the heavy tube deposit — to agents pressed against a wall, and
+       left them eligible as fork parents, so the growth budget went on
+       branches launched into masonry. The dish edge was already excluded; the
+       walls inside it need the same test. */
     var lx = x + cf * TIP_LOOK, ly = y + sf * TIP_LOOK;
-    var tip = (lx < 0 || ly < 0 || lx >= GW || ly >= GH)
-      ? false
-      : trail[(ly | 0) * GW + (lx | 0)] < TIP_TRAIL;
+    var tip = false;
+    if (lx >= 0 && ly >= 0 && lx < GW && ly < GH) {
+      var li = (ly | 0) * GW + (lx | 0);
+      tip = !wallM[li] && trail[li] < TIP_TRAIL;
+    }
     /* how well fed: the tube this tip is being supplied through */
     var feed = 0;
     if (tip) {
