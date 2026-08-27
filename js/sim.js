@@ -1464,6 +1464,50 @@ var nAgents = 0;
 var AGAR = [20, 22, 17];        // the dish, unoccupied
 var BODY_T    = 9.0;            // trail at which tissue begins
 var BODY_SOFT = 1.4;            // trail over which the edge resolves
+
+/* Everything the dish can ADD to a cell, named in one place, because the
+   tint solve has to model the brightest ground a shaded rim can border and
+   numbers copied into it would drift from the painter's. paintField composes
+   cells from these; the solve takes its worst case over them. Index of
+   HAZ_ADD is the hazM code; 3 is the lit field — not an ember: the same
+   aversion, told cold. */
+var HAZ_ADD = [null, [38, 20, 9], [27, 12, 40], [30, 34, 40]];
+var CUE_ADD = [26, 24, 8];    // growth-cue haze, per unit of cueF
+var RET_ADD = [26, 6, 16];    // retract haze, per unit of retF
+var MAT_ADD = [7, 8, 11];     // slime mat, per unit of slimeF — ground only
+var BRUSH_PEAK = 1.15;        // the brush cone's tip, the most cueF/retF holds
+
+/* Every ground the body's shaded rim can border, worst case: each hazard
+   field (and bare agar), under a brush cone's full cue or retract haze, with
+   and without the slime mat's film on the unoccupied side. The mat is the
+   unkind one — it fades under tissue, so it lifts the ground WITHOUT lifting
+   the rim. Additive light compresses a contrast ratio from below, so the
+   floor in applyTint is demanded against all of these, not against bare
+   agar. Twelve bases, each with a matless and a matted ground luminance;
+   the body beside them shares everything but the mat. All static, so built
+   once. */
+var FLOOR_STACKS = (function () {
+  var out = [];
+  var overs = [
+    [0, 0, 0],
+    [CUE_ADD[0] * BRUSH_PEAK, CUE_ADD[1] * BRUSH_PEAK, CUE_ADD[2] * BRUSH_PEAK],
+    [RET_ADD[0] * BRUSH_PEAK, RET_ADD[1] * BRUSH_PEAK, RET_ADD[2] * BRUSH_PEAK]
+  ];
+  for (var hz = 0; hz < 4; hz++) {
+    var h = hz ? HAZ_ADD[hz] : [0, 0, 0];
+    for (var ov = 0; ov < overs.length; ov++) {
+      var bx = AGAR[0] + h[0] + overs[ov][0];
+      var by = AGAR[1] + h[1] + overs[ov][1];
+      var bz = AGAR[2] + h[2] + overs[ov][2];
+      out.push({
+        base: [bx, by, bz],
+        gL:  relLum(bx, by, bz),
+        gmL: relLum(bx + MAT_ADD[0], by + MAT_ADD[1], bz + MAT_ADD[2])
+      });
+    }
+  }
+  return out;
+})();
 /* 1.4, down from 3.0: the crossing keeps about a cell of width against the
    trail gradients the body actually has, and the drawImage upscale antialiases
    that cell, so the edge stays smooth on screen. What the narrower window
@@ -1546,16 +1590,18 @@ var INK_L  = relLum(20, 23, 13);
    that is the player's specimen line and the number they can write down.
    Saturation is clamped to a range a lab would tolerate near a microscope,
    and lightness is walked upward until the vein tone STILL clears WCAG
-   1.4.11 against the agar at the bottom of the inner shadow — it is the
-   down-light rim of the body, not the sheet, that has to stay
-   distinguishable from the dish — and the hot tone clears 7:1. (The
-   unshaded sheet then clears 3:1 a fortiori.) The tone checked is tint
-   times (1 - ISH_DEPTH), a floor slightly UNDER anything actually painted:
-   the painter shades only the body's contribution above the ground, so the
-   rim lands brighter than this on plain agar and rides the ground's own
-   light on a hazard field — measured across the seed space, a tint passing
-   this bound keeps 3:1 against every ground the dish draws, hazard fields
-   included.
+   1.4.11 against every ground the dish can compose at the bottom of the
+   inner shadow — it is the down-light rim of the body, not the sheet, that
+   has to stay distinguishable, and what it must stay distinguishable FROM
+   is not bare agar but FLOOR_STACKS: each hazard field, under the brush's
+   full cue or retract haze, with the slime mat's film on the unoccupied
+   side. Additive light lands on rim and ground alike (the painter shades
+   only the body's contribution, so the two ride the same base), and equal
+   addition always compresses a contrast ratio; the floor therefore has to
+   be demanded where the adding is worst. Checking bare agar alone left the
+   rim under 3:1 for seven percent of seed-and-ground pairs, all of them in
+   the lit-field corner where a player is most likely to be cueing. The hot
+   tone clears 7:1 as before, and the unshaded sheet clears 3:1 a fortiori.
    Demanding it of the shaded tone roughly doubles what the old check asked,
    and the old check was already there because the seed is allowed to be any
    colour and "almost any" is not a guarantee: without it, four in ten seeds
@@ -1590,22 +1636,29 @@ function applyTint(seed) {
   var hue = hsl[0], sat = clamp(hsl[1], 0.35, 0.80);
   var l = clamp(hsl[2], 0.45, 0.72);
   var hotK = hotBandK();
-  var shadedOk = function (v, k) {
-    var m = 1 - k;
-    return contrast(relLum(Math.round(v[0] * m), Math.round(v[1] * m),
-                           Math.round(v[2] * m)), DISH_L) >= 3.0;
+  var rimHolds = function (v, k) {
+    var m = 1 - k, i2, st, bl;
+    for (i2 = 0; i2 < FLOOR_STACKS.length; i2++) {
+      st = FLOOR_STACKS[i2];
+      bl = relLum(
+        Math.min(255, Math.round(st.base[0] + (v[0] - AGAR[0]) * m)),
+        Math.min(255, Math.round(st.base[1] + (v[1] - AGAR[1]) * m)),
+        Math.min(255, Math.round(st.base[2] + (v[2] - AGAR[2]) * m)));
+      if (contrast(bl, st.gL) < 3.0 || contrast(bl, st.gmL) < 3.0) return false;
+    }
+    return true;
   };
   var vein = hslToRgb(hue, sat, l), hot = mixWhite(vein, hotK), i;
   for (i = 0; i < 24; i++) {
     vein = hslToRgb(hue, sat, l);
     hot = mixWhite(vein, hotK);
-    if (shadedOk(vein, ISH_DEPTH) &&
+    if (rimHolds(vein, ISH_DEPTH) &&
         contrast(relLum(hot[0], hot[1], hot[2]), DISH_L) >= 7.0) break;
     if (l >= 0.72) break;
     l = Math.min(0.72, l + 0.02);
   }
   ishDepth = ISH_DEPTH;
-  while (ishDepth > 0 && !shadedOk(vein, ishDepth)) {
+  while (ishDepth > 0 && !rimHolds(vein, ishDepth)) {
     ishDepth = Math.max(0, ishDepth - 0.02);
   }
   TINT = vein;
@@ -2692,10 +2745,10 @@ function paintField() {
     } else {
       r = AGAR[0]; g = AGAR[1]; b = AGAR[2];
       var hz = hazM[i];
-      if (hz === 1) { r += 38; g += 20; b += 9; }
-      else if (hz === 2) { r += 27; g += 12; b += 40; }
-      /* a lit field, not an ember: the same aversion, told cold */
-      else if (hz === 3) { r += 30; g += 34; b += 40; }
+      if (hz) {
+        var hl = HAZ_ADD[hz];
+        r += hl[0]; g += hl[1]; b += hl[2];
+      }
       /* The mat, where a dish is running on it. Cool, grey and much fainter
          than any hazard — it is the record of where the organism has been,
          not a thing on the plate — and it fades out under live tube, because
@@ -2705,7 +2758,9 @@ function paintField() {
         if (sv > 0.05) {
           var thin = 1 - (trail[i] > 8 ? 1 : trail[i] * 0.125);
           if (thin > 0) {
-            r += sv * 7 * thin; g += sv * 8 * thin; b += sv * 11 * thin;
+            r += sv * MAT_ADD[0] * thin;
+            g += sv * MAT_ADD[1] * thin;
+            b += sv * MAT_ADD[2] * thin;
           }
         }
       }
@@ -2756,12 +2811,12 @@ function paintField() {
       /* the player's cue reads as a faint warm haze in the agar */
       var c = cueF[i];
       if (c > 0.02) {
-        r += c * 26; g += c * 24; b += c * 8;
+        r += c * CUE_ADD[0]; g += c * CUE_ADD[1]; b += c * CUE_ADD[2];
         if (r > 255) r = 255; if (g > 255) g = 255; if (b > 255) b = 255;
       }
       var q = retF[i];
       if (q > 0.02) {
-        r += q * 26; g += q * 6; b += q * 16;
+        r += q * RET_ADD[0]; g += q * RET_ADD[1]; b += q * RET_ADD[2];
         if (r > 255) r = 255; if (g > 255) g = 255; if (b > 255) b = 255;
       }
     }
@@ -3232,7 +3287,7 @@ function paintBrush(gx, gy, mode) {
       /* Write the cone directly rather than accumulating toward a cap —
          accumulation saturates the middle flat and leaves a gradient only at
          the rim, which is the part the organism needs to feel. */
-      var want = fall * 1.15;
+      var want = fall * BRUSH_PEAK;
       if (mode === 2) {
         if (retF[i] < want) retF[i] = want;
         trail[i] *= (1 - 0.16 * fall);
