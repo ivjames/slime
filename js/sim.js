@@ -1755,23 +1755,41 @@ var GAM_SCALE = (GAMN - 1) / TRAIL_MAX;
     GAM_LO[j] = (w * w * (3 - 2 * w) * 255) | 0;
   }
 })();
-/* The lowest sharpened value the painter actually puts ink at. GAM is
-   quantised into GAMN steps over TRAIL_MAX and smoothstep leaves its first
-   step rounding to zero, so that value is not BODY_T but a hair above it —
-   9.0572 as the constants stand. Read out of the table rather than written
-   down, so it cannot drift from the ramp it describes, and read once so the
-   test that uses it stays a compare. */
-var BODY_DRAW = (function () {
-  for (var j = 0; j < GAMN; j++) if (GAM[j]) return j / GAM_SCALE;
-  return BODY_T;
-})();
+/* The lowest sharpened value at which the painter actually puts ink on the
+   plate. Not BODY_T, and not derivable from the ramp alone: a cell's colour
+   reaches the pixel through TWO quantisations, and either can round a live
+   cell away to nothing.
+
+   GAM is the first. It holds 256 steps of coverage over GAMN buckets, and
+   smoothstep leaves its first bucket rounding to zero, so coverage begins at
+   9.0572 rather than at 9.0. LUT is the second and the sharper one: it stores
+   a whole channel delta per coverage step, `((tr - AGAR[0]) * i / 255) | 0`,
+   so coverage 1 truncates to zero for any colour the dish can hold — 235 of
+   delta at the very brightest is 0.92 of a channel — and a dark enough plate
+   is still at zero by coverage 4 or 7. The floor is therefore a function of
+   the RUN'S palette, which is why it is computed here, in the one place that
+   knows it, and recomputed whenever the palette changes.
+
+   Composed, the question is exactly "which sharpened value is the first whose
+   coverage survives LUT", and it is asked once per palette so the per-cell
+   test using it stays a compare. If no coverage inks at all — a tint equal to
+   the agar, which the contrast solve does not permit — it falls back to
+   BODY_T and the pass behaves as it did before any of this. */
+var BODY_DRAW = BODY_T;
 
 function buildLUT(tr, tg, tb) {
-  for (var i = 0; i < 256; i++) {
+  var i;
+  for (i = 0; i < 256; i++) {
     var t = i / 255;
     LUT[i * 3]     = ((tr - AGAR[0]) * t) | 0;
     LUT[i * 3 + 1] = ((tg - AGAR[1]) * t) | 0;
     LUT[i * 3 + 2] = ((tb - AGAR[2]) * t) | 0;
+  }
+  var lo = 0;
+  while (lo < 256 && !LUT[lo * 3] && !LUT[lo * 3 + 1] && !LUT[lo * 3 + 2]) lo++;
+  BODY_DRAW = BODY_T;
+  if (lo < 256) {
+    for (var j = 0; j < GAMN; j++) if (GAM[j] >= lo) { BODY_DRAW = j / GAM_SCALE; break; }
   }
 }
 
@@ -3460,16 +3478,17 @@ function buildBridges() {
      seeds for the flood below fall out of the same sweep.
 
      The threshold is BODY_DRAW and not BODY_T, which is the same question
-     asked of the ramp's nominal foot rather than of the first place it puts
-     ink. They disagree over a hairline — 9.0572 against 9.0, the width of one
-     quantisation step of GAM — and everything this pass does is built on the
-     answer: a cell in that band is body by the constant and blank on the
-     plate, so a corridor can terminate there and paint into nothing, or a
-     piece made only of such cells can anchor one to a component that is not
-     visibly present. Measured over six seeds at 1000 and 2200 steps, 18 to 81
-     such cells a frame, 3 to 17 of them touching a corridor. Testing against
-     the value the table actually starts at costs nothing over testing against
-     BODY_T, and the question stops having two answers. */
+     asked of the ramp's nominal foot rather than of the first place the
+     painter puts ink. They disagree over a hairline and everything this pass
+     does is built on the answer: a cell in that band is body by the constant
+     and blank on the plate, so a corridor can terminate there and paint into
+     nothing, or a piece made only of such cells can anchor one to a component
+     that is not visibly present. Measured over six seeds at 1000 and 2200
+     steps, GAM's own rounding alone put 18 to 81 such cells a frame on the
+     plate, 3 to 17 of them touching a corridor; LUT's rounding, which
+     BODY_DRAW also now accounts for, another 26 to 52 a frame with 4 to 20
+     touching. Testing against the composed floor costs nothing over testing
+     against BODY_T, and the question stops having two answers. */
   var np = 0;
   tail = 0;
   for (y = 0; y < GH; y++) {
