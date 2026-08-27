@@ -3686,6 +3686,19 @@ function buildVeins() {
          agar, nowhere near either floor — still leaves on one comparison and
          never reads the memory at all. */
       if (v < RIDGE_MIN_LO) continue;
+      /* Never on a wall. Agar that has just been poured over carries no
+         tissue by definition — diffuseTrail zeroes the trail inside wallM
+         every step — but the surface this pass reads is an AVERAGE, and an
+         average remembers: for the fifteen steps it takes to forget, a wall
+         that has just come down in EXP-17, 18 or 20 would wear the crests of
+         the tube it landed on, held up all the while by the hysteresis above.
+         Tested after the value, so only a cell that was going to be a
+         candidate anyway pays for the read.
+
+         Written as a flat rule rather than as a clear-on-event, because the
+         rule is the true statement — the mold is not on the wall — and a
+         clear would have to be hooked onto every path that can move one. */
+      if (wallM[i]) continue;
       var pd = rprev[i], held = pd !== 255;
       if (!held && v < RIDGE_MIN) continue;
       var floorK = held ? RIDGE_K_LO : RIDGE_K;
@@ -3746,6 +3759,7 @@ function buildVeins() {
     for (x = 2; x < GW - 2; x += 2) {
       i = rowL + x;
       var lv = shpV[i];
+      if (wallM[i]) { lmark[i] = 0; continue; }   /* as in pass one */
       var hold = lmark[i] ? LOBE_HOLD : 1;
       if (lv < BODY_T * hold) { lmark[i] = 0; continue; }
       var mass = knotF[i] > LOBE_MARK * hold ||
