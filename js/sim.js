@@ -1457,9 +1457,14 @@ var vseg = [], vsegN = [];
 /* The four directions a vein can run ACROSS: the across unit vector, the
    tangent it runs along, and the two cell offsets that step along that
    tangent. */
+/* Ordered so the LINE each tangent describes rotates by a steady -45 degrees
+   per index: south, south-east, east, north-east. The middle entry used to be
+   written north-west, which is the same line but the opposite ray, so it
+   pointed backwards from both of its neighbours and a walk crossing it turned
+   round into the part of the vein it had just claimed. */
 var RIDGE_DIR = [
   { o:  1,      ax:  1,      ay:  0,      tx:  0,      ty:  1,      t1:  GW,     t2: -GW     },
-  { o:  1 - GW, ax:  0.7071, ay: -0.7071, tx: -0.7071, ty: -0.7071, t1: -1 - GW, t2:  1 + GW },
+  { o:  1 - GW, ax:  0.7071, ay: -0.7071, tx:  0.7071, ty:  0.7071, t1:  1 + GW, t2: -1 - GW },
   { o: -GW,     ax:  0,      ay:  1,      tx:  1,      ty:  0,      t1:  1,      t2: -1      },
   { o: -1 - GW, ax: -0.7071, ay: -0.7071, tx:  0.7071, ty: -0.7071, t1:  1 - GW, t2: -1 + GW }
 ];
@@ -1562,28 +1567,46 @@ function drawVeins(sx, sy) {
       i = row2 + x;
       if (rdir[i] === 255 || rvis[i]) continue;
 
-      /* walk forward from the seed, then backward, then join */
-      var n = 0, c = i, cd = rdir[i], sum = 0;
+      /* Walk forward from the seed, then backward, then join.
+         `sgn` carries which way along the tangent this walk is travelling, and
+         is re-derived at every cell from the step actually taken rather than
+         inherited. It has to be: the tangent of a bin is a LINE, and four bins
+         span 180 degrees, so going once round the table turns the ray over.
+         However the table is signed, at least one bend must therefore reverse
+         it, and a walk that assumed a fixed sign there would turn round into
+         the cells it had just claimed, stop dead, and leave a curved vein
+         chopped into fragments — several of them below RIDGE_MINPTS and thrown
+         away entirely. Deriving the sign from the movement makes the walk
+         independent of the table's sign convention altogether. */
+      var n = 0, c = i, cd = rdir[i], sum = 0, sgn = 1;
       rvis[c] = 1;
       chx[n] = (c % GW) + 0.5; chy[n] = ((c / GW) | 0) + 0.5; sum += shpA[c]; n++;
       var nx2 = c;
       while (n < 2000) {
-        nx2 = ridgeStep(chx[n - 1] - 0.5, chy[n - 1] - 0.5, cd, 1);
+        nx2 = ridgeStep(chx[n - 1] - 0.5, chy[n - 1] - 0.5, cd, sgn);
         if (nx2 < 0) break;
-        rvis[nx2] = 1; cd = rdir[nx2];
-        chx[n] = (nx2 % GW) + 0.5; chy[n] = ((nx2 / GW) | 0) + 0.5; sum += shpA[nx2]; n++;
+        rvis[nx2] = 1;
+        var qx = (nx2 % GW) + 0.5, qy = ((nx2 / GW) | 0) + 0.5;
+        cd = rdir[nx2];
+        sgn = (RIDGE_DIR[cd].tx * (qx - chx[n - 1]) +
+               RIDGE_DIR[cd].ty * (qy - chy[n - 1])) >= 0 ? 1 : -1;
+        chx[n] = qx; chy[n] = qy; sum += shpA[nx2]; n++;
       }
       /* reverse in place so the backward walk can append */
       for (var a2 = 0, b2 = n - 1; a2 < b2; a2++, b2--) {
         var tx2 = chx[a2]; chx[a2] = chx[b2]; chx[b2] = tx2;
         var ty2 = chy[a2]; chy[a2] = chy[b2]; chy[b2] = ty2;
       }
-      cd = rdir[i];
+      cd = rdir[i]; sgn = -1;
       while (n < 2000) {
-        nx2 = ridgeStep(chx[n - 1] - 0.5, chy[n - 1] - 0.5, cd, -1);
+        nx2 = ridgeStep(chx[n - 1] - 0.5, chy[n - 1] - 0.5, cd, sgn);
         if (nx2 < 0) break;
-        rvis[nx2] = 1; cd = rdir[nx2];
-        chx[n] = (nx2 % GW) + 0.5; chy[n] = ((nx2 / GW) | 0) + 0.5; sum += shpA[nx2]; n++;
+        rvis[nx2] = 1;
+        var rx = (nx2 % GW) + 0.5, ry = ((nx2 / GW) | 0) + 0.5;
+        cd = rdir[nx2];
+        sgn = (RIDGE_DIR[cd].tx * (rx - chx[n - 1]) +
+               RIDGE_DIR[cd].ty * (ry - chy[n - 1])) >= 0 ? 1 : -1;
+        chx[n] = rx; chy[n] = ry; sum += shpA[nx2]; n++;
       }
       if (n < RIDGE_MINPTS) continue;
 
@@ -2679,6 +2702,16 @@ function init() {
     agents: function () { return nAgents; },
     /* how many of them are at the front — the population forkTip draws from */
     tips: function () { var c = 0; for (var k = 0; k < nAgents; k++) if (atip[k]) c++; return c; },
+    /* chains and points in the vein trace of the last painted frame — how far
+       the ridge walk gets before it loses the vein */
+    veins: function () {
+      var ch = 0, pt = 0;
+      for (var b = 0; b < vsegN.length; b++) {
+        var r = 0, end = vsegN[b];
+        while (r < end) { var c = vseg[b][r++]; ch++; pt += c; r += c * 2; }
+      }
+      return { chains: ch, points: pt, mean: ch ? +(pt / ch).toFixed(2) : 0 };
+    },
     prog: function () { return S.nodeProg ? Array.prototype.slice.call(S.nodeProg) : []; },
     front: function () {
       if (!nAgents) return null;
