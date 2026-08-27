@@ -3134,6 +3134,7 @@ function resetVeinTemporal() {
   veinT = S.simT;
   rdir.fill(255);
   rband.fill(255);
+  rbandP.fill(255);
   lmark.fill(0);
 }
 
@@ -3145,6 +3146,24 @@ function resetVeinTemporal() {
    faintest hairlines, which are the ones the hysteresis was holding up. The
    snapshot exists to put the finished dish back; this is part of the finished
    dish. Restored after S, because the average is clocked off S.simT. */
+/* The other half of that, and the reason it is a function rather than four
+   lines inside the FINAL_STATE literal: it has to run AFTER the verdict
+   screen's own render, because that render is what performs the run's last
+   rebuild. Captured with the rest of the snapshot, which is assembled before
+   it, these four are one rebuild behind the picture the player is looking at —
+   and since the restore leaves dt at zero, a replay exit would then put the
+   PENULTIMATE dish back under the verdict rather than the one it replaced.
+
+   `rdir`/`rband` and not `rprev`/`rbandP`: the pairs swap at the top of every
+   rebuild, so the maps the next one will consult as its memory are the ones
+   this one wrote. */
+function snapshotVeinTemporal(fs) {
+  fs.shpV = new Float32Array(shpV);
+  fs.rdir = new Uint8Array(rdir);
+  fs.rband = new Uint8Array(rband);
+  fs.lmark = new Uint8Array(lmark);
+}
+
 function restoreVeinTemporal(fs) {
   if (!fs || !fs.shpV) { resetVeinTemporal(); return; }
   shpV.set(fs.shpV);
@@ -3505,10 +3524,21 @@ var rvis = new Uint8Array(NCELL);
    there does not shorten the line by one cell — it cuts the chain in two, and
    either half that falls under RIDGE_MINPTS is discarded whole. That is why
    the twitch reads as whole veins blinking rather than as edges shimmering.
-   `rband` is which band each crest cell was drawn in, the raw material for the
-   same reluctance applied to width and brightness. */
+   `rbandP` is which band each crest cell was drawn in, the raw material for
+   the same reluctance applied to width and brightness.
+
+   Both are halves of a pair that swaps every rebuild, and the band map has to
+   be as much as the ridge map does. A single map, only ever written where a
+   chain was accepted, is not a record of the LAST rebuild — it is a record of
+   the last rebuild in which each cell happened to carry a vein, which for
+   ground a vein has left is arbitrarily old. Fresh growth over it would then
+   be told it had a band to be loyal to, and hysteresis anchored to an obsolete
+   observation holds a regrown vein at an obsolete width indefinitely, because
+   each rebuild rewrites the stale answer as the new one. Clearing the current
+   map each rebuild is what makes "no memory" mean no memory. */
 var rprev = new Uint8Array(NCELL);
-var rband = new Uint8Array(NCELL);
+var rband = new Uint8Array(NCELL);    // this rebuild's bands
+var rbandP = new Uint8Array(NCELL);   // last rebuild's, what pickBand consults
 /* Where along the across-vector the crest actually lies, in cells, relative to
    the cell centre; see the parabolic fit in pass one. */
 var roff = new Float32Array(NCELL);
@@ -3558,7 +3588,7 @@ function pickBand(mean, cells, n) {
   for (j = 0; j <= last; j++) bandVote[j] = 0;
   var voted = 0;
   for (j = 0; j < n; j++) {
-    var pb0 = rband[cells[j]];
+    var pb0 = rbandP[cells[j]];
     if (pb0 <= last) { bandVote[pb0]++; voted++; }
   }
   /* A chain mostly on fresh ground is fresh: a handful of remembered cells
@@ -3637,10 +3667,12 @@ function buildVeins() {
 
   /* --- pass one: which cells are on a ridge, and which way it runs --- */
   smoothRidgeField();
-  /* last rebuild's map becomes this one's memory by swapping the two arrays,
-     which costs a pointer where copying 106,000 bytes costs 106,000 bytes */
+  /* last rebuild's maps become this one's memory by swapping the pairs, which
+     costs a pointer where copying 106,000 bytes costs 106,000 bytes */
   var rswap = rprev; rprev = rdir; rdir = rswap;
+  rswap = rbandP; rbandP = rband; rband = rswap;
   rdir.fill(255);
+  rband.fill(255);
   for (y = 2; y < GH - 2; y++) {
     var row = y * GW;
     for (x = 2; x < GW - 2; x++) {
@@ -4825,14 +4857,6 @@ function showResult(won) {
        the trail without them puts the finished network back under swellings
        belonging to the abandoned replay */
     knotF: new Float32Array(knotF),
-    /* The highlight layer's memory, snapshotted with the fields it was built
-       from — see restoreVeinTemporal. `rdir` and not `rprev`: the two swap at
-       the top of every rebuild, so the map the next one will consult as its
-       memory is the one this one wrote. */
-    shpV: new Float32Array(shpV),
-    rdir: new Uint8Array(rdir),
-    rband: new Uint8Array(rband),
-    lmark: new Uint8Array(lmark),
     n: nAgents,
     ax: ax.slice(0, nAgents), ay: ay.slice(0, nAgents),
     ah: ah.slice(0, nAgents), atip: atip.slice(0, nAgents),
@@ -4843,6 +4867,9 @@ function showResult(won) {
   LAST_RESULT = buildResult(won);
   paintResult(LAST_RESULT);
   openResult();
+  /* the highlight layer's memory, added to the snapshot once openResult's own
+     render has drawn the frame it belongs to — see snapshotVeinTemporal */
+  snapshotVeinTemporal(FINAL_STATE);
 }
 
 /* ------------------------------------------------------------
