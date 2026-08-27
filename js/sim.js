@@ -1488,6 +1488,12 @@ var BODY_SOFT = 1.4;            // trail over which the edge resolves
    whole network. The shape's own shadow lives on the shape. */
 var ISH_D     = 2;      // throw, in cells, diagonally down-light per tap
 var ISH_DEPTH = 0.30;   // full-shade depth, as a multiply on the cell
+/* The depth the RUN actually paints with. Usually ISH_DEPTH; applyTint trims
+   it for the rare seed whose tint cannot be walked light enough for its
+   fully shaded edge to keep the 3:1 body floor (see the solve). Legibility
+   outranks modelling: a specimen the player can see beats one with the
+   handsomest shading. */
+var ishDepth  = ISH_DEPTH;
 
 var LUT = new Uint8Array(256 * 3);
 var GAMN = 2048;
@@ -1536,10 +1542,21 @@ var INK_L  = relLum(20, 23, 13);
 /* Derive the run's palette from its 24-bit seed. Hue is preserved exactly —
    that is the player's specimen line and the number they can write down.
    Saturation is clamped to a range a lab would tolerate near a microscope,
-   and lightness is walked upward until the vein tone clears WCAG 1.4.11
-   against the agar and the hot tone clears 7:1. With a floor this dark almost
-   any lightness passes; it is measured anyway, because the seed is allowed to
-   be any colour and "almost any" is not a guarantee.
+   and lightness is walked upward until the vein tone STILL clears WCAG
+   1.4.11 against the agar at the bottom of the inner shadow — the down-light
+   rim of the body is drawn at tint times (1 - ISH_DEPTH), and it is the rim,
+   not the sheet, that has to stay distinguishable from the dish — and the
+   hot tone clears 7:1. (The unshaded sheet then clears 3:1 a fortiori.)
+   Demanding it of the shaded tone roughly doubles what the old check asked,
+   and the old check was already there because the seed is allowed to be any
+   colour and "almost any" is not a guarantee: without it, four in ten seeds
+   shade their own outline below the floor.
+
+   For a handful of seeds — deep blues, mostly — the lightness cap arrives
+   before the shaded rim clears, and for those the run's shadow DEPTH gives
+   way instead: ishDepth is trimmed until the rim passes. Measured across the
+   seed space the trim touches under one seed in a hundred and never goes
+   below 0.28 of the 0.30, but the invariant is the point, not the margin.
 
    The hot tone MUST be the one the widest band actually strokes, and is read
    off VEIN_BANDS rather than written here as a number so it cannot drift from
@@ -1564,14 +1581,23 @@ function applyTint(seed) {
   var hue = hsl[0], sat = clamp(hsl[1], 0.35, 0.80);
   var l = clamp(hsl[2], 0.45, 0.72);
   var hotK = hotBandK();
+  var shadedOk = function (v, k) {
+    var m = 1 - k;
+    return contrast(relLum(Math.round(v[0] * m), Math.round(v[1] * m),
+                           Math.round(v[2] * m)), DISH_L) >= 3.0;
+  };
   var vein = hslToRgb(hue, sat, l), hot = mixWhite(vein, hotK), i;
   for (i = 0; i < 24; i++) {
     vein = hslToRgb(hue, sat, l);
     hot = mixWhite(vein, hotK);
-    if (contrast(relLum(vein[0], vein[1], vein[2]), DISH_L) >= 3.0 &&
+    if (shadedOk(vein, ISH_DEPTH) &&
         contrast(relLum(hot[0], hot[1], hot[2]), DISH_L) >= 7.0) break;
     if (l >= 0.72) break;
     l = Math.min(0.72, l + 0.02);
+  }
+  ishDepth = ISH_DEPTH;
+  while (ishDepth > 0 && !shadedOk(vein, ishDepth)) {
+    ishDepth = Math.max(0, ishDepth - 0.02);
   }
   TINT = vein;
   buildLUT(vein[0], vein[1], vein[2]);
@@ -2704,7 +2730,7 @@ function paintField() {
             if (g2 < 0) g2 = 0; else if (g2 >= GAMN) g2 = GAMN - 1;
             var sh = vcov * (255 - 0.55 * GAM[g1] - 0.45 * GAM[g2]);
             if (sh > 0) {
-              var f = 1 - ISH_DEPTH * sh / 65025;
+              var f = 1 - ishDepth * sh / 65025;
               r *= f; g *= f; b *= f;
             }
           }
