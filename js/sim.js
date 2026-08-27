@@ -2117,6 +2117,8 @@ function exitReplay() {
     trail.set(FINAL_STATE.trail);
     cueF.set(FINAL_STATE.cueF); retF.set(FINAL_STATE.retF);
     nAgents = FINAL_STATE.n;
+    ax.set(FINAL_STATE.ax); ay.set(FINAL_STATE.ay);
+    ah.set(FINAL_STATE.ah); atip.set(FINAL_STATE.atip);
     var fs = FINAL_STATE.S;
     for (var rk in fs) S[rk] = fs[rk];
     if (fs.nodeProg) S.nodeProg = fs.nodeProg.slice();
@@ -2383,10 +2385,20 @@ function showResult(won) {
   for (var sk in S) snap[sk] = S[sk];
   snap.nodeProg = S.nodeProg ? S.nodeProg.slice() : null;
   snap.nodeDone = S.nodeDone ? S.nodeDone.slice() : null;
+  /* The agents themselves, not just how many of them there were. The renderer
+     draws the growing front from ax/ay/ah/atip, so restoring nAgents alone
+     leaves that pass walking the ABANDONED REPLAY's agents — or, past the
+     replay's own count, whatever was left in the arrays earlier in the run,
+     since nothing clears them. The verdict would then sit under the right
+     lattice with a scatter of whiskers belonging to a dish that no longer
+     exists. Only the live prefix is worth copying; everything past nAgents is
+     already dead. */
   FINAL_STATE = {
     trail: new Float32Array(trail),
     cueF: new Float32Array(cueF), retF: new Float32Array(retF),
     n: nAgents,
+    ax: ax.slice(0, nAgents), ay: ay.slice(0, nAgents),
+    ah: ah.slice(0, nAgents), atip: atip.slice(0, nAgents),
     logHTML: $('log').innerHTML,
     turbo: TURBO,
     S: snap
