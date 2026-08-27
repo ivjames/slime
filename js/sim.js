@@ -27,7 +27,56 @@ function fmtNum(n) {
   }
   return out;
 }
-function pick(arr) { return arr[(Math.random() * arr.length) | 0]; }
+/* ------------------------------------------------------------
+   0b. seeded RNG — the whole simulation draws from here
+   ------------------------------------------------------------
+   Everything in the sim path that used to call Math.random() calls rnd()
+   instead. One consequence is the contract the time-lapse control depends
+   on: the draw sequence is a function of the SEED and the number of sim
+   STEPS executed, and of nothing else — not the wall clock, not the frame
+   rate, not how many steps a given frame happened to fit in. So the same
+   seed with the same player input produces the same dish at 1x and at 12x,
+   on a fast machine and a slow one.
+
+   mulberry32: one imul-avalanche per draw, 32 bits of state, no allocation.
+   Fast enough to sit in the per-agent inner loop (it runs ~5x per agent per
+   step, so ~70k times a step at the agent ceiling). */
+var RNG_STATE = 0;
+function rndSeed(s) { RNG_STATE = s >>> 0; }
+function rnd() {
+  RNG_STATE = (RNG_STATE + 0x6D2B79F5) | 0;
+  var t = RNG_STATE;
+  t = Math.imul(t ^ (t >>> 15), 1 | t);
+  t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+  return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+}
+
+/* Seeds are 24-bit so the notebook stamp (#a3f2c1) round-trips exactly:
+   what the result screen prints is the whole seed, not a truncation of it,
+   so a player who copies it back into SLIME.start() gets that dish again. */
+var SEED_MASK = 0xFFFFFF;
+
+function mix32(a, b, c) {
+  var h = (0x811C9DC5 ^ (a | 0)) | 0;
+  h = Math.imul(h ^ (b | 0), 0x01000193);
+  h = Math.imul(h ^ (c | 0), 0x01000193);
+  h ^= h >>> 15; h = Math.imul(h, 0x2545F491); h ^= h >>> 13;
+  return h >>> 0;
+}
+function normSeed(s) {
+  if (typeof s === 'string') {
+    var v = parseInt(s.replace(/^#/, ''), 16);
+    return isFinite(v) ? (v >>> 0) & SEED_MASK : 0;
+  }
+  return (s >>> 0) & SEED_MASK;
+}
+function seedLabel(s) {
+  var h = ((s >>> 0) & SEED_MASK).toString(16);
+  while (h.length < 6) h = '0' + h;
+  return '#' + h;
+}
+
+function pick(arr) { return arr[(rnd() * arr.length) | 0]; }
 
 /* Coarse pointer = phone/tablet. Feature-tested, never UA-sniffed: the media
    query answers for the primary pointer, the touch-point count catches a
@@ -397,7 +446,7 @@ var GAM_SCALE = (GAMN - 1) / TRAIL_MAX;
    4. run state
    ------------------------------------------------------------ */
 var S = {
-  exp: null, idx: -1,
+  exp: null, idx: -1, seed: 0,
   running: false, paused: false, over: false,
   simT: 0, peak: 0, cues: 0,
   nodeProg: null, nodeDone: null, engulfed: 0,
@@ -583,12 +632,12 @@ function inoculate(e) {
     if (cx < 1 || cy < 1 || cx >= GW - 1 || cy >= GH - 1 || wallM[ci]) continue;
     /* jitter clear of the cell edges so Float32 rounding cannot carry the
        stored position into a neighbouring cell (see the movement fround note) */
-    ax[nAgents] = cx + 0.05 + Math.random() * 0.9;
-    ay[nAgents] = cy + 0.05 + Math.random() * 0.9;
+    ax[nAgents] = cx + 0.05 + rnd() * 0.9;
+    ay[nAgents] = cy + 0.05 + rnd() * 0.9;
     var si = (ay[nAgents] | 0) * GW + (ax[nAgents] | 0);
     if (!wallM[si] && !occ[si]) {
       occ[si] = 1;
-      ah[nAgents] = Math.random() * Math.PI * 2;
+      ah[nAgents] = rnd() * Math.PI * 2;
       nAgents++;
     }
     var w = ci - 1, ee = ci + 1, nn = ci - GW, ss2 = ci + GW;
@@ -604,7 +653,7 @@ function spawnAgent() {
   /* bias toward the richest of three random parents */
   var best = -1, bestV = -1e9;
   for (var t = 0; t < 3; t++) {
-    var k = (Math.random() * nAgents) | 0;
+    var k = (rnd() * nAgents) | 0;
     var ci = ((ay[k] | 0) * GW + (ax[k] | 0));
     /* new cytoplasm appears where the food is and where the player is asking
        for it, so holding a cue thickens that part of the network rather than
@@ -614,8 +663,8 @@ function spawnAgent() {
   }
   if (best < 0) return;
   for (var tries = 0; tries < 6; tries++) {
-    var nx = ax[best] + (Math.random() - 0.5) * 8;
-    var ny = ay[best] + (Math.random() - 0.5) * 8;
+    var nx = ax[best] + (rnd() - 0.5) * 8;
+    var ny = ay[best] + (rnd() - 0.5) * 8;
     if (nx < 1 || ny < 1 || nx >= GW - 1 || ny >= GH - 1) continue;
     ax[nAgents] = nx; ay[nAgents] = ny;
     var ni2 = (ay[nAgents] | 0) * GW + (ax[nAgents] | 0);
@@ -624,7 +673,7 @@ function spawnAgent() {
        growth is busiest) that is precisely where the mesh wants room */
     if (wallM[ni2] || occ[ni2]) continue;
     occ[ni2]++;
-    ah[nAgents] = Math.random() * Math.PI * 2;
+    ah[nAgents] = rnd() * Math.PI * 2;
     nAgents++;
     return;
   }
@@ -632,7 +681,7 @@ function spawnAgent() {
 
 function killRandom() {
   if (nAgents <= 0) return;
-  var k = (Math.random() * nAgents) | 0;
+  var k = (rnd() * nAgents) | 0;
   var ci = (ay[k] | 0) * GW + (ax[k] | 0);
   if (occ[ci]) occ[ci]--;          /* every removal path decrements */
   nAgents--;
@@ -739,9 +788,9 @@ function step() {
     var hl = h - SENS_A, hr = h + SENS_A;
     var L = sense(x + Math.cos(hl) * SENS_D, y + Math.sin(hl) * SENS_D);
     var R = sense(x + Math.cos(hr) * SENS_D, y + Math.sin(hr) * SENS_D);
-    F += (Math.random() - 0.5) * SENS_NOISE;
-    L += (Math.random() - 0.5) * SENS_NOISE;
-    R += (Math.random() - 0.5) * SENS_NOISE;
+    F += (rnd() - 0.5) * SENS_NOISE;
+    L += (rnd() - 0.5) * SENS_NOISE;
+    R += (rnd() - 0.5) * SENS_NOISE;
 
     /* Jones' rule, exactly: hold the heading when the middle sensor is best,
        turn one rotation-angle toward the better flank otherwise, and turn a
@@ -751,13 +800,13 @@ function step() {
     if (F > L && F > R) {
       /* straight on */
     } else if (F < L && F < R) {
-      h += (Math.random() < 0.5 ? -TURN : TURN);
+      h += (rnd() < 0.5 ? -TURN : TURN);
     } else if (L > R) {
       h -= TURN;
     } else if (R > L) {
       h += TURN;
     }
-    h += (Math.random() - 0.5) * JITTER;
+    h += (rnd() - 0.5) * JITTER;
 
     var oldIdx = (y | 0) * GW + (x | 0);
     /* Speed is how much cytoplasm is behind the tip: established trail, or the
@@ -792,7 +841,7 @@ function step() {
        up against walls and inside junctions and fattens them into blobs. */
     var cell;
     if (blocked) {
-      ah[k] = Math.random() * Math.PI * 2;
+      ah[k] = rnd() * Math.PI * 2;
       cell = oldIdx;
     } else {
       ax[k] = nx; ay[k] = ny; ah[k] = h;
@@ -809,13 +858,13 @@ function step() {
     var hz = hazM[cell];
     if (hz === 2) {
       inQuin++;
-      if (quinDmg > 0 && Math.random() < quinDmg) dead = true;
+      if (quinDmg > 0 && rnd() < quinDmg) dead = true;
     } else if (hz === 1) {
-      if (Math.random() < heatDmg) dead = true;
+      if (rnd() < heatDmg) dead = true;
     }
     if (!dead && shockOn) {
       var safe = (ni >= 0 && S.nodeDone[ni]);
-      if (!safe && Math.random() < shockDmg) dead = true;
+      if (!safe && rnd() < shockDmg) dead = true;
     }
 
     if (dead) {
@@ -1134,7 +1183,7 @@ function updateNarration(e) {
   }
   /* ambient mutterings */
   if (S.simT >= S.ambientAt) {
-    S.ambientAt = S.simT + 17 + Math.random() * 12;
+    S.ambientAt = S.simT + 17 + rnd() * 12;
     if (S.simT > 8) logLine(pick(e.ambient));
   }
 }
@@ -1182,7 +1231,7 @@ var hudTick = 0;
 
 function updateHUD() {
   if (!S.exp) return;
-  $('h-time').textContent = fmtTime(S.simT);
+  $('h-time').textContent = fmtTime(S.simT) + (TURBO > 1 ? ' ×' + TURBO : '');
 
   if ((hudTick++ % 4) !== 0) return;
 
@@ -1344,14 +1393,57 @@ function openBrief(i) {
    15. run lifecycle
    ------------------------------------------------------------ */
 var raf = 0, lastTs = 0, acc = 0;
-/* Sim-time multiplier. 1 in play; the harness winds it up to watch ninety
-   seconds of network form in nine. It scales the step budget with it, so the
-   clock, the shock schedule and every rate stay in sim time. */
+/* Sim-time multiplier: sim seconds per real second. It scales the step budget
+   with it, so the clock, the shock schedule and every rate stay in sim time —
+   the dish is not "sped up", it is watched with the shutter open longer. The
+   player cycles it through SPEEDS; the harness can set any value up to 24. */
 var TURBO = 1;
+var SPEEDS = [1, 4, 12];
 
-function startRun(i) {
+/* Steps executed this run, and an optional harness stop. stepsRun is the
+   x-axis determinism is defined over: two runs of the same seed that have
+   executed the same number of steps hold identical state, whatever speed or
+   frame rate got them there. stepTarget lets a test stop both runs on the
+   same step rather than on whichever step a frame happened to end at. */
+var stepsRun = 0;
+var stepTarget = 0;
+
+function setSpeed(n) {
+  TURBO = clamp(Math.round(n) || 1, 1, 24);
+  var b = $('s-speed');
+  if (b) {
+    b.textContent = 'Time-lapse ×' + TURBO;
+    b.classList.toggle('lapse-on', TURBO > 1);
+    b.setAttribute('aria-label', 'Time-lapse, currently ' + TURBO + ' times real time');
+  }
+  return TURBO;
+}
+
+function cycleSpeed() {
+  var k = SPEEDS.indexOf(TURBO);
+  setSpeed(SPEEDS[(k + 1) % SPEEDS.length]);
+}
+
+/* Seed derivation. A run's seed is 24 bits and is the ONLY thing (besides
+   player input) that decides how the dish turns out. Fresh runs get
+   mix32(dish, attempt, bootSalt): the dish and the attempt counter so two
+   dishes and two retries never collide, the boot salt so reloading the page
+   is not the same five dishes every time. bootSalt is the one clock read in
+   the file and it is not sim state — it chooses WHICH seed you play, and the
+   seed is then printed where you can write it down and play it again. */
+var bootSalt = (Date.now() >>> 0);
+var attempts = 0;
+function freshSeed(i) { return mix32(i + 1, ++attempts, bootSalt) & SEED_MASK; }
+
+function startRun(i, seed) {
   var e = EXPERIMENTS[i];
   S.exp = e; S.idx = i;
+  /* Seed first: inoculate() draws from the stream, so the generator has to be
+     standing before anything in the dish is placed. */
+  S.seed = (seed == null || seed === '') ? freshSeed(i) : normSeed(seed);
+  rndSeed(mix32(S.seed, 0x9E3779B9, 0x85EBCA6B));
+  stepsRun = 0;
+  setSpeed(1);
   S.running = true; S.paused = false; S.over = false;
   S.simT = 0; S.peak = 0; S.cues = 0;
   S.nodeProg = new Float32Array(e.nodes.length);
@@ -1387,6 +1479,7 @@ function startRun(i) {
   updateHUD();
 
   logLine('inoculated. ' + fmtNum(nAgents) + ' nuclei, one cell, no plan.', true);
+  logLine('specimen line ' + seedLabel(S.seed) + ' — plate stamped.');
 
   lastTs = 0; acc = 0;
   if (!raf) raf = window.requestAnimationFrame(frame);
@@ -1455,6 +1548,10 @@ function showResult(won) {
   }
   if (e.shocks) rows.push(['Dry shocks survived', String(S.shocksSurvived)]);
   if (won && save.best[e.code] != null) rows.push(['Best run', fmtTime(save.best[e.code])]);
+  /* The plate's provenance, last, the way a notebook records it: this dish is
+     reproducible from that number alone — SLIME.start(idx, '#a3f2c1') runs it
+     again, cell for cell, at any time-lapse setting. */
+  rows.push(['Specimen line', seedLabel(S.seed)]);
 
   var stats = $('r-stats');
   stats.innerHTML = '';
@@ -1488,12 +1585,21 @@ function frame(ts) {
 
   if (S.running && !S.paused) {
     acc += dt * TURBO;
+    /* Four frames' worth of headroom at whatever the multiplier is, so a
+       dropped frame is caught up rather than lost. A held brush is painted
+       once per STEP, not once per frame — that is what keeps a cued run
+       identical between speeds. */
     var steps = 0, budget = 4 * TURBO;
-    while (acc >= DT && steps < budget && S.running) {
+    while (acc >= DT && steps < budget && S.running &&
+           (!stepTarget || stepsRun < stepTarget)) {
       if (ptr.down) paintBrush(ptr.gx, ptr.gy, ptr.mode);
-      step(); acc -= DT; steps++;
+      step(); stepsRun++; acc -= DT; steps++;
     }
+    /* Backlog past the budget is dropped: a device that cannot keep up runs
+       fewer steps per real second rather than spiralling. It changes how far
+       a run gets in a given wall-clock second, never what any step does. */
     if (acc > DT * budget) acc = 0;
+    if (stepTarget && stepsRun >= stepTarget && S.running && !S.over) setPaused(true);
   } else {
     acc = 0;
   }
@@ -1595,6 +1701,9 @@ function bindInput() {
     if (ev.code === 'Space') {
       ev.preventDefault();
       setPaused(!S.paused);
+    } else if (ev.code === 'KeyF') {
+      ev.preventDefault();
+      cycleSpeed();
     } else if (ev.code === 'KeyR') {
       ev.preventDefault();
       if (S.idx >= 0) startRun(S.idx);
@@ -1618,6 +1727,7 @@ function bindButtons() {
   $('s-abort').addEventListener('click', goTitle);
   $('s-pause').addEventListener('click', function () { setPaused(!S.paused); });
   $('s-reset').addEventListener('click', function () { if (S.idx >= 0) startRun(S.idx); });
+  $('s-speed').addEventListener('click', cycleSpeed);
   $('t-grow').addEventListener('click', function () { setTouchMode(1); });
   $('t-ret').addEventListener('click', function () { setTouchMode(2); });
   $('r-retry').addEventListener('click', function () { startRun(S.idx); });
@@ -1645,6 +1755,7 @@ function init() {
   bindInput();
   bindButtons();
   setTouchMode(1);
+  setSpeed(1);
   renderTitle();
   show('scr-title');
 
@@ -1665,12 +1776,23 @@ function init() {
     /* a copy of the trail field, for measuring the network from outside */
     trail: function () { return Float32Array.prototype.slice.call(trail); },
     trailMax: function () { return TRAIL_MAX; },
-    /* the one writable handle: sim seconds per real second, for the harness */
-    turbo: function (n) {
-      if (n != null) TURBO = clamp(Math.round(n) || 1, 1, 24);
-      return TURBO;
+    /* sim seconds per real second. Same path the on-screen control uses, so
+       the button label and HUD follow a harness that sets it directly. */
+    turbo: function (n) { if (n != null) setSpeed(n); return TURBO; },
+    speeds: function () { return SPEEDS.slice(); },
+    /* the seed of the current run, raw and as the notebook prints it */
+    seed: function () { return S.seed; },
+    seedLabel: function () { return seedLabel(S.seed); },
+    /* sim steps executed this run — the axis determinism is defined over */
+    steps: function () { return stepsRun; },
+    /* harness only: pause once exactly n steps have run (0 clears it), so two
+       runs at different speeds can be compared on the same step rather than
+       on whichever step their frames happened to land on */
+    runTo: function (n) { stepTarget = Math.max(0, n | 0); return stepTarget; },
+    start: function (i, seed) {
+      startRun(clamp(i | 0, 0, EXPERIMENTS.length - 1), seed);
+      return S.seed;
     },
-    start: function (i) { startRun(clamp(i | 0, 0, EXPERIMENTS.length - 1)); },
     experiments: function () {
       var out = [];
       for (var i = 0; i < EXPERIMENTS.length; i++) {
