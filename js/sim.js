@@ -1229,9 +1229,19 @@ function flashNodeRow(i) {
 
 var hudTick = 0;
 
-function updateHUD() {
+/* force: skip the every-4th-frame throttle below. The throttle is invisible
+   while the dish is running — the numbers catch up 60ms later — but the LAST
+   frame of a run has no next frame, so a run that ended on a skipped tick
+   froze the objective and the biomass one update short. That used to vanish
+   with the sim screen; now the plate stays on the bench under a verdict
+   quoting the true final figures, and a stale HUD sits next to it disagreeing. */
+function updateHUD(force) {
   if (!S.exp) return;
-  $('h-time').textContent = fmtTime(S.simT) + (TURBO > 1 ? ' ×' + TURBO : '');
+  if (force) hudTick = 0;
+  /* The time-lapse slot doubles as the replay badge: a run being replayed is
+     always at some rate, so the rate is stated whether or not it is 1. */
+  $('h-time').textContent = fmtTime(S.simT) +
+    (REPLAY.on ? ' · REPLAY ×' + TURBO : (TURBO > 1 ? ' ×' + TURBO : ''));
 
   if ((hudTick++ % 4) !== 0) return;
 
@@ -1324,7 +1334,10 @@ function doneCount() {
 /* ------------------------------------------------------------
    14. screens
    ------------------------------------------------------------ */
-var SCREENS = ['scr-title', 'scr-brief', 'scr-sim', 'scr-result'];
+/* Three screens, not four: the result is no longer one. It is a panel below
+   the dish on the sim screen, so finishing a run never takes the organism off
+   the bench. */
+var SCREENS = ['scr-title', 'scr-brief', 'scr-sim'];
 
 function show(id) {
   for (var i = 0; i < SCREENS.length; i++) {
@@ -1364,6 +1377,9 @@ function renderTitle() {
 
 function goTitle() {
   stopRun();
+  REPLAY.on = false; REPLAY.trace = null;
+  setReplayUI(false);
+  closeResult();
   renderTitle();
   show('scr-title');
 }
@@ -1408,6 +1424,124 @@ var SPEEDS = [1, 4, 12];
 var stepsRun = 0;
 var stepTarget = 0;
 
+/* ------------------------------------------------------------
+   15b. input trace + replay
+   ------------------------------------------------------------
+   The dish is a pure function of (seed, the brush painted at each step), so
+   recording the second of those makes the whole run replayable. The trace is
+   written in the SAME place the brush is painted — inside the frame loop's
+   step budget, immediately before step() — so it is by construction exactly
+   what the simulation consumed, not an approximation of the pointer events
+   that produced it. A held brush spans many steps and is recorded once per
+   step; an idle run records nothing at all.
+
+   Positions are Float64: ptr.gx/gy are doubles, paintBrush reads them as
+   doubles, and rounding them to Float32 on the way into the trace would make
+   a replay land on a very slightly different cone. Same bits in, same dish
+   out — that is the whole contract. */
+var TRACE = null;
+var REPLAY = { on: false, i: 0, trace: null };
+
+function newTrace(idx, seed) {
+  var cap = 2048;
+  return {
+    idx: idx, seed: seed, n: 0, cap: cap, cues: 0,
+    step: new Int32Array(cap),
+    mode: new Uint8Array(cap),
+    gx: new Float64Array(cap),
+    gy: new Float64Array(cap)
+  };
+}
+
+function growTrace(t) {
+  var c = t.cap * 2;
+  var s = new Int32Array(c);   s.set(t.step); t.step = s;
+  var m = new Uint8Array(c);   m.set(t.mode); t.mode = m;
+  var x = new Float64Array(c); x.set(t.gx);   t.gx = x;
+  var y = new Float64Array(c); y.set(t.gy);   t.gy = y;
+  t.cap = c;
+}
+
+function recordBrush(s, mode, gx, gy) {
+  var t = TRACE;
+  if (!t) return;
+  if (t.n >= t.cap) growTrace(t);
+  t.step[t.n] = s; t.mode[t.n] = mode; t.gx[t.n] = gx; t.gy[t.n] = gy;
+  t.n++;
+}
+
+/* Drive ptr from the trace for the step about to run. It writes the live ptr
+   rather than a shadow copy on purpose: the frame loop's paint line and the
+   renderer's brush ring then need no replay-specific branch, so the replay
+   path and the played path are the same code. Live input is gated off while
+   REPLAY.on, so nothing else can touch ptr from under it. */
+function feedTrace(s) {
+  var t = REPLAY.trace;
+  if (!t) { ptr.down = false; return; }
+  while (REPLAY.i < t.n && t.step[REPLAY.i] < s) REPLAY.i++;
+  if (REPLAY.i < t.n && t.step[REPLAY.i] === s) {
+    ptr.down = true;
+    ptr.mode = t.mode[REPLAY.i];
+    ptr.gx = t.gx[REPLAY.i];
+    ptr.gy = t.gy[REPLAY.i];
+    REPLAY.i++;
+  } else {
+    ptr.down = false;
+  }
+}
+
+function setReplayUI(on) {
+  document.body.classList.toggle('replay', !!on);
+  var x = $('s-exitrp');
+  if (x) x.hidden = !on;
+  var r = $('s-reset');
+  if (r) r.textContent = on ? 'Restart fresh' : 'Reset';
+}
+
+function startReplay(sp) {
+  if (!TRACE || TRACE.idx < 0) return false;
+  var t = TRACE;
+  startRun(t.idx, t.seed, t);
+  setSpeed(sp || 4);
+  return true;
+}
+
+/* Leaving a replay early puts the ORIGINAL run's verdict back — the replay is
+   a viewing of a run that already happened, so aborting it cannot invent a new
+   result and must not disturb the trace it was reading. */
+function exitReplay() {
+  if (!REPLAY.on) return;
+  stopRun();
+  REPLAY.on = false;
+  REPLAY.trace = null;
+  ptr.down = false;
+  S.over = true;
+  /* a replay abandoned while held would otherwise leave the veil up over the
+     dish the verdict is inviting you to look at */
+  S.paused = false;
+  $('pauseveil').classList.remove('on');
+  setPausedLabel(false);
+  setReplayUI(false);
+  /* put the original completed dish back so the lattice, biomass, nodes and
+     clock agree with the verdict below them */
+  if (FINAL_STATE) {
+    trail.set(FINAL_STATE.trail);
+    cueF.set(FINAL_STATE.cueF); retF.set(FINAL_STATE.retF);
+    nAgents = FINAL_STATE.n;
+    var fs = FINAL_STATE.S;
+    for (var rk in fs) S[rk] = fs[rk];
+    if (fs.nodeProg) S.nodeProg = fs.nodeProg.slice();
+    if (fs.nodeDone) S.nodeDone = fs.nodeDone.slice();
+    /* the run is a finished exhibit, whatever the snapshot said mid-frame */
+    S.running = false; S.paused = false; S.over = true;
+    $('log').innerHTML = FINAL_STATE.logHTML;
+    setSpeed(FINAL_STATE.turbo);
+  }
+  if (LAST_RESULT) { paintResult(LAST_RESULT); openResult(); }
+  render();
+  updateHUD(true);
+}
+
 function setSpeed(n) {
   TURBO = clamp(Math.round(n) || 1, 1, 24);
   var b = $('s-speed');
@@ -1435,13 +1569,24 @@ var bootSalt = (Date.now() >>> 0);
 var attempts = 0;
 function freshSeed(i) { return mix32(i + 1, ++attempts, bootSalt) & SEED_MASK; }
 
-function startRun(i, seed) {
+/* trace: a recorded run to play back instead of taking live input. Passing one
+   makes this a REPLAY — no fresh seed is minted, nothing is recorded, and the
+   stored trace is left exactly as it was so it can be replayed again. */
+function startRun(i, seed, trace) {
   var e = EXPERIMENTS[i];
   S.exp = e; S.idx = i;
   /* Seed first: inoculate() draws from the stream, so the generator has to be
      standing before anything in the dish is placed. */
   S.seed = (seed == null || seed === '') ? freshSeed(i) : normSeed(seed);
   rndSeed(mix32(S.seed, 0x9E3779B9, 0x85EBCA6B));
+
+  REPLAY.on = !!trace;
+  REPLAY.i = 0;
+  REPLAY.trace = trace || null;
+  if (!trace) TRACE = newTrace(i, S.seed);
+  setReplayUI(REPLAY.on);
+  closeResult();
+
   stepsRun = 0;
   stepTarget = 0;
   setSpeed(1);
@@ -1457,6 +1602,9 @@ function startRun(i, seed) {
   S.shockActive = false; S.shockWarn = false; S.shocksSurvived = 0;
   S.shockWarned = -1; S.quinTime = 0; S.slow = 1; S.anticipated = false;
   S.ambientAt = 14; S.scriptIdx = 0; S.failReason = '';
+  /* the cue count is bookkeeping, not sim state — a replay inherits the
+     recorded run's tally so its observations match the run it is replaying */
+  if (trace) S.cues = trace.cues;
 
   buildDish(e);
   inoculate(e);
@@ -1481,6 +1629,9 @@ function startRun(i, seed) {
 
   logLine('inoculated. ' + fmtNum(nAgents) + ' nuclei, one cell, no plan.', true);
   logLine('specimen line ' + seedLabel(S.seed) + ' — plate stamped.');
+  if (REPLAY.on) {
+    logLine('replay — same line, same cues, the tape run again.', true);
+  }
 
   lastTs = 0; acc = 0;
   if (!raf) raf = window.requestAnimationFrame(frame);
@@ -1509,23 +1660,36 @@ function finish(won, reason) {
   S.running = false;
   S.failReason = reason;
   stopRun();
+  ptr.down = false;
 
   var e = S.exp;
-  if (won) {
-    var prev = save.best[e.code];
-    if (!prev || S.simT < prev) save.best[e.code] = S.simT;
-    save.done[e.code] = true;
-    writeSave();
+  /* A replay reaches exactly the result it is replaying, which is already in
+     the log — so it neither re-records the trace nor re-writes the save. */
+  if (!REPLAY.on) {
+    if (TRACE) TRACE.cues = S.cues;
+    if (won) {
+      var prev = save.best[e.code];
+      if (!prev || S.simT < prev) save.best[e.code] = S.simT;
+      save.done[e.code] = true;
+      writeSave();
+    }
   }
+  REPLAY.on = false;
+  REPLAY.trace = null;
+  setReplayUI(false);
   showResult(won);
 }
 
-/* ---------- result ---------- */
-function showResult(won) {
-  var e = S.exp;
-  $('r-code').textContent = e.code + ' · ' + e.name;
-  $('r-head').textContent = won ? 'Result logged' : 'Culture lost';
+/* ---------- result ----------
+   Built into a plain object first, then painted. The split is what lets a
+   replay be abandoned halfway: the ORIGINAL verdict is still sitting in
+   LAST_RESULT and can be put back without re-deriving it from a run state
+   that has since been overwritten. */
+var LAST_RESULT = null;
+var FINAL_STATE = null;
 
+function buildResult(won) {
+  var e = S.exp;
   var body = won ? e.win : e.lose;
   if (!won && S.failReason === 'timeout') {
     body = 'The plate reached its scheduled end with the network incomplete. ' + e.lose;
@@ -1534,7 +1698,6 @@ function showResult(won) {
   } else if (!won) {
     body = e.lose;
   }
-  $('r-body').textContent = body;
 
   var rows = [
     ['Elapsed', fmtTime(S.simT)],
@@ -1554,24 +1717,94 @@ function showResult(won) {
      again, cell for cell, at any time-lapse setting. */
   rows.push(['Specimen line', seedLabel(S.seed)]);
 
+  var hasNext = won && S.idx < EXPERIMENTS.length - 1;
+  return {
+    code: e.code + ' · ' + e.name,
+    head: won ? 'Result logged' : 'Culture lost',
+    body: body,
+    rows: rows,
+    nextText: hasNext ? 'Next experiment' : 'Schedule',
+    nextMode: hasNext ? 'next' : 'menu'
+  };
+}
+
+function paintResult(R) {
+  $('r-code').textContent = R.code;
+  $('r-head').textContent = R.head;
+  $('r-body').textContent = R.body;
+
   var stats = $('r-stats');
   stats.innerHTML = '';
-  for (var i = 0; i < rows.length; i++) {
+  for (var i = 0; i < R.rows.length; i++) {
     var d = document.createElement('div');
     var k = document.createElement('span');
     k.className = 'mono-dim';
-    k.textContent = rows[i][0] + ' — ';
+    k.textContent = R.rows[i][0] + ' — ';
     d.appendChild(k);
-    d.appendChild(document.createTextNode(rows[i][1]));
+    d.appendChild(document.createTextNode(R.rows[i][1]));
     stats.appendChild(d);
   }
 
   var next = $('r-next');
-  var hasNext = won && S.idx < EXPERIMENTS.length - 1;
-  next.textContent = hasNext ? 'Next experiment' : 'Schedule';
-  next.dataset.mode = hasNext ? 'next' : 'menu';
+  next.textContent = R.nextText;
+  next.dataset.mode = R.nextMode;
 
-  show('scr-result');
+  var note = $('r-tracenote');
+  if (note) {
+    note.textContent = (TRACE && TRACE.n)
+      ? fmtNum(TRACE.n) + ' cue-steps recorded'
+      : 'no cues recorded — the dish ran itself';
+  }
+}
+
+/* The panel lives under the dish and shows without switching screens: the
+   plate stays on the bench, halted on its last frame, and the verdict is
+   pinned below it. */
+function openResult() {
+  var sim = $('scr-sim');
+  if (sim) sim.classList.add('resulting');
+  var el = $('result');
+  if (el) el.classList.add('on');
+  /* the dish is letterboxed while the panel is up, so the backing store has to
+     follow the new CSS width or the final lattice renders at the wrong scale */
+  resizeCanvas();
+  render();
+  updateHUD(true);
+}
+
+function closeResult() {
+  var sim = $('scr-sim');
+  if (sim) sim.classList.remove('resulting');
+  var el = $('result');
+  if (el) el.classList.remove('on');
+}
+
+function resultOpen() {
+  var el = $('result');
+  return !!el && el.classList.contains('on');
+}
+
+function showResult(won) {
+  /* Snapshot what the finished dish looks like, so aborting a replay can put
+     the ORIGINAL final lattice and HUD figures back under the verdict instead
+     of leaving the replay's partial state on display. */
+  /* copy EVERY field of S, not a hand-picked list — noteText/objText read a
+     wide, growing set of them and each omission has been its own bug */
+  var snap = {};
+  for (var sk in S) snap[sk] = S[sk];
+  snap.nodeProg = S.nodeProg ? S.nodeProg.slice() : null;
+  snap.nodeDone = S.nodeDone ? S.nodeDone.slice() : null;
+  FINAL_STATE = {
+    trail: new Float32Array(trail),
+    cueF: new Float32Array(cueF), retF: new Float32Array(retF),
+    n: nAgents,
+    logHTML: $('log').innerHTML,
+    turbo: TURBO,
+    S: snap
+  };
+  LAST_RESULT = buildResult(won);
+  paintResult(LAST_RESULT);
+  openResult();
 }
 
 /* ------------------------------------------------------------
@@ -1593,7 +1826,14 @@ function frame(ts) {
     var steps = 0, budget = 4 * TURBO;
     while (acc >= DT && steps < budget && S.running &&
            (!stepTarget || stepsRun < stepTarget)) {
-      if (ptr.down) paintBrush(ptr.gx, ptr.gy, ptr.mode);
+      /* Replay drives the brush from the tape; a played run records what the
+         brush actually was. Either way the paint call below is the same one,
+         so what is recorded is precisely what the sim consumed. */
+      if (REPLAY.on) feedTrace(stepsRun);
+      if (ptr.down) {
+        paintBrush(ptr.gx, ptr.gy, ptr.mode);
+        if (!REPLAY.on) recordBrush(stepsRun, ptr.mode, ptr.gx, ptr.gy);
+      }
       step(); stepsRun++; acc -= DT; steps++;
     }
     /* Backlog past the budget is dropped: a device that cannot keep up runs
@@ -1647,6 +1887,9 @@ function bindInput() {
   stage.addEventListener('pointerdown', function (ev) {
     if (ev.pointerType === 'touch') markTouch();
     if (!S.running) return;
+    /* a replay is a recording being played: the tape owns the brush, and a
+       finger on the dish must not write over what it is showing */
+    if (REPLAY.on) return;
     /* the veil owns its own taps; nothing else inside the stage is clickable */
     if (ev.target && ev.target.id === 'pauseveil') return;
 
@@ -1676,7 +1919,7 @@ function bindInput() {
   });
 
   window.addEventListener('pointermove', function (ev) {
-    if (!ptr.down) return;
+    if (!ptr.down || REPLAY.on) return;
     if (primaryId !== null && ev.pointerId !== primaryId) return;
     var g = toGrid(ev);
     if (!g) return;
@@ -1685,6 +1928,9 @@ function bindInput() {
   }, { passive: false });
 
   function release(ev) {
+    /* the tape owns ptr.down during a replay — a stray pointerup must not
+       lift a brush the recording says is held */
+    if (REPLAY.on) { downIds.length = 0; primaryId = null; return; }
     if (ev && ev.pointerId != null) {
       var k = downIds.indexOf(ev.pointerId);
       if (k >= 0) downIds.splice(k, 1);
@@ -1703,23 +1949,40 @@ function bindInput() {
 
   document.addEventListener('keydown', function (ev) {
     if (!$('scr-sim').classList.contains('on')) return;
-    if (ev.code === 'Space') {
+    /* A focused button already answers Space and Enter itself; handling them
+       here as well would fire the control twice. */
+    var onBtn = !!(ev.target && ev.target.tagName === 'BUTTON');
+
+    if (ev.code === 'Enter' || ev.code === 'NumpadEnter') {
+      /* the primary action of the verdict panel: on with the schedule */
+      if (resultOpen() && !onBtn) { ev.preventDefault(); $('r-next').click(); }
+    } else if (ev.code === 'Space') {
+      if (onBtn) return;
       ev.preventDefault();
       setPaused(!S.paused);
     } else if (ev.code === 'KeyF') {
       ev.preventDefault();
       cycleSpeed();
     } else if (ev.code === 'KeyR') {
+      /* R is always a fresh dish — a new seed, a new recording — whether it is
+         pressed mid-run, mid-replay, or over the verdict */
       ev.preventDefault();
       if (S.idx >= 0) startRun(S.idx);
     } else if (ev.code === 'Escape') {
       ev.preventDefault();
-      goTitle();
+      if (REPLAY.on) exitReplay();
+      else goTitle();
     }
   });
 
   window.addEventListener('resize', function () {
-    if ($('scr-sim').classList.contains('on')) resizeCanvas();
+    if (!$('scr-sim').classList.contains('on')) return;
+    resizeCanvas();
+    /* Resizing reallocates the backing store, which clears it. A running dish
+       redraws on the next frame; a finished one has no next frame, so the
+       final lattice has to be repainted here or the plate goes black under
+       the verdict. */
+    if (!S.running) render();
   });
 }
 
@@ -1733,13 +1996,17 @@ function bindButtons() {
   $('s-pause').addEventListener('click', function () { setPaused(!S.paused); });
   $('s-reset').addEventListener('click', function () { if (S.idx >= 0) startRun(S.idx); });
   $('s-speed').addEventListener('click', cycleSpeed);
+  $('s-exitrp').addEventListener('click', exitReplay);
   $('t-grow').addEventListener('click', function () { setTouchMode(1); });
   $('t-ret').addEventListener('click', function () { setTouchMode(2); });
+  /* Retry is a NEW dish: no seed passed, so freshSeed() mints one and
+     startRun() opens a fresh recording over the replayed run's trace. */
   $('r-retry').addEventListener('click', function () { startRun(S.idx); });
   $('r-menu').addEventListener('click', goTitle);
   $('r-next').addEventListener('click', function () {
     if (this.dataset.mode === 'next' && S.idx < EXPERIMENTS.length - 1) {
       stopRun();
+      closeResult();
       openBrief(S.idx + 1);
     } else {
       goTitle();
@@ -1751,6 +2018,28 @@ function bindButtons() {
     try { window.localStorage.removeItem(SAVE_KEY); } catch (err) { /* nothing to remove */ }
     renderTitle();
   });
+  buildReplayRow();
+}
+
+/* The replay control: the same rates the time-lapse button cycles, offered as
+   one button each because from the verdict you are choosing how long to spend
+   watching, not stepping through a cycle. ×4 is the suggested rate — fast
+   enough to be a recap, slow enough to see the front move. */
+function buildReplayRow() {
+  var box = $('r-replay');
+  if (!box) return;
+  box.innerHTML = '';
+  for (var i = 0; i < SPEEDS.length; i++) {
+    (function (sp) {
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'btn ghost rsp' + (sp === 4 ? ' def' : '');
+      b.textContent = '×' + sp;
+      b.setAttribute('aria-label', 'Replay this run at ' + sp + ' times real time');
+      b.addEventListener('click', function () { startReplay(sp); });
+      box.appendChild(b);
+    })(SPEEDS[i]);
+  }
 }
 
 function init() {
@@ -1798,6 +2087,13 @@ function init() {
       startRun(clamp(i | 0, 0, EXPERIMENTS.length - 1), seed);
       return S.seed;
     },
+    /* recorded brush-steps of the last played run (0 for an idle run) */
+    trace: function () { return TRACE ? TRACE.n : 0; },
+    /* replay that run at the given rate; false if there is nothing to replay */
+    replay: function (sp) { return startReplay(sp); },
+    replaying: function () { return REPLAY.on; },
+    exitReplay: exitReplay,
+    resultOpen: resultOpen,
     experiments: function () {
       var out = [];
       for (var i = 0; i < EXPERIMENTS.length; i++) {
