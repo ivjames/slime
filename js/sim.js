@@ -1519,15 +1519,35 @@ var INK_L  = relLum(20, 23, 13);
    and lightness is walked upward until the vein tone clears WCAG 1.4.11
    against the agar and the hot tone clears 7:1. With a floor this dark almost
    any lightness passes; it is measured anyway, because the seed is allowed to
-   be any colour and "almost any" is not a guarantee. */
+   be any colour and "almost any" is not a guarantee.
+
+   The hot tone MUST be the one the widest band actually strokes, and is read
+   off VEIN_BANDS rather than written here as a number so it cannot drift from
+   it. A brighter stand-in does not make the test safer: the agar is dark, so
+   contrast RISES with brightness, and asking 7:1 of a tone brighter than
+   anything drawn is a weaker demand than asking it of the band itself. That
+   was a live gap and not a theoretical one — this solve tested mixWhite 0.70
+   against a band drawn at 0.48, which happened to hold across the seed space
+   by luck rather than by construction, and the moment the band came down to
+   0.40 the trunk fell under 7:1 for a fifth of all seeds while the solve went
+   on reporting success. Reading the band closes it by construction.
+
+   VEIN_BANDS is a var initialised further down the file, so this reads it at
+   CALL time, not definition time. The only caller is startRun, long after the
+   file has finished evaluating; the fallback covers a future caller that runs
+   earlier rather than any path that exists today. */
+function hotBandK() {
+  return VEIN_BANDS ? VEIN_BANDS[VEIN_BANDS.length - 1].hot : 0.40;
+}
 function applyTint(seed) {
   var hsl = rgbToHsl((seed >>> 16) & 255, (seed >>> 8) & 255, seed & 255);
   var hue = hsl[0], sat = clamp(hsl[1], 0.35, 0.80);
   var l = clamp(hsl[2], 0.45, 0.72);
-  var vein = hslToRgb(hue, sat, l), hot = mixWhite(vein, 0.70), i;
+  var hotK = hotBandK();
+  var vein = hslToRgb(hue, sat, l), hot = mixWhite(vein, hotK), i;
   for (i = 0; i < 24; i++) {
     vein = hslToRgb(hue, sat, l);
-    hot = mixWhite(vein, 0.70);
+    hot = mixWhite(vein, hotK);
     if (contrast(relLum(vein[0], vein[1], vein[2]), DISH_L) >= 3.0 &&
         contrast(relLum(hot[0], hot[1], hot[2]), DISH_L) >= 7.0) break;
     if (l >= 0.72) break;
