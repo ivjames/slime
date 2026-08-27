@@ -321,8 +321,17 @@ body.touch .dish{min-height:132px}
 
 /* What a small plate carries, and what steps off it. Stated twice on purpose:
    the container query is the accurate one — it asks how wide the DISH is — and
-   the media query is the fallback where @container is unsupported. */
-@media(max-width:640px){
+   the media query is the fallback where @container is unsupported.
+
+   The fallback has to ask the question the long way round. A plate is small
+   either because the window is narrow or because it is SHORT: the letterbox
+   caps its height at 56vh, so its width is 56vh x 420/260 = 0.9046 of the
+   viewport height, which crosses 640px at a viewport 707px tall. Without the
+   second half of this condition, a wide short window — 800x390, say — hands
+   the fallback a 353px plate while the media query still sees an 800px
+   viewport and leaves nine rows of node list absolutely positioned over a
+   dish 219px tall. */
+@media(max-width:640px),(max-height:707px){
   .hud-bl{width:58%}
   .hud-tl .lt,.hud-tl .rt{font-size:10px}
   /* The objective wedged into the middle third of a narrow bar wraps to three
