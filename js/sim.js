@@ -137,15 +137,6 @@ function mixWhite(c, k) {
           Math.round(c[1] + (255 - c[1]) * k),
           Math.round(c[2] + (255 - c[2]) * k)];
 }
-/* The other end of mixWhite: the tint with the light taken off it, for the
-   shadow a raised vein drops on the sheet beside it. Toward black in a
-   straight line for the same reason mixWhite goes toward white in one — a
-   straight line to either corner of the cube holds the hue, so a shaded green
-   is a darker green and never a neutral grey. */
-function mixBlack(c, k) {
-  var m = 1 - k;
-  return [Math.round(c[0] * m), Math.round(c[1] * m), Math.round(c[2] * m)];
-}
 function hex2(n) { var h = (n | 0).toString(16); return h.length < 2 ? '0' + h : h; }
 function hexOf(c) { return '#' + hex2(c[0]) + hex2(c[1]) + hex2(c[2]); }
 function rgba(c, a) { return 'rgba(' + c[0] + ',' + c[1] + ',' + c[2] + ',' + a + ')'; }
@@ -1554,7 +1545,12 @@ var nAgents = 0;
    the growing ends spreading into lobed fans. The old ramp fought that. It ran
    through olive to near-white, which turned dense tissue grey; and it ramped
    SMOOTHLY, so every vein was a gradient with no edge anywhere and the dish
-   read as luminous goo.
+   read as luminous goo. The threshold below fixed most of that and then
+   underdid its own idea: at three trail units of crossing, every boundary
+   still wore a band of the muddy in-between tones, and a bright body edged
+   in dark mud against a dark dish is the anatomy of a DROP SHADOW — the
+   whole organism read as a sticker with a shadow behind it, which is a
+   different wrong dish from the luminous one but wrong the same amount.
 
    So the transfer is a soft-edged THRESHOLD rather than a ramp. Below BODY_T
    there is no organism and the cell is agar; across the next BODY_SOFT of
@@ -1572,7 +1568,90 @@ var nAgents = 0;
    yellow. */
 var AGAR = [20, 22, 17];        // the dish, unoccupied
 var BODY_T    = 9.0;            // trail at which tissue begins
-var BODY_SOFT = 3.0;            // trail over which the edge resolves
+var BODY_SOFT = 1.4;            // trail over which the edge resolves
+
+/* Everything the dish can ADD to a cell, named in one place, because the
+   tint solve has to model the brightest ground a shaded rim can border and
+   numbers copied into it would drift from the painter's. paintField composes
+   cells from these; the solve takes its worst case over them. Index of
+   HAZ_ADD is the hazM code; 3 is the lit field — not an ember: the same
+   aversion, told cold. */
+var HAZ_ADD = [null, [38, 20, 9], [27, 12, 40], [30, 34, 40]];
+var CUE_ADD = [26, 24, 8];    // growth-cue haze, per unit of cueF
+var RET_ADD = [26, 6, 16];    // retract haze, per unit of retF
+var MAT_ADD = [7, 8, 11];     // slime mat, per unit of slimeF — ground only
+var BRUSH_PEAK = 1.15;        // the brush cone's tip, the most cueF/retF holds
+
+/* Every ground the body's shaded rim can border, worst case: each hazard
+   field (and bare agar), under a brush cone's full cue haze, retract haze,
+   or BOTH — the brush writes one field without clearing the other, so a
+   mode switch mid-gesture (the second-finger override) leaves cue and
+   retract on the same cells, and the painter adds them both — with and
+   without the slime mat's film on the unoccupied side. The mat is the
+   unkind one: it fades under tissue, so it lifts the ground WITHOUT lifting
+   the rim. Additive light compresses a contrast ratio from below, so the
+   floor in applyTint is demanded against all of these, not against bare
+   agar. Sixteen bases, each with a matless and a matted ground luminance;
+   the body beside them shares everything but the mat. All static, so built
+   once. */
+var FLOOR_STACKS = (function () {
+  var out = [];
+  var overs = [
+    [0, 0, 0],
+    [CUE_ADD[0] * BRUSH_PEAK, CUE_ADD[1] * BRUSH_PEAK, CUE_ADD[2] * BRUSH_PEAK],
+    [RET_ADD[0] * BRUSH_PEAK, RET_ADD[1] * BRUSH_PEAK, RET_ADD[2] * BRUSH_PEAK],
+    [(CUE_ADD[0] + RET_ADD[0]) * BRUSH_PEAK,
+     (CUE_ADD[1] + RET_ADD[1]) * BRUSH_PEAK,
+     (CUE_ADD[2] + RET_ADD[2]) * BRUSH_PEAK]
+  ];
+  for (var hz = 0; hz < 4; hz++) {
+    var h = hz ? HAZ_ADD[hz] : [0, 0, 0];
+    for (var ov = 0; ov < overs.length; ov++) {
+      var bx = AGAR[0] + h[0] + overs[ov][0];
+      var by = AGAR[1] + h[1] + overs[ov][1];
+      var bz = AGAR[2] + h[2] + overs[ov][2];
+      out.push({
+        base: [bx, by, bz],
+        gL:  relLum(bx, by, bz),
+        gmL: relLum(bx + MAT_ADD[0], by + MAT_ADD[1], bz + MAT_ADD[2])
+      });
+    }
+  }
+  return out;
+})();
+/* 1.4, down from 3.0: the crossing keeps about a cell of width against the
+   trail gradients the body actually has, and the drawImage upscale antialiases
+   that cell, so the edge stays smooth on screen. What the narrower window
+   removes is the apron — the muddy blend tones that ringed every lobe and
+   hole and read, against the dark dish, as a shadow the body was casting. */
+
+/* The inner shadow: the shading of the WHOLE shape of the mold, and the only
+   shadow on the plate. The organism is a raised mass on the agar, lit from
+   up and to the left of the bench; where its surface rolls away from that
+   light — the down-light side of its outline, the up-light wall inside every
+   hole — the tissue darkens. Computed in paintField from the body's own
+   coverage: a cell is shaded by how much the body is ABSENT a little way
+   down-light of it, sampled at two throws so the shade curls off soft instead
+   of stamping a band. Two throws are the whole feather; the field is coarse
+   enough that more would buy nothing.
+
+   It is a multiply on the body's own contribution to the cell — not on the
+   finished pixel — so a shaded green is a darker green, never grey, and the
+   ground underneath keeps its own light: the agar, and the hazard glow that
+   bleeds through the organism on a heat, quinine or light field. It touches
+   nothing but tissue — the agar carries no coverage, so nothing is ever
+   drawn OFF the body. That is the line every earlier attempt crossed:
+   shadows drawn along the veins, at any depth or offset, traced the body's
+   skeleton and summed to a drop shadow under the whole network. The shape's
+   own shadow lives on the shape. */
+var ISH_D     = 2;      // throw, in cells, diagonally down-light per tap
+var ISH_DEPTH = 0.30;   // full-shade depth, on the body's contribution
+/* The depth the RUN actually paints with. Usually ISH_DEPTH; applyTint trims
+   it for the rare seed whose tint cannot be walked light enough for its
+   fully shaded edge to keep the 3:1 body floor (see the solve). Legibility
+   outranks modelling: a specimen the player can see beats one with the
+   handsomest shading. */
+var ishDepth  = ISH_DEPTH;
 
 var LUT = new Uint8Array(256 * 3);
 var GAMN = 2048;
@@ -1621,10 +1700,29 @@ var INK_L  = relLum(20, 23, 13);
 /* Derive the run's palette from its 24-bit seed. Hue is preserved exactly —
    that is the player's specimen line and the number they can write down.
    Saturation is clamped to a range a lab would tolerate near a microscope,
-   and lightness is walked upward until the vein tone clears WCAG 1.4.11
-   against the agar and the hot tone clears 7:1. With a floor this dark almost
-   any lightness passes; it is measured anyway, because the seed is allowed to
-   be any colour and "almost any" is not a guarantee.
+   and lightness is walked upward until the vein tone STILL clears WCAG
+   1.4.11 against every ground the dish can compose at the bottom of the
+   inner shadow — it is the down-light rim of the body, not the sheet, that
+   has to stay distinguishable, and what it must stay distinguishable FROM
+   is not bare agar but FLOOR_STACKS: each hazard field, under the brush's
+   full cue or retract haze, with the slime mat's film on the unoccupied
+   side. Additive light lands on rim and ground alike (the painter shades
+   only the body's contribution, so the two ride the same base), and equal
+   addition always compresses a contrast ratio; the floor therefore has to
+   be demanded where the adding is worst. Checking bare agar alone left the
+   rim under 3:1 for seven percent of seed-and-ground pairs, all of them in
+   the lit-field corner where a player is most likely to be cueing. The hot
+   tone clears 7:1 as before, and the unshaded sheet clears 3:1 a fortiori.
+   Demanding it of the shaded tone roughly doubles what the old check asked,
+   and the old check was already there because the seed is allowed to be any
+   colour and "almost any" is not a guarantee: without it, four in ten seeds
+   shade their own outline below the floor.
+
+   For a handful of seeds — deep blues, mostly — the lightness cap arrives
+   before the shaded rim clears, and for those the run's shadow DEPTH gives
+   way instead: ishDepth is trimmed until the rim passes. Measured across the
+   seed space the trim touches under one seed in a hundred and never goes
+   below 0.28 of the 0.30, but the invariant is the point, not the margin.
 
    The hot tone MUST be the one the widest band actually strokes, and is read
    off VEIN_BANDS rather than written here as a number so it cannot drift from
@@ -1649,14 +1747,30 @@ function applyTint(seed) {
   var hue = hsl[0], sat = clamp(hsl[1], 0.35, 0.80);
   var l = clamp(hsl[2], 0.45, 0.72);
   var hotK = hotBandK();
+  var rimHolds = function (v, k) {
+    var m = 1 - k, i2, st, bl;
+    for (i2 = 0; i2 < FLOOR_STACKS.length; i2++) {
+      st = FLOOR_STACKS[i2];
+      bl = relLum(
+        Math.min(255, Math.round(st.base[0] + (v[0] - AGAR[0]) * m)),
+        Math.min(255, Math.round(st.base[1] + (v[1] - AGAR[1]) * m)),
+        Math.min(255, Math.round(st.base[2] + (v[2] - AGAR[2]) * m)));
+      if (contrast(bl, st.gL) < 3.0 || contrast(bl, st.gmL) < 3.0) return false;
+    }
+    return true;
+  };
   var vein = hslToRgb(hue, sat, l), hot = mixWhite(vein, hotK), i;
   for (i = 0; i < 24; i++) {
     vein = hslToRgb(hue, sat, l);
     hot = mixWhite(vein, hotK);
-    if (contrast(relLum(vein[0], vein[1], vein[2]), DISH_L) >= 3.0 &&
+    if (rimHolds(vein, ISH_DEPTH) &&
         contrast(relLum(hot[0], hot[1], hot[2]), DISH_L) >= 7.0) break;
     if (l >= 0.72) break;
     l = Math.min(0.72, l + 0.02);
+  }
+  ishDepth = ISH_DEPTH;
+  while (ishDepth > 0 && !rimHolds(vein, ishDepth)) {
+    ishDepth = Math.max(0, ishDepth - 0.02);
   }
   TINT = vein;
   buildLUT(vein[0], vein[1], vein[2]);
@@ -2990,10 +3104,10 @@ function paintField() {
     } else {
       r = AGAR[0]; g = AGAR[1]; b = AGAR[2];
       var hz = hazM[i];
-      if (hz === 1) { r += 38; g += 20; b += 9; }
-      else if (hz === 2) { r += 27; g += 12; b += 40; }
-      /* a lit field, not an ember: the same aversion, told cold */
-      else if (hz === 3) { r += 30; g += 34; b += 40; }
+      if (hz) {
+        var hl = HAZ_ADD[hz];
+        r += hl[0]; g += hl[1]; b += hl[2];
+      }
       /* The mat, where a dish is running on it. Cool, grey and much fainter
          than any hazard — it is the record of where the organism has been,
          not a thing on the plate — and it fades out under live tube, because
@@ -3003,7 +3117,9 @@ function paintField() {
         if (sv > 0.05) {
           var thin = 1 - (trail[i] > 8 ? 1 : trail[i] * 0.125);
           if (thin > 0) {
-            r += sv * 7 * thin; g += sv * 8 * thin; b += sv * 11 * thin;
+            r += sv * MAT_ADD[0] * thin;
+            g += sv * MAT_ADD[1] * thin;
+            b += sv * MAT_ADD[2] * thin;
           }
         }
       }
@@ -3013,8 +3129,39 @@ function paintField() {
         if (t > BODY_T * 0.5) {
           var gi = (t * GAM_SCALE) | 0;
           if (gi < 0) gi = 0; else if (gi >= GAMN) gi = GAMN - 1;
-          var o = GAM[gi] * 3;
-          r += LUT[o] * FIELD_GAIN; g += LUT[o + 1] * FIELD_GAIN; b += LUT[o + 2] * FIELD_GAIN;
+          var vcov = GAM[gi];
+          /* the inner shadow (see ISH_D above): how much of the body is
+             missing one and two throws down-light of this cell. The last
+             few rows and columns skip it rather than clamp it — they are
+             against the dish wall, where the shade would be guesswork. */
+          var f = 1;
+          var sx2 = i % GW, sy2 = (i / GW) | 0;
+          if (vcov > 8 && sx2 < GW - 2 * ISH_D - 1 && sy2 < GH - 2 * ISH_D - 1) {
+            var j1 = i + ISH_D * GW + ISH_D;
+            var a1 = shpA[j1];
+            var t1 = a1 + SHARP * (a1 - shpB[j1]);
+            var g1 = (t1 * GAM_SCALE) | 0;
+            if (g1 < 0) g1 = 0; else if (g1 >= GAMN) g1 = GAMN - 1;
+            var j2 = i + 2 * ISH_D * GW + 2 * ISH_D;
+            var a2 = shpA[j2];
+            var t2 = a2 + SHARP * (a2 - shpB[j2]);
+            var g2 = (t2 * GAM_SCALE) | 0;
+            if (g2 < 0) g2 = 0; else if (g2 >= GAMN) g2 = GAMN - 1;
+            var sh = vcov * (255 - 0.55 * GAM[g1] - 0.45 * GAM[g2]);
+            if (sh > 0) f = 1 - ishDepth * sh / 65025;
+          }
+          /* The shade scales the ORGANISM'S contribution and nothing under
+             it. The ground keeps its own light — agar, and the hazard glow
+             that bleeds through the body — which is what holds the shaded
+             rim's contrast against every ground the dish can show: shading
+             the whole pixel put the rim under 3:1 against a lit hazard
+             field for a quarter of seed-and-ground pairs, while shading the
+             contribution alone clears the floor on all of them, because
+             rim and ground then ride on the same base. */
+          var o = vcov * 3;
+          r += LUT[o] * FIELD_GAIN * f;
+          g += LUT[o + 1] * FIELD_GAIN * f;
+          b += LUT[o + 2] * FIELD_GAIN * f;
           if (r > 255) r = 255;
           if (g > 255) g = 255;
           if (b > 255) b = 255;
@@ -3023,12 +3170,12 @@ function paintField() {
       /* the player's cue reads as a faint warm haze in the agar */
       var c = cueF[i];
       if (c > 0.02) {
-        r += c * 26; g += c * 24; b += c * 8;
+        r += c * CUE_ADD[0]; g += c * CUE_ADD[1]; b += c * CUE_ADD[2];
         if (r > 255) r = 255; if (g > 255) g = 255; if (b > 255) b = 255;
       }
       var q = retF[i];
       if (q > 0.02) {
-        r += q * 26; g += q * 6; b += q * 16;
+        r += q * RET_ADD[0]; g += q * RET_ADD[1]; b += q * RET_ADD[2];
         if (r > 255) r = 255; if (g > 255) g = 255; if (b > 255) b = 255;
       }
     }
@@ -3124,48 +3271,48 @@ var RIDGE_REL = 0.14;  // ...as a fraction of the cell's own trail
    band now tops out around lightness 0.68, which is still plainly the
    brightest thing on the plate and still plainly the specimen's colour.
 
-   The brightness it gives up is returned as `cast`: how much shadow the band
-   drops on the sheet beside it, as an alpha. That is the better trade because
-   a highlight needs something to be a highlight OF. The tissue is one flat
-   threshold colour, so a bright line on it was the only tonal event in the
-   picture and read as something drawn ON the plate; a crest with a shade down
-   one side reads as a tube standing up out of it, at a fraction of the
-   brightness. `cast` rises with width because that is also what makes the
-   hierarchy legible: a trunk is a raised tube and throws a real shadow, a
-   hairline barely lifts off the sheet.
-
-   The two finest bands throw none at all, for two separate reasons that
-   happen to agree. `dim` has already sunk the finest BELOW the sheet, where a
-   cast shadow would be a contradiction. And a shadow is only a shadow if you
-   can see which way it fell — the throw scales with the band's own width, so
-   below about a cell it lands under its own crest on both sides and draws an
-   OUTLINE. A dish full of outlined hairlines reads as cut paper, which is a
-   worse failure than the streaks this is fixing. */
+   These lines are the HIGHLIGHTS and nothing else. The bands used to carry
+   shadows too — a dark stroke offset beside each crest, tried at several
+   depths and geometries — and every version misattributed itself: the veins
+   trace the body's whole skeleton, so their offset dark copies summed to a
+   drop shadow under the body, the one thing this dish must never wear. The
+   shading that makes the organism read as a raised mass is the field's own
+   inner shadow now (section 9, ISH_D), computed from the SHAPE of the mold
+   rather than drawn along its veins; the crests stay where light belongs,
+   on top of it. */
 var VEIN_BANDS = [
-  { max: 6,        w: 0.34, hot: 0.00, dim: 0.86, alpha: 0.90, cast: 0.00, style: '', shadow: '' },
-  { max: 10,       w: 0.62, hot: 0.09, dim: 1.00, alpha: 0.97, cast: 0.00, style: '', shadow: '' },
-  { max: 16,       w: 1.05, hot: 0.18, dim: 1.00, alpha: 1,    cast: 0.24, style: '', shadow: '' },
-  { max: 26,       w: 1.75, hot: 0.28, dim: 1.00, alpha: 1,    cast: 0.32, style: '', shadow: '' },
-  { max: Infinity, w: 2.70, hot: 0.40, dim: 1.00, alpha: 1,    cast: 0.40, style: '', shadow: '' }
+  { max: 6,        w: 0.34, hot: 0.00, dim: 0.86, alpha: 0.90, style: '' },
+  { max: 10,       w: 0.62, hot: 0.09, dim: 1.00, alpha: 0.97, style: '' },
+  { max: 16,       w: 1.05, hot: 0.18, dim: 1.00, alpha: 1 },
+  { max: 26,       w: 1.75, hot: 0.28, dim: 1.00, alpha: 1 },
+  { max: Infinity, w: 2.70, hot: 0.40, dim: 1.00, alpha: 1 }
 ];
 /* The lobe layer: the swellings, drawn as swellings.
 
    The line layer above draws the network where the network is a LINE, and
    correctly draws nothing where it is not: the ridge test finds no ridge on a
    plateau, so a pad of cytoplasm sitting on a flake and a lobe parked at a
-   junction both came through as bare field — flat tissue colour, hard edge,
-   no relief, indistinguishable from a wide smear of body. The organism's two
+   junction both came through as bare field — flat tissue colour, no crest, no
+   hierarchy, indistinguishable from a wide smear of body. The organism's two
    most characteristic masses were the two things the renderer had no pen for.
 
    This is that pen, and it asks the simulation where the masses are rather
-   than trying to infer it from the field. The first attempt did infer it —
-   any cell whose blurred trail was high and had stayed high under a wider
+   than trying to infer them from the field. The first attempt did infer them
+   — any cell whose blurred trail was high and had stayed high under a wider
    blur — and it drew the wrong picture for a reason worth keeping: the
    densest tissue in a dish is not a lobe at all, it is the inoculation drop
    and the packed sheet around it, so the layer painted a single pale mass
-   across the middle of the plate and the lobes it was written for were lost
-   inside it. The simulation already knows exactly which cells are junction
-   and which are meal. Asking it is both cheaper and right.
+   across the middle of the plate and lost the lobes it was written for inside
+   it. The simulation knows exactly which cells are junction and which are
+   meal. Asking it is both cheaper and right.
+
+   Like the bands above it, this is a HIGHLIGHT and nothing else. A first
+   version filled an offset dark copy under each mass, which is the same
+   mistake the vein shadows were: a swelling drawn with its own cast shadow
+   is a sticker on the plate, and the shading that makes it read as raised is
+   the field's inner shadow (section 9, ISH_D), which already covers it —
+   a lobe is body, so the shape's own shadow shades it along with everything
+   else the mold is made of.
 
    Drawn as a union of overlapping discs on a two-cell lattice rather than as
    a fitted outline: the masses are not circles, and a union of discs takes
@@ -3173,45 +3320,28 @@ var VEIN_BANDS = [
 var LOBE_MARK = 0.30;  // junction mark at which a lobe is drawn
 var LOBE_PAD  = 24;    // ...and the blurred trail a pad needs to be drawn at all
 var LOBE_DOT  = 1.9;   // radius of each disc in the union, cells
-var LOBE_CAST = 1.30;  // how far a mass throws its shade, cells
 /* One slot per cell of the two-cell lattice, so the list cannot overflow and
    there is no cap to test against inside the loop that fills it. */
 var LOBE_CAP  = ((GW >> 1) + 1) * ((GH >> 1) + 1);
 var lseg = new Float32Array(LOBE_CAP * 2);
 var lsegN = 0;
 var lobePath = null;
-var LOBE_STYLE = '', LOBE_SHADE = '';
+var LOBE_STYLE = '';
 
-/* The lamp: up and to the left of the bench, the way a plate is lit for a
-   photograph. A unit vector in GRID cells, pointing the way shadows fall, so
-   the offsets below scale with the dish and survive a resize along with the
-   baked paths. */
-var LIGHT_X = 0.7071, LIGHT_Y = 0.7071;
-/* How far a band's shadow slides out from under it, and how much wider it is
-   drawn, both as multiples of the band's own line width. Kept small: this is
-   a tube a fraction of a millimetre proud of the agar, not a pipe on a table,
-   and a longer throw immediately reads as a drop shadow under a sticker. */
-var CAST_OFF  = 0.46;
-var CAST_GROW = 1.22;
 function tintVeins(vein) {
-  /* One shade for every band, not one per band: a shadow is the absence of
-     the lamp on the TISSUE, and the tissue is a single flat colour whatever
-     vein happens to sit on it. Depth is carried by `cast` and by how far each
-     band throws, which is where it belongs. */
-  var sh = mixBlack(vein, 0.60);
   for (var i = 0; i < VEIN_BANDS.length; i++) {
     var band = VEIN_BANDS[i];
     var c = mixWhite(vein, band.hot);
     band.style = 'rgba(' + Math.round(c[0] * band.dim) + ','
                          + Math.round(c[1] * band.dim) + ','
                          + Math.round(c[2] * band.dim) + ',' + band.alpha + ')';
-    band.shadow = band.cast ? rgba(sh, band.cast.toFixed(3)) : '';
   }
   TIP_STYLE = rgba(mixWhite(vein, 0.62), '0.34');
-  /* A mass catches the lamp like the widest vein does, and throws a shade
-     like it too — it is the same tissue standing proud of the same sheet. */
-  LOBE_STYLE = rgba(mixWhite(vein, 0.30), '1');
-  LOBE_SHADE = rgba(sh, '0.44');
+  /* A mass catches the lamp about as hard as the second-widest band does: it
+     is the same tissue standing at about the same height, and taking it any
+     brighter walks a pad the size of a flake toward white, which is the one
+     tone on this plate that never means tissue. */
+  LOBE_STYLE = rgba(mixWhite(vein, 0.24), '1');
 }
 var VEIN_CAP = 200000;                 /* floats held per band per rebuild */
 var vseg = [], vsegN = [], veinPath = [];
@@ -3473,44 +3603,16 @@ function strokeVeins(sx, sy) {
   ctx.setTransform(sx, 0, 0, sy, 0, 0);
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
-  var b, band;
-  /* The masses throw the first and longest shade: they are the widest thing
-     on the plate, and every vein that runs into one stands on top of it. */
-  if (lobePath) {
-    ctx.save();
-    ctx.translate(LOBE_CAST * LIGHT_X, LOBE_CAST * LIGHT_Y);
-    ctx.fillStyle = LOBE_SHADE;
-    ctx.fill(lobePath);
-    ctx.restore();
-  }
-  /* Every shadow first, then every highlight — rather than shading each band
-     as it is drawn. Two passes cost one extra loop over five cached paths and
-     buy the rule that makes the network read as one surface: nothing standing
-     ABOVE the sheet can have a shadow laid on top of it. Interleaved, a
-     narrower band drawn later dropped its shade across the crest of the trunk
-     it joins, which on the default plate took about 2.6% of the second-widest
-     band's highlight pixels with it — small, but it is exactly the junctions
-     that lose them, and the junctions are where the hierarchy is read. */
-  for (b = VEIN_BANDS.length - 1; b >= 0; b--) {
-    band = VEIN_BANDS[b];
-    if (!veinPath[b] || !band.shadow) continue;
-    /* Offset only the shadow, never the crest. The crest IS the vein — the
-       ridge walk put it on the centreline and moving it would draw the
-       network somewhere the simulation does not have one. Sliding the shade
-       out from under it is what leaves a dark crescent down one side. */
-    ctx.save();
-    ctx.translate(band.w * CAST_OFF * LIGHT_X, band.w * CAST_OFF * LIGHT_Y);
-    ctx.lineWidth = band.w * CAST_GROW;
-    ctx.strokeStyle = band.shadow;
-    ctx.stroke(veinPath[b]);
-    ctx.restore();
-  }
+  /* The masses first, so the crests of the veins running into one land on
+     top of it rather than under it. One fill, no offset copy: what makes a
+     lobe read as raised is the field's inner shadow, which has already
+     shaded it as part of the shape. */
   if (lobePath) {
     ctx.fillStyle = LOBE_STYLE;
     ctx.fill(lobePath);
   }
   /* widest first, so the hairlines land on top of the trunks they join */
-  for (b = VEIN_BANDS.length - 1; b >= 0; b--) {
+  for (var b = VEIN_BANDS.length - 1; b >= 0; b--) {
     if (!veinPath[b]) continue;
     ctx.lineWidth = VEIN_BANDS[b].w;
     ctx.strokeStyle = VEIN_BANDS[b].style;
@@ -3635,7 +3737,7 @@ function paintBrush(gx, gy, mode) {
       /* Write the cone directly rather than accumulating toward a cap —
          accumulation saturates the middle flat and leaves a gradient only at
          the rim, which is the part the organism needs to feel. */
-      var want = fall * 1.15;
+      var want = fall * BRUSH_PEAK;
       if (mode === 2) {
         if (retF[i] < want) retF[i] = want;
         trail[i] *= (1 - 0.16 * fall);
