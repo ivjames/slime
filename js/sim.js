@@ -1640,6 +1640,17 @@ var nAgents = 0;
 var AGAR = [20, 22, 17];        // the dish, unoccupied
 var BODY_T    = 9.0;            // trail at which tissue begins
 var BODY_SOFT = 1.4;            // trail over which the edge resolves
+/* The floor the same edge resolves from along a BRIDGE — see buildBridges.
+   A tube thin enough to need bridging sits well under BODY_T by definition,
+   so measuring it against BODY_T would draw nothing. This sits BELOW
+   BRIDGE_MIN, and the gap between the two is load-bearing rather than
+   incidental: paintField reads a bridged cell's coverage off the same trail
+   field the flood qualified it on, so a cell that cleared 3.0 to be routed
+   cannot then fail to be drawn. It resolves at 79% coverage at worst and full
+   tissue by 3.4. What the remaining distance to zero is for is a cell the mask
+   still names after its tube has decayed out from under it, which fades rather
+   than being asserted. */
+var BODY_LO   = 2.0;            // ...and the floor it resolves from on a bridge
 
 /* Everything the dish can ADD to a cell, named in one place, because the
    tint solve has to model the brightest ground a shaded rim can border and
@@ -1727,21 +1738,58 @@ var ishDepth  = ISH_DEPTH;
 var LUT = new Uint8Array(256 * 3);
 var GAMN = 2048;
 var GAM = new Uint8Array(GAMN);
+/* the same ramp, anchored at BODY_LO — the transfer a bridged cell is drawn
+   through, so a bridge is tissue at the body's own colour and not a tone
+   between body and agar */
+var GAM_LO = new Uint8Array(GAMN);
 var GAM_SCALE = (GAMN - 1) / TRAIL_MAX;
 (function buildGamma() {
   for (var j = 0; j < GAMN; j++) {
-    var u = ((j / GAM_SCALE) - BODY_T) / BODY_SOFT;
+    var q = j / GAM_SCALE;
+    var u = (q - BODY_T) / BODY_SOFT;
     if (u < 0) u = 0; else if (u > 1) u = 1;
     var v = u * u * (3 - 2 * u);          /* smoothstep: the edge */
     GAM[j] = (v * 255) | 0;
+    var w = (q - BODY_LO) / BODY_SOFT;
+    if (w < 0) w = 0; else if (w > 1) w = 1;
+    GAM_LO[j] = (w * w * (3 - 2 * w) * 255) | 0;
   }
 })();
+/* The lowest sharpened value at which the painter actually puts ink on the
+   plate. Not BODY_T, and not derivable from the ramp alone: a cell's colour
+   reaches the pixel through TWO quantisations, and either can round a live
+   cell away to nothing.
+
+   GAM is the first. It holds 256 steps of coverage over GAMN buckets, and
+   smoothstep leaves its first bucket rounding to zero, so coverage begins at
+   9.0572 rather than at 9.0. LUT is the second and the sharper one: it stores
+   a whole channel delta per coverage step, `((tr - AGAR[0]) * i / 255) | 0`,
+   so coverage 1 truncates to zero for any colour the dish can hold — 235 of
+   delta at the very brightest is 0.92 of a channel — and a dark enough plate
+   is still at zero by coverage 4 or 7. The floor is therefore a function of
+   the RUN'S palette, which is why it is computed here, in the one place that
+   knows it, and recomputed whenever the palette changes.
+
+   Composed, the question is exactly "which sharpened value is the first whose
+   coverage survives LUT", and it is asked once per palette so the per-cell
+   test using it stays a compare. If no coverage inks at all — a tint equal to
+   the agar, which the contrast solve does not permit — it falls back to
+   BODY_T and the pass behaves as it did before any of this. */
+var BODY_DRAW = BODY_T;
+
 function buildLUT(tr, tg, tb) {
-  for (var i = 0; i < 256; i++) {
+  var i;
+  for (i = 0; i < 256; i++) {
     var t = i / 255;
     LUT[i * 3]     = ((tr - AGAR[0]) * t) | 0;
     LUT[i * 3 + 1] = ((tg - AGAR[1]) * t) | 0;
     LUT[i * 3 + 2] = ((tb - AGAR[2]) * t) | 0;
+  }
+  var lo = 0;
+  while (lo < 256 && !LUT[lo * 3] && !LUT[lo * 3 + 1] && !LUT[lo * 3 + 2]) lo++;
+  BODY_DRAW = BODY_T;
+  if (lo < 256) {
+    for (var j = 0; j < GAMN; j++) if (GAM[j] >= lo) { BODY_DRAW = j / GAM_SCALE; break; }
   }
 }
 
@@ -3322,9 +3370,246 @@ function buildRidge() {
   for (n = 1; n < SHARP_RW; n++) blurPass(shpB, shpB);
 }
 
+/* ---- bridges: drawing the tube that is already there ----
+
+   The organism is one cell. It has no way to put cytoplasm somewhere it is not
+   connected to, so a scrap of body floating clear of the network is the one
+   thing the picture must never show — and, measured, the picture was full of
+   them. Four seeds at 600, 1200 and 2000 steps: 13 to 63 drawn pieces adrift
+   from the main mass, 5% to 20% of every cell of drawn body. Labelling the
+   drawn components and walking the trail field back from each island to the
+   mass says why, and it is not the physics. Sweeping every cell in descending
+   trail and recording the level at which an island first joins the mass, no
+   island in any sample was actually isolated: 69% to 89% of them hang off a
+   path carrying 4 to 8 trail — well above TIP_FEED * TIP_MIN, the level the
+   supply rule at the top of this file calls a fed tube — and the painter drew
+   the gap as agar for the single reason that BODY_T is 9. The renderer's floor
+   for tissue was three times the simulation's floor for a tube.
+
+   The obvious repair is to lower the threshold for anything touching drawn
+   body, and it does heal the picture: at a floor of 3 the islands fall from 45
+   to 6. It also inflates the drawn body by 51% to 61%, because a threshold
+   dropped is dropped in every direction — it walks the soft skirt outward all
+   the way round the organism, which is exactly the fattening BODY_T was tuned
+   at 9 to avoid. Healing bought that way costs the silhouette.
+
+   What is wanted is narrower than a threshold: not every dim cell, only the
+   dim cells that lie on a path BETWEEN two drawn pieces. A skirt cell borders
+   one component; a bridge cell has a different component on its far side. So
+   the drawn pieces are labelled, a breadth-first flood runs out of all of them
+   at once over cells the supply rule would call a tube, and every low cell
+   learns which piece owns it and which cell it was reached from. Where two
+   territories meet, both sides are walked home along those parent links and
+   the path is marked. Nothing else is. Same seeds at 2000 steps: islands
+   54 -> 6, 63 -> 16, 42 -> 7, 57 -> 9, for 10% to 18% more drawn cells — and
+   that increase is corridor LENGTH, not silhouette. The outline of the
+   organism is the one it already had.
+
+   The islands that remain are the point of keeping the floor where it is. A
+   scrap whose best path home carries less trail than the supply rule needs is
+   a scrap the simulation is already starving — one of the branches that comes
+   adrift, slows to VOID_SPEED and is reabsorbed — and it should read as cut
+   off, because it is. Tracked from step 900, one such branch went 12.06 trail
+   at its neck, to 3.44 by step 1100, to 0.05 by 1700. This pass draws the
+   organism that is connected and lets the dying ends die visibly.
+
+   Render-only, like the rest of section 9: it reads trail and the ridge
+   fields, writes nothing either of them or the simulation reads back, and
+   draws nothing from the RNG. A run's outcome does not depend on it. It costs
+   2.6ms against the field rebuild's 7.5, on the every-other-frame cadence
+   REBUILD_EVERY already puts that rebuild on.
+
+   That cadence is the only one it gets, and giving it a slower one of its own
+   was tried and reverted. The mask survives being stale in principle — it says
+   which cells MAY be drawn against BODY_LO and the live field still says how
+   much of one is drawn — but the count that would pace it is frames, and a
+   frame at x12 is twelve times the sim time it is at x1. Rebuilding every
+   third field rebuild left corridors trailing the dish exactly when the dish
+   was moving: 42 -> 32 islands where rebuilding every time gives 42 -> 7. The
+   same trap the vein average is written in sim time to avoid. */
+var BRIDGE_MIN = TIP_FEED * TIP_MIN;   // trail a bridge may be routed through
+var bStrong = new Uint8Array(NCELL);   // cells the painter draws unaided
+var bLab    = new Int32Array(NCELL);   // component id, then flood ownership
+var bPar    = new Int32Array(NCELL);   // ...and the cell each was reached from
+var bQ      = new Int32Array(NCELL);   // seeds, then the cells the flood reached
+/* Two uses, never at once: the union-find parents while the drawn pieces are
+   being labelled, then the corridor as a list of its own cells. Sharing one
+   array rather than carrying two is worth 437KB on a phone, and the second use
+   cannot start until the first is finished — the labels are flattened before
+   the flood runs, and the flood before anything is marked. */
+var bAux    = new Int32Array(NCELL);
+var bridge  = new Uint8Array(NCELL);   // the cells this pass adds to the body
+var bN = 0;                            // how many of them, as a list in bAux
+
+/* The cells whose eight neighbours are all on the grid, and the offsets to
+   them. Both floods below are the same loop twice — by offset where the mask
+   says it is safe, with the bounds tests and the divisions to recover x and y
+   where it does not — because at this grid size the border is 1.3% of the
+   cells and the interior is the hot loop. */
+var bInner = new Uint8Array(NCELL);
+var BOFF = new Int32Array([-GW - 1, -GW, -GW + 1, -1, 1, GW - 1, GW, GW + 1]);
+(function markInner() {
+  for (var y = 1; y < GH - 1; y++)
+    for (var x = 1; x < GW - 1; x++) bInner[y * GW + x] = 1;
+})();
+
+function ufFind(a) {
+  while (bAux[a] !== a) { bAux[a] = bAux[bAux[a]]; a = bAux[a]; }
+  return a;
+}
+
+/* Walk home from a meeting cell, marking as it goes. It stops on drawn body
+   (arrived) and on already-marked corridor (this stretch is someone else's
+   already), which is what keeps a mass with many islands from re-walking the
+   same trunk once per island. Every cell it steps through was reached by the
+   flood, so bPar under it is always a cell the flood wrote. */
+function bridgeWalk(c) {
+  while (c >= 0 && !bStrong[c] && !bridge[c]) { bridge[c] = 1; bAux[bN++] = c; c = bPar[c]; }
+}
+
+function buildBridges() {
+  var i, c, q, k, x, y, l, m, o, dx, dy, nx, ny, row, head, tail;
+  bridge.fill(0);
+  bN = 0;
+
+  /* 1. decide what the painter would draw unaided and label the pieces of it,
+     in one raster pass. Union-find rather than a flood fill per piece: four
+     already-seen neighbours each, no queue, no cell visited twice — and the
+     seeds for the flood below fall out of the same sweep.
+
+     The threshold is BODY_DRAW and not BODY_T, which is the same question
+     asked of the ramp's nominal foot rather than of the first place the
+     painter puts ink. They disagree over a hairline and everything this pass
+     does is built on the answer: a cell in that band is body by the constant
+     and blank on the plate, so a corridor can terminate there and paint into
+     nothing, or a piece made only of such cells can anchor one to a component
+     that is not visibly present. Measured over six seeds at 1000 and 2200
+     steps, GAM's own rounding alone put 18 to 81 such cells a frame on the
+     plate, 3 to 17 of them touching a corridor; LUT's rounding, which
+     BODY_DRAW also now accounts for, another 26 to 52 a frame with 4 to 20
+     touching. Testing against the composed floor costs nothing over testing
+     against BODY_T, and the question stops having two answers. */
+  var np = 0;
+  tail = 0;
+  for (y = 0; y < GH; y++) {
+    row = y * GW;
+    for (x = 0; x < GW; x++) {
+      i = row + x;
+      var a = shpA[i];
+      if (a + SHARP * (a - shpB[i]) < BODY_DRAW) { bStrong[i] = 0; bLab[i] = -1; continue; }
+      bStrong[i] = 1;
+      bQ[tail++] = i;
+      l = -1;
+      if (x > 0 && bStrong[i - 1]) l = ufFind(bLab[i - 1]);
+      if (y > 0) {
+        if (bStrong[i - GW]) {
+          m = ufFind(bLab[i - GW]);
+          if (l < 0) l = m; else if (m !== l) bAux[m] = l;
+        }
+        if (x > 0 && bStrong[i - GW - 1]) {
+          m = ufFind(bLab[i - GW - 1]);
+          if (l < 0) l = m; else if (m !== l) bAux[m] = l;
+        }
+        if (x < GW - 1 && bStrong[i - GW + 1]) {
+          m = ufFind(bLab[i - GW + 1]);
+          if (l < 0) l = m; else if (m !== l) bAux[m] = l;
+        }
+      }
+      if (l < 0) { l = np; bAux[np] = np; np++; }
+      bLab[i] = l;
+    }
+  }
+  var seedEnd = tail, nl = 0;
+  for (i = 0; i < np; i++) if (ufFind(i) === i) nl++;
+  /* one piece — or none — is nothing to bridge, which is the case a healthy
+     young dish is in and the case the title screen is in */
+  if (nl < 2) return;
+  for (k = 0; k < seedEnd; k++) bLab[bQ[k]] = ufFind(bLab[bQ[k]]);
+
+  /* 2. flood out of every piece at once, over supplied cells only, so each low
+     cell learns which piece owns it and which cell it was reached from */
+  head = 0;
+  while (head < tail) {
+    c = bQ[head++];
+    o = bLab[c];
+    if (bInner[c]) {
+      for (k = 0; k < 8; k++) {
+        q = c + BOFF[k];
+        if (bLab[q] >= 0 || trail[q] < BRIDGE_MIN) continue;
+        bLab[q] = o; bPar[q] = c; bQ[tail++] = q;
+      }
+    } else {
+      x = c % GW; y = (c / GW) | 0;
+      for (dy = -1; dy <= 1; dy++) for (dx = -1; dx <= 1; dx++) {
+        if (!dx && !dy) continue;
+        nx = x + dx; ny = y + dy;
+        if (nx < 0 || ny < 0 || nx >= GW || ny >= GH) continue;
+        q = ny * GW + nx;
+        if (bLab[q] >= 0 || trail[q] < BRIDGE_MIN) continue;
+        bLab[q] = o; bPar[q] = c; bQ[tail++] = q;
+      }
+    }
+  }
+
+  /* 3. where two territories touch, walk both sides home. Every meeting is an
+     adjacency between two cells the flood reached, so the scan runs over what
+     it reached — bQ past its seeds — and not over the grid.
+
+     Taking the meetings inside the flood instead, off the labelled-neighbour
+     test it already makes, is the tempting version and was measurably worse:
+     2.79ms against 2.62 for the pass, repeatably. The flood's inner loop is
+     the hottest thing here and it is cheaper to leave it saying one simple
+     thing than to hang a second decision off it. */
+  for (k = seedEnd; k < tail; k++) {
+    c = bQ[k];
+    l = bLab[c];
+    if (bInner[c]) {
+      for (i = 0; i < 8; i++) {
+        q = c + BOFF[i];
+        if (bLab[q] >= 0 && bLab[q] !== l) { bridgeWalk(c); bridgeWalk(q); }
+      }
+    } else {
+      x = c % GW; y = (c / GW) | 0;
+      for (dy = -1; dy <= 1; dy++) for (dx = -1; dx <= 1; dx++) {
+        if (!dx && !dy) continue;
+        nx = x + dx; ny = y + dy;
+        if (nx < 0 || ny < 0 || nx >= GW || ny >= GH) continue;
+        q = ny * GW + nx;
+        if (bLab[q] >= 0 && bLab[q] !== l) { bridgeWalk(c); bridgeWalk(q); }
+      }
+    }
+  }
+
+  /* 4. one ring of thickening, from the hairline as it stood before this loop
+     — bAux holds it as a list precisely so the dilation cannot feed on its own
+     output and creep outward a ring per cell. A corridor is a tube, and a tube
+     one cell wide reads as a scratch on the plate; it also lets a single dim
+     cell along an otherwise sound path punch a hole in the connection. */
+  var end = bN;
+  for (k = 0; k < end; k++) {
+    c = bAux[k];
+    if (bInner[c]) {
+      for (i = 0; i < 8; i++) {
+        q = c + BOFF[i];
+        if (!bridge[q] && !bStrong[q] && trail[q] >= BRIDGE_MIN) bridge[q] = 1;
+      }
+    } else {
+      x = c % GW; y = (c / GW) | 0;
+      for (dy = -1; dy <= 1; dy++) for (dx = -1; dx <= 1; dx++) {
+        if (!dx && !dy) continue;
+        nx = x + dx; ny = y + dy;
+        if (nx < 0 || ny < 0 || nx >= GW || ny >= GH) continue;
+        q = ny * GW + nx;
+        if (!bridge[q] && !bStrong[q] && trail[q] >= BRIDGE_MIN) bridge[q] = 1;
+      }
+    }
+  }
+}
+
 function paintField() {
   var d = imgData;
   buildRidge();
+  buildBridges();
   for (var i = 0, p = 0; i < NCELL; i++, p += 4) {
     var r, g, b;
     if (wallM[i]) {
@@ -3352,19 +3637,57 @@ function paintField() {
         }
       }
       var a = shpA[i];
-      if (a > 0.004) {
+      var br = bridge[i];
+      if (a > 0.004 || br) {
         var t = a + SHARP * (a - shpB[i]);
-        if (t > BODY_T * 0.5) {
+        if (t > BODY_T * 0.5 || br) {
           var gi = (t * GAM_SCALE) | 0;
           if (gi < 0) gi = 0; else if (gi >= GAMN) gi = GAMN - 1;
-          var vcov = GAM[gi];
+          /* A bridged cell is under BODY_T by construction, so GAM would hand
+             back nothing; it is drawn through the ramp anchored at BODY_LO
+             instead, which is the whole of what the bridge pass changes about
+             this loop.
+
+             And it is measured against TRAIL — the field that qualified the
+             route — rather than against anything the ridge pass built out of
+             it. Both blurred candidates leak the same way, in proportion to
+             how thin the tube is, which is the one property every cell here
+             has. Three 1-2-1 passes put 20/64 of a one-cell line back at its
+             own centre, so a corridor at BRIDGE_MIN renders from shpA at
+             0.9375 and from t lower still: routing accepts it, the painter
+             draws a hole, and the two pieces stay visibly apart. Reading trail
+             closes that by construction rather than by luck. Every cell the
+             flood marked cleared BRIDGE_MIN against the same array this lookup
+             reads, in the same pass, so the floor is not a hope about dish
+             conditions: BRIDGE_MIN is 3.0, BODY_LO is 2.0 and BODY_SOFT 1.4,
+             which puts the worst a qualified cell can draw at 79% coverage and
+             saturates it by 3.4.
+
+             That gap is also what answers the objection to reading a raw field
+             — that trail carries per-cell shot noise the painter blurs out on
+             purpose. It does, and none of it lands here: the ramp is already
+             flat 0.4 above the floor every corridor cell stands on, so the
+             noise has nowhere to show. Measured across five experiments and
+             42,649 corridor cells, no cell drew under that floor. */
+          var vcov;
+          if (br) {
+            var gt = (trail[i] * GAM_SCALE) | 0;
+            if (gt < 0) gt = 0; else if (gt >= GAMN) gt = GAMN - 1;
+            vcov = GAM_LO[gt];
+          } else {
+            vcov = GAM[gi];
+          }
           /* the inner shadow (see ISH_D above): how much of the body is
              missing one and two throws down-light of this cell. The last
              few rows and columns skip it rather than clamp it — they are
              against the dish wall, where the shade would be guesswork. */
           var f = 1;
           var sx2 = i % GW, sy2 = (i / GW) | 0;
-          if (vcov > 8 && sx2 < GW - 2 * ISH_D - 1 && sy2 < GH - 2 * ISH_D - 1) {
+          /* and it is not shaded: the inner shadow is the body's own thickness
+             read off its neighbours, and a corridor two cells wide has no
+             interior to be inside of — shading it only dirties the one thing
+             this pass exists to make legible */
+          if (vcov > 8 && !br && sx2 < GW - 2 * ISH_D - 1 && sy2 < GH - 2 * ISH_D - 1) {
             var j1 = i + ISH_D * GW + ISH_D;
             var a1 = shpA[j1];
             var t1 = a1 + SHARP * (a1 - shpB[j1]);
