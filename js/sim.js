@@ -1443,6 +1443,7 @@ function startRun(i, seed) {
   S.seed = (seed == null || seed === '') ? freshSeed(i) : normSeed(seed);
   rndSeed(mix32(S.seed, 0x9E3779B9, 0x85EBCA6B));
   stepsRun = 0;
+  stepTarget = 0;
   setSpeed(1);
   S.running = true; S.paused = false; S.over = false;
   S.simT = 0; S.peak = 0; S.cues = 0;
@@ -1599,7 +1600,11 @@ function frame(ts) {
        fewer steps per real second rather than spiralling. It changes how far
        a run gets in a given wall-clock second, never what any step does. */
     if (acc > DT * budget) acc = 0;
-    if (stepTarget && stepsRun >= stepTarget && S.running && !S.over) setPaused(true);
+    if (stepTarget && stepsRun >= stepTarget && S.running && !S.over) {
+      /* one-shot: consume the target so Resume resumes and later runs run */
+      stepTarget = 0;
+      setPaused(true);
+    }
   } else {
     acc = 0;
   }
