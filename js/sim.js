@@ -4959,19 +4959,25 @@ function feedTrace(s) {
    compacts the row on it and this moves the actions on it, and the two have to
    agree or the row is compacted while still carrying six controls.
 
-   TOUCH_W is the hole ROW_NARROW's pointer term cannot see. A coarse pointer
-   gets the gesture switch, and the switch is what makes the undocked row too
-   wide below ~716px; but body.touch is also set by markTouch() on a real touch
-   event, on a device whose PRIMARY pointer is fine and which therefore does
-   not match (pointer:coarse). A touchscreen laptop in a 700px window is that
-   device. Docking alone keeps it off a second row — with the three actions in
-   the panel the row needs ~387px — so the script covers it even though the
-   sheet's compaction does not. markTouch() re-runs this for the same reason:
-   learning the device is touch changes what the row needs. */
+   TOUCH_W is the hole ROW_NARROW's pointer-gated terms cannot see. Those two
+   terms exist because a coarse pointer gets the gesture switch, and the switch
+   is what makes the undocked row too wide; but body.touch is also set by
+   markTouch() on a real touch event, on a device whose PRIMARY pointer is fine
+   and which therefore never matches (pointer:coarse). A touchscreen laptop in
+   a 700px window is that device, and it gets the switch too. So TOUCH_W is the
+   same two bounds with the pointer gate dropped, consulted only once TOUCH is
+   known. Docking alone keeps that row off a second line — with the three
+   actions in the panel it needs ~387px — so the script covers the case even
+   though the sheet's compaction does not. markTouch() re-runs this for the
+   same reason: learning the device is touch changes what the row needs. */
 var DOCK = window.matchMedia
-  ? window.matchMedia('(max-width:640px),(max-height:707px),(pointer:coarse) and (max-width:739px)')
+  ? window.matchMedia('(max-width:640px),(max-height:707px),' +
+      '(pointer:coarse) and (max-width:739px),(pointer:coarse) and (max-height:775px)')
   : null;
-var TOUCH_W = window.matchMedia ? window.matchMedia('(max-width:739px)') : null;
+/* the coarse pair with the pointer gate dropped — see TOUCH_W's note below */
+var TOUCH_W = window.matchMedia
+  ? window.matchMedia('(max-width:739px),(max-height:775px)')
+  : null;
 var DOCKED = ['s-reset', 's-abort', 's-exitrp'];
 
 function dockActions() {

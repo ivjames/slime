@@ -329,7 +329,7 @@ body.touch .simbar .btn{min-height:44px;min-width:44px;padding:0 14px}
    older Safari. */
 .simbar .wd{display:none}
 @media(min-width:641px) and (min-height:708px){.simbar .wd{display:inline}}
-@media(pointer:coarse) and (max-width:739px){.simbar .wd{display:none}}
+@media(pointer:coarse) and (max-width:739px),(pointer:coarse) and (max-height:775px){.simbar .wd{display:none}}
 .hint{margin:0;color:var(--dim);font-size:11px;letter-spacing:.04em}
 .hint b{color:var(--ink);font-weight:600}
 
@@ -505,19 +505,38 @@ body.touch .dish{min-height:132px}
    disclosure, and the two decisions have to agree or the row is compacted
    while still carrying six controls.
 
-   Two of the three terms are the pair the console's off-plate fallback uses,
-   for the same reason: a row is cramped because the window is narrow OR
-   because it is SHORT (a landscape phone is 844px wide with 390px of height).
-   The third term is the one those two miss. A coarse pointer also gets the
-   gesture switch, which is ~111px the row does not otherwise spend, and with
-   it the undocked row needs 684px against a viewport minus 32px of page
-   padding — so it overflows all the way out to a 716px viewport, well past
-   the 640px the first term stops at. Swept at 8px steps from 320 to 1400
-   across eight heights, the undocked row overflows on touch from 656 to 712
-   and nowhere else; a fine pointer never overflows at any size, which is why
-   this term is gated on the pointer rather than raising the plain width
-   breakpoint and compacting desktop windows for nothing. 739 for margin. */
-@media(max-width:640px),(max-height:707px),(pointer:coarse) and (max-width:739px){
+   Derived rather than guessed at, because guessing at it has now been wrong
+   twice. The row is capped to var(--plate) on a coarse pointer, so its width
+   is not the viewport width — it is
+
+       min(vw - 32, 0.9046 x vh)
+
+   the first term being the viewport less #app's padding, the second being the
+   letterbox: --plate is 56vh x 1.6154, and 0.56 x 1.6154 = 0.9046. What the
+   undocked row NEEDS is a function of the pointer, because a coarse pointer
+   also gets the gesture switch — ~111px the row does not otherwise spend:
+
+       coarse 684px    fine 533px
+
+   Set those equal and the row overflows when
+
+       coarse   vw < 716  OR  vh < 757
+       fine     vw < 565  OR  vh < 589
+
+   The first two terms below cover the fine pointer with room to spare, and
+   they are the pair the console's off-plate fallback uses, so the row and the
+   console change together. The coarse pointer needs both of its own bounds
+   stated, and needs them gated on the pointer rather than folded into the
+   plain terms, which would compact desktop windows that fit perfectly well.
+   739 and 775 carry ~20px of margin over the two crossovers.
+
+   The width bound alone was the first fix and was not enough: the letterbox
+   makes the row narrow on a SHORT coarse window at any width at all, so a
+   1400x720 tablet failed a rule capped on width. Verified by sweeping both
+   axes at 8px steps rather than the sparse height grid that missed it. */
+@media(max-width:640px),(max-height:707px),
+      (pointer:coarse) and (max-width:739px),
+      (pointer:coarse) and (max-height:775px){
   /* a header that is one word does not need 35px of a phone screen */
   .feed-h{padding:6px 12px}
   #log{padding:8px 12px}
