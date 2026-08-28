@@ -322,11 +322,14 @@ body.touch .keys-touch{display:grid}
    for a standalone button and is most of a phone's control row */
 body.touch .simbar .btn{min-height:44px;min-width:44px;padding:0 14px}
 /* Dropped where the row has to be narrow — the button still reads "×4", and
-   its aria-label says the whole thing at every width. Stated as the negation
-   of the narrow pair below, so the word comes back exactly where the row stops
-   being cramped: a viewport both wide enough AND tall enough. */
+   its aria-label says the whole thing at every width. The word comes back only
+   where the row stops being cramped, which is the negation of ROW_NARROW
+   below; written as show-then-hide rather than one `not(...)` query because
+   the nested-not form is Media Queries 4 and this is not worth losing on an
+   older Safari. */
 .simbar .wd{display:none}
 @media(min-width:641px) and (min-height:708px){.simbar .wd{display:inline}}
+@media(pointer:coarse) and (max-width:739px){.simbar .wd{display:none}}
 .hint{margin:0;color:var(--dim);font-size:11px;letter-spacing:.04em}
 .hint b{color:var(--ink);font-weight:600}
 
@@ -496,11 +499,25 @@ body.touch .dish{min-height:132px}
   .nodes{max-width:none;text-align:left;font-size:11px;line-height:1.5;padding:8px 12px;
     display:flex;flex-wrap:wrap;gap:2px 16px}
 }
-/* Same pair of conditions the console's off-plate fallback uses, and for the
-   same reason: a control row is cramped either because the window is narrow or
-   because it is SHORT — a landscape phone is 844px wide with 390px of height,
-   which is a wide viewport and a small dish. */
-@media(max-width:640px),(max-height:707px){
+/* ROW_NARROW — when the control row cannot afford its roomy layout. Kept in
+   step with the DOCK query in sim.js, which is the same string: the sheet
+   compacts the row and the script moves the three dish-ending actions into the
+   disclosure, and the two decisions have to agree or the row is compacted
+   while still carrying six controls.
+
+   Two of the three terms are the pair the console's off-plate fallback uses,
+   for the same reason: a row is cramped because the window is narrow OR
+   because it is SHORT (a landscape phone is 844px wide with 390px of height).
+   The third term is the one those two miss. A coarse pointer also gets the
+   gesture switch, which is ~111px the row does not otherwise spend, and with
+   it the undocked row needs 684px against a viewport minus 32px of page
+   padding — so it overflows all the way out to a 716px viewport, well past
+   the 640px the first term stops at. Swept at 8px steps from 320 to 1400
+   across eight heights, the undocked row overflows on touch from 656 to 712
+   and nowhere else; a fine pointer never overflows at any size, which is why
+   this term is gated on the pointer rather than raising the plain width
+   breakpoint and compacting desktop windows for nothing. 739 for margin. */
+@media(max-width:640px),(max-height:707px),(pointer:coarse) and (max-width:739px){
   /* a header that is one word does not need 35px of a phone screen */
   .feed-h{padding:6px 12px}
   #log{padding:8px 12px}

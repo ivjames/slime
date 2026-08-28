@@ -178,6 +178,9 @@ function markTouch() {
   if (TOUCH) return;
   TOUCH = true;
   document.body.classList.add('touch');
+  /* the control row just gained the gesture switch, so what it needs to fit on
+     one line has changed — see DOCK */
+  dockActions();
 }
 
 /* ------------------------------------------------------------
@@ -4952,15 +4955,29 @@ function feedTrace(s) {
    same ids either way — all that changes is the parent, so nothing else in the
    file has to know which of the two places they are in.
 
-   The query is the pair the sheet uses for every other narrow decision: a row
-   is cramped because the window is narrow OR because it is short. */
-var DOCK = window.matchMedia ? window.matchMedia('(max-width:640px),(max-height:707px)') : null;
+   DOCK is the sheet's ROW_NARROW query, character for character — the sheet
+   compacts the row on it and this moves the actions on it, and the two have to
+   agree or the row is compacted while still carrying six controls.
+
+   TOUCH_W is the hole ROW_NARROW's pointer term cannot see. A coarse pointer
+   gets the gesture switch, and the switch is what makes the undocked row too
+   wide below ~716px; but body.touch is also set by markTouch() on a real touch
+   event, on a device whose PRIMARY pointer is fine and which therefore does
+   not match (pointer:coarse). A touchscreen laptop in a 700px window is that
+   device. Docking alone keeps it off a second row — with the three actions in
+   the panel the row needs ~387px — so the script covers it even though the
+   sheet's compaction does not. markTouch() re-runs this for the same reason:
+   learning the device is touch changes what the row needs. */
+var DOCK = window.matchMedia
+  ? window.matchMedia('(max-width:640px),(max-height:707px),(pointer:coarse) and (max-width:739px)')
+  : null;
+var TOUCH_W = window.matchMedia ? window.matchMedia('(max-width:739px)') : null;
 var DOCKED = ['s-reset', 's-abort', 's-exitrp'];
 
 function dockActions() {
   var bar = $('controls'), pop = $('kact'), keys = $('keypop');
   if (!bar || !pop || !keys) return;
-  var inPanel = !!(DOCK && DOCK.matches);
+  var inPanel = !!(DOCK && DOCK.matches) || !!(TOUCH && TOUCH_W && TOUCH_W.matches);
   var home = inPanel ? pop : bar, i, el;
   for (i = 0; i < DOCKED.length; i++) {
     el = $(DOCKED[i]);
@@ -5634,12 +5651,14 @@ function bindButtons() {
   $('s-exitrp').addEventListener('click', function () { closeKeys(); exitReplay(); });
   $('t-grow').addEventListener('click', function () { setTouchMode(1); });
   $('t-ret').addEventListener('click', function () { setTouchMode(2); });
-  if (DOCK) {
-    /* addListener is the pre-2021 Safari spelling; the modern one is preferred
-       where it exists, and neither is worth a failed boot if the browser has
-       matchMedia but neither hook. */
-    if (DOCK.addEventListener) DOCK.addEventListener('change', dockActions);
-    else if (DOCK.addListener) DOCK.addListener(dockActions);
+  /* addListener is the pre-2021 Safari spelling; the modern one is preferred
+     where it exists, and neither is worth a failed boot if the browser has
+     matchMedia but neither hook. */
+  var mq = [DOCK, TOUCH_W], mi;
+  for (mi = 0; mi < mq.length; mi++) {
+    if (!mq[mi]) continue;
+    if (mq[mi].addEventListener) mq[mi].addEventListener('change', dockActions);
+    else if (mq[mi].addListener) mq[mi].addListener(dockActions);
   }
   /* Retry is a NEW dish: no seed passed, so freshSeed() mints one and
      startRun() opens a fresh recording over the replayed run's trace. */
