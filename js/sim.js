@@ -4945,6 +4945,33 @@ function feedTrace(s) {
   }
 }
 
+/* Where the three dish-ending controls live. On a bench with room they are on
+   the control row, as they always were; on a phone they move inside the
+   Controls disclosure, because that row also carries the gesture switch and
+   six controls at phone width wrap to three rows. Same buttons, same handlers,
+   same ids either way — all that changes is the parent, so nothing else in the
+   file has to know which of the two places they are in.
+
+   The query is the pair the sheet uses for every other narrow decision: a row
+   is cramped because the window is narrow OR because it is short. */
+var DOCK = window.matchMedia ? window.matchMedia('(max-width:640px),(max-height:707px)') : null;
+var DOCKED = ['s-reset', 's-abort', 's-exitrp'];
+
+function dockActions() {
+  var bar = $('controls'), pop = $('kact'), keys = $('keypop');
+  if (!bar || !pop || !keys) return;
+  var inPanel = !!(DOCK && DOCK.matches);
+  var home = inPanel ? pop : bar, i, el;
+  for (i = 0; i < DOCKED.length; i++) {
+    el = $(DOCKED[i]);
+    if (!el || el.parentNode === home) continue;
+    /* on the bar they go before the disclosure, which is always last */
+    if (inPanel) home.appendChild(el); else bar.insertBefore(el, keys);
+  }
+  /* an empty action row would still draw its rule under the panel's top edge */
+  pop.hidden = !inPanel;
+}
+
 /* true if there was an open key list to close, so Escape can stop there. */
 function closeKeys() {
   var k = $('keypop');
@@ -5020,9 +5047,12 @@ function exitReplay() {
 
 function setSpeed(n) {
   TURBO = clamp(Math.round(n) || 1, 1, 24);
-  var b = $('s-speed');
+  var b = $('s-speed'), fig = $('s-speedn');
+  /* Only the figure is rewritten: the word in front of it is markup the sheet
+     drops where the row has to be narrow, and the aria-label — which wins over
+     the button's text outright — states the whole thing at every width. */
+  if (fig) fig.textContent = '×' + TURBO;
   if (b) {
-    b.textContent = 'Time-lapse ×' + TURBO;
     b.classList.toggle('lapse-on', TURBO > 1);
     b.setAttribute('aria-label', 'Time-lapse, currently ' + TURBO + ' times real time');
   }
@@ -5427,6 +5457,8 @@ function toGrid(ev) {
 
 function setTouchMode(m) {
   touchMode = (m === 2) ? 2 : 1;
+  /* the two halves of the gesture switch — a pressed pair, not a pair of
+     toggles, so exactly one of them is aria-pressed at a time */
   var g = $('t-grow'), r = $('t-ret');
   if (g) { g.classList.toggle('on', touchMode === 1); g.setAttribute('aria-pressed', touchMode === 1 ? 'true' : 'false'); }
   if (r) { r.classList.toggle('on', touchMode === 2); r.setAttribute('aria-pressed', touchMode === 2 ? 'true' : 'false'); }
@@ -5450,14 +5482,14 @@ function bindInput() {
      was also a pinch, and the player came out of it looking at a quarter of
      the plate with no way back except pinching out again by hand.
 
-     Blocked on the dish and on the verb pads directly under it, which is where
-     a second finger lands; NOT on the page, because a player who wants to zoom
-     the schedule or read the brief closer is doing something reasonable and
-     1.4.4 says they get to. gesture* are WebKit-only — nothing else fires
+     Blocked on the dish and on the control row directly under it, which is
+     where a second finger can land short of the plate; NOT on the page,
+     because a player who wants to zoom the schedule or read the brief closer
+     is doing something reasonable and 1.4.4 says they get to. gesture* are WebKit-only — nothing else fires
      them, so the listeners cost those browsers nothing. */
   var GESTURES = ['gesturestart', 'gesturechange', 'gestureend'];
   var noZoom = function (ev) { ev.preventDefault(); };
-  var surfaces = [stage, $('touchbar')], si, gi;
+  var surfaces = [stage, $('controls')], si, gi;
   for (si = 0; si < surfaces.length; si++) {
     if (!surfaces[si]) continue;
     for (gi = 0; gi < GESTURES.length; gi++) {
@@ -5591,13 +5623,24 @@ function bindInput() {
 function bindButtons() {
   $('b-go').addEventListener('click', function () { startRun(briefIdx); });
   $('b-back').addEventListener('click', goTitle);
-  $('s-abort').addEventListener('click', goTitle);
+  /* Reset, Abandon and Exit replay sit inside the Controls disclosure, so each
+     of them has to put it away on the way out — the outside-click handler that
+     normally closes it deliberately ignores clicks the panel contains, which
+     would otherwise leave it hanging open over a dish it just restarted. */
+  $('s-abort').addEventListener('click', function () { closeKeys(); goTitle(); });
   $('s-pause').addEventListener('click', function () { setPaused(!S.paused); });
-  $('s-reset').addEventListener('click', function () { if (S.idx >= 0) startRun(S.idx); });
+  $('s-reset').addEventListener('click', function () { closeKeys(); if (S.idx >= 0) startRun(S.idx); });
   $('s-speed').addEventListener('click', cycleSpeed);
-  $('s-exitrp').addEventListener('click', exitReplay);
+  $('s-exitrp').addEventListener('click', function () { closeKeys(); exitReplay(); });
   $('t-grow').addEventListener('click', function () { setTouchMode(1); });
   $('t-ret').addEventListener('click', function () { setTouchMode(2); });
+  if (DOCK) {
+    /* addListener is the pre-2021 Safari spelling; the modern one is preferred
+       where it exists, and neither is worth a failed boot if the browser has
+       matchMedia but neither hook. */
+    if (DOCK.addEventListener) DOCK.addEventListener('change', dockActions);
+    else if (DOCK.addListener) DOCK.addListener(dockActions);
+  }
   /* Retry is a NEW dish: no seed passed, so freshSeed() mints one and
      startRun() opens a fresh recording over the replayed run's trace. */
   $('r-retry').addEventListener('click', function () { startRun(S.idx); });
@@ -5650,6 +5693,7 @@ function init() {
   initCanvas();
   bindInput();
   bindButtons();
+  dockActions();
   setTouchMode(1);
   setSpeed(1);
   renderTitle();

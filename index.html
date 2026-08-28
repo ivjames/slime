@@ -64,6 +64,11 @@ body::before{
   mix-blend-mode:overlay;
 }
 button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
+/* The UA sheet's [hidden] is a bare attribute selector, so any class rule that
+   sets display beats it — and every button in the control row and the Controls
+   panel now sets one. Exit replay is hidden except during a replay; without
+   this it is on the page always. */
+[hidden]{display:none!important}
 /* One ring for everything focusable. The accent is solved per seed to 4.5:1
    against the page, so it clears 1.4.11's 3:1 for a focus indicator by a
    margin whatever the specimen line turns out to be. */
@@ -180,7 +185,7 @@ body.touch #result .btn{min-height:44px;padding:11px 15px}
    lands above the fold. The play controls step aside — the panel carries the
    only actions that still mean anything once the run is over. */
 #scr-sim.resulting .bench,#scr-sim.resulting #feed{max-width:var(--plate)}
-#scr-sim.resulting .touchbar,#scr-sim.resulting .simbar{display:none}
+#scr-sim.resulting .simbar{display:none}
 
 @media(max-width:700px){
   .rgrid{grid-template-columns:1fr}
@@ -188,7 +193,6 @@ body.touch #result .btn{min-height:44px;padding:11px 15px}
 
 /* ---------- replay mode ---------- */
 #replaynote{display:none}
-body.replay #touchbar{display:none}
 body.replay #stage{cursor:default}
 body.replay #replaynote{display:block}
 body.replay #replaynote b{color:var(--slime)}
@@ -218,6 +222,18 @@ body.touch .keys-touch{display:grid}
    drag across it still scrolls the page on iOS. */
 #stage canvas{display:block;width:100%;height:auto;touch-action:none;
   -webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+/* The console is every readout the run has, in one box: the code line and the
+   clock, the objective, the meters, the depot list and the note. On a bench
+   with room around it the box is laid OVER the plate, inset by the stage's own
+   border, and reads as the instrument glass it always was. On a small plate it
+   steps off the agar entirely (see the narrow rules) and becomes a panel under
+   the dish — one panel, not the four floating blocks it used to be.
+
+   Consequence of moving it out of #stage: the pause veil, which is still
+   inside the stage, no longer covers it. That is the right way round — a held
+   culture is a culture you are reading, and the numbers are what you read. */
+.console{position:absolute;inset:1px;pointer-events:none;
+  overflow:hidden;border-radius:2px}
 .hud{position:absolute;pointer-events:none;font-size:11px;letter-spacing:.08em}
 /* A readout over live cytoplasm has no fixed background to be measured
    against: the same pixel is #070906 agar one second and #fff6b0 lit slime the
@@ -275,13 +291,42 @@ body.touch .keys-touch{display:grid}
   background:linear-gradient(180deg,#14180f,#0f1210)}
 .feed-h{padding:8px 14px;border-bottom:1px solid var(--line);color:var(--dim);
   font-size:10px;letter-spacing:.22em;text-transform:uppercase}
-#log{height:96px;overflow-y:auto;padding:10px 14px;color:#aab092;font-size:12px;line-height:1.55}
+/* The well is a fixed height so an arriving line does not shove the page, and
+   a fixed height cuts whatever line happens to straddle the bottom edge —
+   mid-glyph, which reads as a rendering fault rather than as more text below.
+   Faded out over the last few pixels instead, which works whatever the lines
+   wrap to; and since the newest line is at the TOP, the fade only ever touches
+   the oldest line on screen. */
+#log{height:96px;overflow-y:auto;padding:10px 14px;color:#aab092;font-size:12px;line-height:1.55;
+  -webkit-mask-image:linear-gradient(180deg,#000 calc(100% - 13px),transparent);
+  mask-image:linear-gradient(180deg,#000 calc(100% - 13px),transparent)}
 #log div{margin-bottom:5px;animation:fade .5s ease-out}
 #log div:last-child{margin-bottom:0}
 #log div.hi{color:var(--slime)}
-#log:focus-visible{outline-offset:-2px}
+/* The ring is drawn inside the element, so the fade would eat its bottom edge.
+   A focused log is being read deliberately — drop the mask while it is. */
+#log:focus-visible{outline-offset:-2px;-webkit-mask-image:none;mask-image:none}
 
-.simbar{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-top:10px;flex-wrap:wrap}
+/* ---------- the control row ---------- */
+/* On a bench with room it is what it was: the play controls, then the key list
+   behind a disclosure. On a phone it is the gesture switch, the two controls
+   you reach for mid-run, and that same disclosure — and the three that end the
+   dish (reset, abandon, exit replay) move INSIDE it, because a row carrying
+   six controls at phone width wraps to three rows, and three rows of buttons
+   under the dish is what this branch is getting rid of. dockActions() in
+   sim.js does the moving; the sheet only has to style them in both places. */
+.simbar{display:flex;align-items:center;gap:8px;margin:8px auto 0;flex-wrap:wrap}
+.simbar .btn{display:inline-flex;align-items:center;justify-content:center;
+  min-height:38px;padding:0 14px;letter-spacing:.13em}
+/* out-specifies body.touch .btn, whose 18px of horizontal padding is right
+   for a standalone button and is most of a phone's control row */
+body.touch .simbar .btn{min-height:44px;min-width:44px;padding:0 14px}
+/* Dropped where the row has to be narrow — the button still reads "×4", and
+   its aria-label says the whole thing at every width. Stated as the negation
+   of the narrow pair below, so the word comes back exactly where the row stops
+   being cramped: a viewport both wide enough AND tall enough. */
+.simbar .wd{display:none}
+@media(min-width:641px) and (min-height:708px){.simbar .wd{display:inline}}
 .hint{margin:0;color:var(--dim);font-size:11px;letter-spacing:.04em}
 .hint b{color:var(--ink);font-weight:600}
 
@@ -294,27 +339,47 @@ body.touch .keys-touch{display:grid}
 .keypop>summary{display:inline-block;list-style:none}
 .keypop>summary::-webkit-details-marker{display:none}
 .keypop>summary::marker{content:""}
-.keypop>summary::after{content:" +"}
-.keypop[open]>summary::after{content:" \2212"}
+.keypop>summary::after{content:"+";margin-left:.5em}
+.keypop[open]>summary::after{content:"\2212";margin-left:.5em}
 .keypop[open]>summary{border-color:var(--slime);color:var(--slime)}
 .keypop-body{position:absolute;right:0;bottom:calc(100% + 8px);z-index:20;
   width:min(430px,78vw);padding:12px 15px 14px;
   box-shadow:0 10px 28px rgba(0,0,0,.55)}
 .keypop-body .keys{margin-top:0}
+/* the two dish-ending actions, above the rule that separates them from the
+   reference material below */
+.kact{margin-bottom:13px;padding-bottom:13px;border-bottom:1px solid var(--line)}
+.kact .btn{display:inline-flex;align-items:center;justify-content:center;
+  min-height:38px;padding:0 14px;letter-spacing:.13em}
+body.touch .kact .btn{min-height:44px}
 
-/* ---------- touch verb pads, docked under the stage ---------- */
-.touchbar{display:none;gap:8px;margin-top:8px}
-body.touch .touchbar{display:flex}
-.tbtn{flex:1 1 0;min-height:48px;min-width:44px;padding:12px 10px;border:1px solid var(--edge);
-  border-radius:2px;background:#12160f;color:var(--dim);font-size:11.5px;letter-spacing:.20em;
-  text-transform:uppercase;transition:.14s;
+/* ---------- the gesture switch ---------- */
+/* This was two full-width 48px pads with sub-labels, stacked in a row of their
+   own under the dish: something like a fifth of a phone screen spent on a
+   two-state toggle, in the loudest furniture on the page, for a state most
+   players never change — a second finger already retracts without touching it.
+
+   It is a segmented switch in the control row now. Same two states, same 44px
+   of touch target, one control's worth of room; the "or use two fingers" line
+   it used to carry moved to the key list, which is where the rest of the
+   gestures are explained. Touch only: a mouse retracts with the right button
+   and a keyboard with shift, so there is nothing here for them to switch. */
+.verb{display:none;flex:0 0 auto;border:1px solid var(--edge);border-radius:2px;
+  overflow:hidden}
+body.touch .verb{display:flex}
+/* The tape owns the brush during a replay, so the verb it would be switching
+   is not the player's to set. Stated here rather than up with the other
+   replay rules because it has to come AFTER the rule that shows the switch —
+   the two selectors weigh the same, so the later one wins. */
+body.replay .verb{display:none}
+.vb{display:inline-flex;align-items:center;justify-content:center;
+  min-height:44px;min-width:44px;padding:0 13px;background:#12160f;color:var(--dim);
+  font-size:10.5px;letter-spacing:.16em;text-transform:uppercase;transition:.14s;
   touch-action:manipulation;-webkit-tap-highlight-color:transparent;
   -webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
-/* The sub-label is smaller, not fainter: at .72 it was 4.15:1 on the pad it
-   labels, and it is the line that tells you HOW to use the verb. */
-.tbtn .sub{display:block;font-size:9.5px;letter-spacing:.10em;margin-top:3px;text-transform:none}
-.tbtn.on{background:var(--slime);border-color:var(--slime);color:#14170d;font-weight:600}
-.tbtn.ret.on{background:var(--bad);border-color:var(--bad);color:#1a0a10}
+.vb+.vb{border-left:1px solid var(--edge)}
+.vb.on{background:var(--slime);color:#14170d;font-weight:600}
+.vb.ret.on{background:var(--bad);color:#1a0a10}
 
 body.touch .btn{min-height:44px;padding:11px 18px}
 body.touch .dish{min-height:132px}
@@ -332,78 +397,138 @@ body.touch .dish{min-height:132px}
    viewport and leaves nine rows of node list absolutely positioned over a
    dish 219px tall. */
 @media(max-width:640px),(max-height:707px){
-  .hud-bl{width:58%}
-  .hud-tl .lt,.hud-tl .rt{font-size:10px}
-  /* The objective wedged into the middle third of a narrow bar wraps to three
-     and four lines and swallows the plate — 103px of a 159px dish at the
-     narrowest. Given the whole width on a second row it takes one line, and
-     the bar clears the biomass meter again. */
-  .hud-tl{flex-wrap:wrap;row-gap:2px}
-  .hud-tl .obj{order:3;flex:1 1 100%;text-align:left}
-  /* A phone-sized plate cannot hold all of this. At 320px the dish is 296x184;
+  /* A phone-sized plate cannot hold any of this. At 320px the dish is 296x184;
      the top bar wraps its objective and stands 52 to 103px tall, the
      nine-depot list is 179px, and the biomass meter wants the bottom — the sum
-     is half again the plate, so everything past the first layer either covers
-     the organism or falls off a dish that clips. That was already true before
-     this branch, where nine rows lost 22px off the bottom at this width; the
-     plate each block now carries only made it visible.
+     is half again the plate. Anything left over the agar at this size is
+     either covering the organism or falling off a dish that clips, and the
+     organism is the entire reason the dish is on screen.
 
-     So the readouts step off the plate here, into the strip between the dish
-     and the controls — which is where this branch put the narration, for the
-     same reason. What stays over the agar is what has to be read against it:
-     the top bar and the biomass meter, and those two clear each other at
-     every width the plate can be. */
-  /* One strip rather than two: off the plate they are no longer two things
-     floating over an image, they are a panel — so they get the feed's ground
-     and a rule between them, and stop carrying their own plates. */
-  .readouts{position:static;display:block;padding:0;margin-top:8px;
-    border:1px solid var(--line);border-radius:3px;
+     So the whole console steps off, into the strip between the dish and the
+     controls — which is where the narration already went, for the same
+     reason. Over the agar: nothing. The plate carries the culture and the
+     pause veil, and that is the list. */
+  .console{position:static;overflow:visible;pointer-events:auto;
+    margin-top:8px;border:1px solid var(--line);border-radius:3px;
     background:linear-gradient(180deg,#14180f,#0f1210)}
-  .nodes,.hud-br{background:none;border:0;border-radius:0;
+  .hud,.readouts{pointer-events:auto}
+  /* Off the plate they are rows of a panel, not blocks floating over an image,
+     so they drop the ground and the hairline each was carrying to survive over
+     live cytoplasm, and take the panel's instead. */
+  .hud-tl,.hud-bl,.hud-br,.nodes{background:none;
     -webkit-backdrop-filter:none;backdrop-filter:none}
+  .hud-bl,.hud-br,.nodes{border:0;border-radius:0}
+  .hud-tl{position:static;flex-wrap:wrap;row-gap:2px;border-bottom:0;padding:8px 12px}
+  .hud-tl .lt,.hud-tl .rt{font-size:10px}
+  /* The objective wedged into the middle third of a narrow bar wraps to three
+     and four lines. Given the whole width on a second row it takes one. */
+  .hud-tl .obj{order:3;flex:1 1 100%;text-align:left}
+  /* Each row draws the rule ABOVE it rather than below, so a dish with no
+     depots and no note ends the panel at the meters instead of on a rule with
+     nothing under it — an empty row is display:none and contributes no
+     border, which a border-bottom on the row before it could not know. */
+  .hud-bl,.readouts>*{border-top:1px solid var(--line)}
+  .hud-bl{position:static;width:auto;padding:9px 12px}
+  /* One line per meter — label, track, figure — rather than a label row above
+     a bar. Stacked, two meters cost six lines of panel to report two numbers. */
+  .meter{display:flex;align-items:center;gap:10px;margin-bottom:0}
+  .meter+.meter{margin-top:7px}
+  .meter .lab{display:contents}
+  /* wide enough for the longest label the two meters have, so the tracks of a
+     dish carrying both line up instead of starting at two different columns */
+  .meter .lab span:first-child{flex:0 0 86px}
+  .meter .bar{order:1;flex:1}
+  .meter .lab span:last-child{order:2;color:var(--ink)}
+  .readouts{position:static;display:block;padding:0}
   .hud-br{max-width:none;text-align:left;font-size:11px;padding:8px 12px}
-  .nodes:not(:empty)+.hud-br{border-top:1px solid var(--line)}
   /* the list reads across the strip instead of down the side of the plate:
      nine rows become three lines of three */
   .nodes{max-width:none;text-align:left;font-size:11px;line-height:1.5;padding:8px 12px;
     display:flex;flex-wrap:wrap;gap:2px 16px}
 }
 @container dish (max-width:640px){
-  .hud-bl{width:58%}
-  .hud-tl .lt,.hud-tl .rt{font-size:10px}
-  /* The objective wedged into the middle third of a narrow bar wraps to three
-     and four lines and swallows the plate — 103px of a 159px dish at the
-     narrowest. Given the whole width on a second row it takes one line, and
-     the bar clears the biomass meter again. */
-  .hud-tl{flex-wrap:wrap;row-gap:2px}
-  .hud-tl .obj{order:3;flex:1 1 100%;text-align:left}
-  /* A phone-sized plate cannot hold all of this. At 320px the dish is 296x184;
+  /* A phone-sized plate cannot hold any of this. At 320px the dish is 296x184;
      the top bar wraps its objective and stands 52 to 103px tall, the
      nine-depot list is 179px, and the biomass meter wants the bottom — the sum
-     is half again the plate, so everything past the first layer either covers
-     the organism or falls off a dish that clips. That was already true before
-     this branch, where nine rows lost 22px off the bottom at this width; the
-     plate each block now carries only made it visible.
+     is half again the plate. Anything left over the agar at this size is
+     either covering the organism or falling off a dish that clips, and the
+     organism is the entire reason the dish is on screen.
 
-     So the readouts step off the plate here, into the strip between the dish
-     and the controls — which is where this branch put the narration, for the
-     same reason. What stays over the agar is what has to be read against it:
-     the top bar and the biomass meter, and those two clear each other at
-     every width the plate can be. */
-  /* One strip rather than two: off the plate they are no longer two things
-     floating over an image, they are a panel — so they get the feed's ground
-     and a rule between them, and stop carrying their own plates. */
-  .readouts{position:static;display:block;padding:0;margin-top:8px;
-    border:1px solid var(--line);border-radius:3px;
+     So the whole console steps off, into the strip between the dish and the
+     controls — which is where the narration already went, for the same
+     reason. Over the agar: nothing. The plate carries the culture and the
+     pause veil, and that is the list. */
+  .console{position:static;overflow:visible;pointer-events:auto;
+    margin-top:8px;border:1px solid var(--line);border-radius:3px;
     background:linear-gradient(180deg,#14180f,#0f1210)}
-  .nodes,.hud-br{background:none;border:0;border-radius:0;
+  .hud,.readouts{pointer-events:auto}
+  /* Off the plate they are rows of a panel, not blocks floating over an image,
+     so they drop the ground and the hairline each was carrying to survive over
+     live cytoplasm, and take the panel's instead. */
+  .hud-tl,.hud-bl,.hud-br,.nodes{background:none;
     -webkit-backdrop-filter:none;backdrop-filter:none}
+  .hud-bl,.hud-br,.nodes{border:0;border-radius:0}
+  .hud-tl{position:static;flex-wrap:wrap;row-gap:2px;border-bottom:0;padding:8px 12px}
+  .hud-tl .lt,.hud-tl .rt{font-size:10px}
+  /* The objective wedged into the middle third of a narrow bar wraps to three
+     and four lines. Given the whole width on a second row it takes one. */
+  .hud-tl .obj{order:3;flex:1 1 100%;text-align:left}
+  /* Each row draws the rule ABOVE it rather than below, so a dish with no
+     depots and no note ends the panel at the meters instead of on a rule with
+     nothing under it — an empty row is display:none and contributes no
+     border, which a border-bottom on the row before it could not know. */
+  .hud-bl,.readouts>*{border-top:1px solid var(--line)}
+  .hud-bl{position:static;width:auto;padding:9px 12px}
+  /* One line per meter — label, track, figure — rather than a label row above
+     a bar. Stacked, two meters cost six lines of panel to report two numbers. */
+  .meter{display:flex;align-items:center;gap:10px;margin-bottom:0}
+  .meter+.meter{margin-top:7px}
+  .meter .lab{display:contents}
+  /* wide enough for the longest label the two meters have, so the tracks of a
+     dish carrying both line up instead of starting at two different columns */
+  .meter .lab span:first-child{flex:0 0 86px}
+  .meter .bar{order:1;flex:1}
+  .meter .lab span:last-child{order:2;color:var(--ink)}
+  .readouts{position:static;display:block;padding:0}
   .hud-br{max-width:none;text-align:left;font-size:11px;padding:8px 12px}
-  .nodes:not(:empty)+.hud-br{border-top:1px solid var(--line)}
   /* the list reads across the strip instead of down the side of the plate:
      nine rows become three lines of three */
   .nodes{max-width:none;text-align:left;font-size:11px;line-height:1.5;padding:8px 12px;
     display:flex;flex-wrap:wrap;gap:2px 16px}
+}
+/* Same pair of conditions the console's off-plate fallback uses, and for the
+   same reason: a control row is cramped either because the window is narrow or
+   because it is SHORT — a landscape phone is 844px wide with 390px of height,
+   which is a wide viewport and a small dish. */
+@media(max-width:640px),(max-height:707px){
+  /* a header that is one word does not need 35px of a phone screen */
+  .feed-h{padding:6px 12px}
+  #log{padding:8px 12px}
+  /* Four controls across a phone, in ONE row: the row is the point, and a
+     wrap puts back the second row of buttons this branch exists to remove.
+     Everything below is spent buying it. The switch and the buttons keep their
+     44px of height throughout, which is the touch target that actually
+     matters; what gives is horizontal padding, the tracking the labels are set
+     with, and the space in front of the disclosure's sign. Below about 360px
+     of viewport it wraps anyway — four labelled controls will not fit — and
+     the wrap is the graceful end of this, not a failure of it. */
+  .simbar{gap:6px}
+  .simbar .btn,.vb{font-size:10px}
+  .simbar .btn,body.touch .simbar .btn{padding:0 8px}
+  .simbar .btn{letter-spacing:.06em}
+  .vb{padding:0 8px;letter-spacing:.09em}
+  .keypop>summary::after,.keypop[open]>summary::after{margin-left:.25em}
+  /* Held to the width of its longer label, because it has two: a row this
+     tight that reflows the moment you pause it is a row that moves the
+     time-lapse button out from under your thumb. */
+  .simbar #s-pause{min-width:58px}
+  /* The panel hangs off the right edge of its summary, which on a wide bench
+     is the right edge of the bench. On a phone the summary is the fourth item
+     in a packed row and sits nowhere near that edge, so a panel anchored there
+     runs off the left of the screen. Anchor it to the row instead. */
+  .simbar{position:relative}
+  .keypop{position:static}
+  .keypop-body{left:0;right:0;width:auto}
 }
 @media(max-width:520px){
   #app{padding:12px;gap:10px}
@@ -411,15 +536,13 @@ body.touch .dish{min-height:132px}
   .card h2{font-size:20px}
   .keys{grid-template-columns:1fr;gap:1px 0}
   .keys b{margin-top:9px}
-  .simbar{gap:8px}
   .hint{font-size:10.5px;flex:1 1 100%}
-  .keypop-body{width:min(430px,86vw)}
 }
 /* Letterbox the dish rather than letting a fixed 420:260 canvas run off a
    short viewport. Width-driven on a portrait phone, so this only bites in
    landscape / short windows. */
 @media(pointer:coarse),(max-height:760px){
-  .bench,#feed{max-width:var(--plate)}
+  .bench,#controls,#feed{max-width:var(--plate)}
 }
 @media(max-height:760px){
   #log{height:64px}
@@ -465,10 +588,10 @@ body.touch .dish{min-height:132px}
         </div>
         <div class="keys keys-touch">
           <b>hold / drag</b><span>emit a growth cue &mdash; the exploratory front flows toward your finger</span>
-          <b>RETRACT pad</b><span>switch the verb, then hold to pull cytoplasm back out of a region</span>
-          <b>two fingers</b><span>retract without switching pads &mdash; a second finger flips that drag</span>
-          <b>TIME-LAPSE</b><span>the button under the dish winds the clock to &times;4 or &times;12 &mdash; same dish, watched faster</span>
-          <b>HOLD / RESET</b><span>the buttons under the dish stop the clock and restart the plate</span>
+          <b>two fingers</b><span>retract &mdash; a second finger flips a live drag and pulls cytoplasm back out of a region</span>
+          <b>Retract</b><span>the switch on the control row does the same one-handed, until you switch it back</span>
+          <b>Hold / &times;N</b><span>the control row stops the dish clock, or winds it to &times;4 or &times;12 &mdash; same dish, watched faster</span>
+          <b>Controls</b><span>resetting the plate and abandoning the dish are in there</span>
         </div>
       </div>
       <div class="row" style="margin-top:22px">
@@ -481,8 +604,17 @@ body.touch .dish{min-height:132px}
   <!-- ============ SIM ============ -->
   <section class="screen" id="scr-sim">
     <div class="bench">
+      <!-- the plate holds the culture and nothing else -->
       <div id="stage">
         <canvas id="cv"></canvas>
+        <div id="pauseveil">Culture held</div>
+      </div>
+
+      <!-- Every readout the run has, in one console: laid over the plate where
+           the dish is big enough to carry it, a panel under the dish where it
+           is not. Which of the two is decided by how wide the DISH is, not the
+           window — a letterboxed landscape plate is narrow in a wide viewport. -->
+      <div class="console" id="console">
         <div class="hud hud-tl">
           <div class="lt" id="h-code"></div>
           <div class="obj" id="h-obj"></div>
@@ -495,12 +627,10 @@ body.touch .dish{min-height:132px}
             <div class="lab"><span id="h-meterlab">Habituation</span><span id="h-hab">0%</span></div>
             <div class="bar"><div class="fill" id="h-habbar"></div></div></div>
         </div>
-        <div id="pauseveil">Culture held</div>
-      </div>
-      <!-- over the plate where there is room for them, under it where there is not -->
-      <div class="readouts">
-        <div class="nodes" id="h-nodes"></div>
-        <div class="hud-br" id="h-note"></div>
+        <div class="readouts">
+          <div class="nodes" id="h-nodes"></div>
+          <div class="hud-br" id="h-note"></div>
+        </div>
       </div>
     </div>
 
@@ -528,37 +658,37 @@ body.touch .dish{min-height:132px}
       </div>
     </div>
 
-    <div class="touchbar" id="touchbar">
-      <button class="tbtn on" id="t-grow" type="button" aria-pressed="true">Grow<span class="sub">hold on the dish</span></button>
-      <button class="tbtn ret" id="t-ret" type="button" aria-pressed="false">Retract<span class="sub">or use two fingers</span></button>
-    </div>
-    <div class="simbar">
+    <div class="simbar" id="controls">
       <p class="hint" id="replaynote"><b>Replay</b> &mdash; the recorded run, played back. Your cues are the recording; <b>Hold</b> and the time-lapse still work.</p>
-      <div class="row">
-        <button class="btn ghost" id="s-pause" type="button">Hold</button>
-        <button class="btn ghost" id="s-speed" type="button">Time-lapse &times;1</button>
-        <button class="btn ghost" id="s-reset" type="button">Reset</button>
-        <button class="btn ghost" id="s-abort">Abandon dish</button>
-        <button class="btn ghost" id="s-exitrp" type="button" hidden>Exit replay</button>
-        <details class="keypop" id="keypop">
-          <summary class="btn ghost">Controls</summary>
-          <div class="keypop-body slab">
-            <div class="keys keys-fine">
-              <b>hold left / drag</b><span>emit a growth cue</span>
-              <b>right / shift</b><span>retract &mdash; pull cytoplasm back</span>
-              <b>space</b><span>hold the clock</span>
-              <b>F</b><span>time-lapse &times;1 / &times;4 / &times;12</span>
-              <b>R</b><span>reset the dish</span>
-            </div>
-            <div class="keys keys-touch">
-              <b>hold / drag</b><span>emit a growth cue</span>
-              <b>RETRACT</b><span>switch the verb, then hold &mdash; or use two fingers</span>
-              <b>two fingers</b><span>retract without switching pads</span>
-              <b>the row above</b><span>hold the clock, wind it, restart the plate</span>
-            </div>
-          </div>
-        </details>
+      <div class="verb" role="group" aria-label="Dish gesture">
+        <button class="vb on" id="t-grow" type="button" aria-pressed="true">Grow</button>
+        <button class="vb ret" id="t-ret" type="button" aria-pressed="false">Retract</button>
       </div>
+      <button class="btn ghost" id="s-pause" type="button">Hold</button>
+      <button class="btn ghost" id="s-speed" type="button"><span class="wd">Time-lapse&nbsp;</span><span id="s-speedn">&times;1</span></button>
+      <details class="keypop" id="keypop">
+        <summary class="btn ghost">Controls</summary>
+        <div class="keypop-body slab">
+          <div class="row kact" id="kact">
+            <button class="btn ghost" id="s-reset" type="button">Reset</button>
+            <button class="btn ghost" id="s-abort" type="button">Abandon dish</button>
+            <button class="btn ghost" id="s-exitrp" type="button" hidden>Exit replay</button>
+          </div>
+          <div class="keys keys-fine">
+            <b>hold left / drag</b><span>emit a growth cue</span>
+            <b>right / shift</b><span>retract &mdash; pull cytoplasm back</span>
+            <b>space</b><span>hold the clock</span>
+            <b>F</b><span>time-lapse &times;1 / &times;4 / &times;12</span>
+            <b>R</b><span>reset the dish</span>
+          </div>
+          <div class="keys keys-touch">
+            <b>hold / drag</b><span>emit a growth cue</span>
+            <b>two fingers</b><span>retract &mdash; a second finger flips a live drag</span>
+            <b>Retract</b><span>the switch, for retracting one-handed</span>
+            <b>Hold / &times;N</b><span>stop the clock, or wind it &times;4 / &times;12</span>
+          </div>
+        </div>
+      </details>
     </div>
 
     <!-- narration: under the bench, not over the organism -->

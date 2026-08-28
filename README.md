@@ -78,7 +78,14 @@ hold WCAG contrast against the agar whatever the seed.
 | hold left / drag | growth cue — the exploratory front flows toward it |
 | hold right / shift | retract — pull cytoplasm back out of a region |
 | space | pause (hold the clock) |
+| F | time-lapse — cycle the dish clock ×1 / ×4 / ×12 |
 | R | reset the dish |
+| Escape | close the key list, leave a replay, abandon the dish — in that order |
+
+On a touch screen the same verbs are a hold or drag for a growth cue, a second
+finger to flip that drag into a retract, and a Grow / Retract switch on the
+control row for retracting one-handed. Hold and the time-lapse sit beside it;
+the rest — reset, abandon, and this table — are behind **Controls**.
 
 ## How the sim works
 
