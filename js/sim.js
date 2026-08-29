@@ -3834,12 +3834,31 @@ var RIDGE_REL = 0.14;  // ...as a fraction of the cell's own trail
    inner shadow now (section 9, ISH_D), computed from the SHAPE of the mold
    rather than drawn along its veins; the crests stay where light belongs,
    on top of it. */
+/* `hot` is how much WHITE each band's stroke is mixed with — the lamp on the
+   crest of a tube. It used to top out at 0.40 on the trunks, which drew a
+   near-white core down the middle of every wide vein and, in the dense middle
+   of a dish, a string of white beads where the trunks crowd. Two things go
+   wrong at that strength. The specimen's colour is the one thing the seed
+   gives the player, and the widest, most-looked-at tissue was the place it was
+   least present. And white is the one tone on this plate that never means
+   tissue — the lobes' own comment says so — so a network cored in it reads as
+   lit wire rather than as a mold with a highlight.
+
+   Scaled to 0.6 of what it was, which keeps the hierarchy between the bands
+   exactly (they are the same ramp, shorter) and hands the tint back the crest.
+   0.24 is not arbitrary: applyTint demands 7:1 of the widest band against the
+   dish, and the band is where that solve READS the hot tone, so lowering this
+   tightens the solve rather than escaping it. Swept over 4000 seeds, the
+   worst-case trunk contrast is 9.20 at 0.40, 7.45 here, and 7.22 at 0.22 —
+   which is the floor: 0.18 puts 26 seeds under 7:1 and 0.00 puts 496 under.
+   Nothing else in the solve moves, because the binding constraint on the
+   tint's lightness is the shaded rim's 3:1 and not this. */
 var VEIN_BANDS = [
   { max: 6,        w: 0.34, hot: 0.00, dim: 0.86, alpha: 0.90, style: '' },
-  { max: 10,       w: 0.62, hot: 0.09, dim: 1.00, alpha: 0.97, style: '' },
-  { max: 16,       w: 1.05, hot: 0.18, dim: 1.00, alpha: 1 },
-  { max: 26,       w: 1.75, hot: 0.28, dim: 1.00, alpha: 1 },
-  { max: Infinity, w: 2.70, hot: 0.40, dim: 1.00, alpha: 1 }
+  { max: 10,       w: 0.62, hot: 0.05, dim: 1.00, alpha: 0.97, style: '' },
+  { max: 16,       w: 1.05, hot: 0.11, dim: 1.00, alpha: 1 },
+  { max: 26,       w: 1.75, hot: 0.17, dim: 1.00, alpha: 1 },
+  { max: Infinity, w: 2.70, hot: 0.24, dim: 1.00, alpha: 1 }
 ];
 /* The lobe layer: the swellings, drawn as swellings.
 
@@ -3895,12 +3914,19 @@ function tintVeins(vein) {
                          + Math.round(c[1] * band.dim) + ','
                          + Math.round(c[2] * band.dim) + ',' + band.alpha + ')';
   }
-  TIP_STYLE = rgba(mixWhite(vein, 0.62), '0.34');
+  TIP_STYLE = rgba(mixWhite(vein, 0.42), '0.34');
   /* A mass catches the lamp about as hard as the second-widest band does: it
      is the same tissue standing at about the same height, and taking it any
      brighter walks a pad the size of a flake toward white, which is the one
-     tone on this plate that never means tissue. */
-  LOBE_STYLE = rgba(mixWhite(vein, 0.24), '1');
+     tone on this plate that never means tissue.
+
+     Read off that band rather than written here as a number, for the reason
+     hotBandK reads the widest one: as a constant it was 0.24 against a band
+     of 0.28, which is the sentence above; the moment the bands came down it
+     would have been 0.24 against 0.17, and the pads would have become the
+     BRIGHTEST thing on the plate while the comment went on claiming they
+     matched. Derived, it cannot drift from what it says it is. */
+  LOBE_STYLE = rgba(mixWhite(vein, VEIN_BANDS[3].hot), '1');
 }
 var VEIN_CAP = 200000;                 /* floats held per band per rebuild */
 var vseg = [], vsegN = [], veinPath = [];
@@ -5160,8 +5186,13 @@ function startRun(i, seed, trace) {
   $('h-obj').textContent = objText(e);
   $('h-time').textContent = '00:00';
   $('h-note').textContent = '';
-  /* One second meter, whichever of the two the dish is about. */
-  $('h-habwrap').style.display = (e.hab || e.diet) ? '' : 'none';
+  /* One second meter, whichever of the two the dish is about. The console is
+     told as well: with two meters their labels take a fixed column so the
+     tracks line up, and with one there is nothing to line up with and the
+     label takes only the room the word needs. */
+  var two = !!(e.hab || e.diet);
+  $('h-habwrap').style.display = two ? '' : 'none';
+  $('console').classList.toggle('twometer', two);
   $('h-meterlab').textContent = e.diet && !e.hab ? 'P : C' : 'Habituation';
   $('h-hab').textContent = e.diet && !e.hab ? 'p 0 · c 0' : '0%';
   $('h-habbar').style.width = '0%';
