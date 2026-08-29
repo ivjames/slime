@@ -3047,7 +3047,9 @@ function step() {
   /* the beat is narrative, not mechanical: the outcome was decided the
      moment the flake went in */
   if (S.dietDoomedT && S.simT >= S.dietDoomedT + 4) { finish(false, 'ratio'); return; }
-  if (e.timeLimit && S.simT >= e.timeLimit) { finish(false, 'timeout'); return; }
+  /* a clock that runs out during the beat does not change what happened:
+     the ratio verdict stands once the plate is past saving */
+  if (e.timeLimit && S.simT >= e.timeLimit) { finish(false, S.dietDoomedT ? 'ratio' : 'timeout'); return; }
 }
 
 /* What the dish actually asks for. Every dish asks for the food gate and, if
