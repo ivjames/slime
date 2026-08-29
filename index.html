@@ -401,13 +401,26 @@ body.touch .dish{min-height:132px}
    each block a readable measure — meters, depot list, note, side by side in
    one ~56px band instead of three stacked rows. Asked of the DISH rather than
    the window, because the panel is the dish's own width: a letterboxed
-   landscape plate is narrow inside a wide viewport, and the media query is
-   the fallback where @container is unsupported.
+   landscape plate is narrow inside a wide viewport.
 
    The rule moves from the top of each block to its left edge, and :empty still
    removes a block entirely — flex rather than grid precisely so that a dish
-   with no depots closes the gap instead of leaving a dead column. */
-@media(min-width:641px){
+   with no depots closes the gap instead of leaving a dead column.
+
+   The media query is the fallback where @container is unsupported, and it has
+   to ask the question the long way round, in the viewport terms it can see.
+   The panel is the plate's width, which since the letterbox went unconditional
+   is
+
+       min(vw - 32, 0.9046 x vh)
+
+   — #app's padding, and 56vh x 1.6154. So it is 641px wide only when the
+   viewport is BOTH at least 673 wide and at least 709 tall, and a width-only
+   fallback squeezes three columns into a 353px panel on an 800x390 window:
+   91px for the narrowest of them, which is not a column, it is a stripe. The
+   container queries below correct this wherever they are supported; this pair
+   is for where they are not. */
+@media(min-width:673px) and (min-height:709px){
   .crow{display:flex}
   .crow>*{border-top:0;border-left:1px solid var(--line);min-width:0}
   .crow>*:first-child{border-left:0}
