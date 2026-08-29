@@ -3583,17 +3583,21 @@ function ufFind(a) {
 
    Two passes over the same chain: the first measures it, the second marks
    each cell with its distance from home as a fraction of the whole — the
-   growth gate's coordinate. Home is wherever the count stopped, so a spur
-   that lands on an already-marked trunk grows out of the trunk, not out of
-   the distant body the trunk hangs from. The re-walk costs one pointer
-   chase over the ~hundreds of corridor cells a rebuild marks. */
+   growth gate's coordinate. Home is wherever the count stopped, and when
+   that is an already-marked trunk rather than the body, the spur's range
+   starts at the TRUNK CELL'S OWN fraction rather than at zero: the front
+   has to reach the junction before it turns up the spur, or a spur off a
+   not-yet-grown stretch would draw first as a floating segment. The re-walk
+   costs one pointer chase over the ~hundreds of corridor cells a rebuild
+   marks. */
 function bridgeWalk(c) {
   var L = 0, p = c;
   while (p >= 0 && !bStrong[p] && !bridge[p]) { L++; p = bPar[p]; }
   if (!L) return;
-  var j = L, s = 255 / L;
+  var b0 = (p >= 0 && bridge[p]) ? bFrac[p] : 0;
+  var j = L, s = (255 - b0) / L;
   while (c >= 0 && !bStrong[c] && !bridge[c]) {
-    bridge[c] = 1; bFrac[c] = (j-- * s) | 0; bAux[bN++] = c; c = bPar[c];
+    bridge[c] = 1; bFrac[c] = (b0 + j-- * s) | 0; bAux[bN++] = c; c = bPar[c];
   }
 }
 
