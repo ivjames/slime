@@ -3295,7 +3295,13 @@ var shpV = new Float32Array(NCELL);   // narrow, low-passed over sim time
    Without it a temporally eased narrow field against an instantaneous wide
    one would put a transient halo around anything that moved. */
 var shpVB = new Float32Array(NCELL);
-var VEIN_TAU = 0.25;                  // sim seconds of memory (~15 steps)
+/* 0.40, up from 0.25 — the measured combo-mid setting: each anti-jitter
+   mechanism was swept OFF/baseline/strong separately and together, and this
+   combination cut decision churn ~25% while keeping ~90% of drawn motion.
+   Since the sheet now paints from this field too, the extra memory quiets
+   the body edge as well; the lag it buys is 0.4 sim-seconds on an organism
+   that moves about a cell per second. */
+var VEIN_TAU = 0.40;                  // sim seconds of memory (~24 steps)
 var veinPrimed = false;               // has shpV been seeded at all?
 var veinT = 0;                        // S.simT at the last rebuild
 
@@ -3967,7 +3973,7 @@ var LOBE_CAP  = ((GW >> 1) + 1) * ((GH >> 1) + 1);
    threshold one of them is held for having been. Same reluctance as the vein
    layer's, for the same reason and against the same noise — see RIDGE_HOLD. */
 var lmark = new Uint8Array(NCELL);
-var LOBE_HOLD = 0.74;
+var LOBE_HOLD = 0.65;    // combo-mid: marked masses hold their mark harder
 var lseg = new Float32Array(LOBE_CAP * 2);
 /* the presence tier each emitted mass is drawn at — filled beside lseg, read
    at bake; the envelope block further down holds the rest of the machinery */
@@ -4055,12 +4061,17 @@ var lenv = new Float32Array(NCELL);   // lobe-mass presence
 var vseen = new Float32Array(NCELL);
 var lseen = new Float32Array(NCELL);
 var envT = 0;                         // S.simT at the last envelope step
-var ENV_UP_TAU = 0.10;                // sim-seconds to rise
-var ENV_DN_TAU = 0.09;                // sim-seconds to fall
+/* Slower than the first cut (0.10/0.09), which softened each flip over
+   ~0.2s — fast enough that the eye still parsed it as a blink, just a quieter
+   one. At these clocks an arrival grows over ~0.3s and an exit glides out
+   over ~0.4s, which reads as an animation rather than a glitch. Still sim
+   time: at x12 the rise is near-instant and the fall is one rebuild. */
+var ENV_UP_TAU = 0.22;                // sim-seconds to rise
+var ENV_DN_TAU = 0.18;                // sim-seconds to fall
 /* Three tiers rather than a continuous alpha, because a continuous alpha is a
    Path2D per distinct value: the whole layer stays a handful of draw calls. */
 var BUCK_A  = [0.35, 0.68, 1];        // stroke alpha per tier
-var LOBE_RK = [0.62, 0.82, 1];        // disc radius factor per tier: masses scale in
+var LOBE_RK = [0.50, 0.78, 1];        // disc radius factor per tier: masses scale in
 function envBucket(p) { return p < 0.35 ? 0 : (p < 0.75 ? 1 : 2); }
 
 /* The other half of the envelope, and the half the tiers cannot do: FADE-OUT.
@@ -4151,8 +4162,8 @@ var roff = new Float32Array(NCELL);
    direction stickiness matters more than its size suggests: a cell whose four
    scores are nearly tied picks a different winner each rebuild, its chain
    reroutes through a different neighbour, and the vein wags. */
-var RIDGE_HOLD = 0.72;
-var DIR_STICK  = 1.15;
+var RIDGE_HOLD = 0.60;   // combo-mid: crests held harder once found
+var DIR_STICK  = 1.25;   // combo-mid: directions stickier against re-rolls
 /* the relaxed floors, folded once rather than per cell — pass one is 106,000
    cells with a four-way loop inside it, and this is its innermost arithmetic */
 var RIDGE_MIN_LO = RIDGE_MIN * RIDGE_HOLD;
@@ -4182,7 +4193,7 @@ var chi = new Int32Array(4096);      // the cell each chain point stands on
    A chain landing on ground with no memory (new growth, or a vein that moved)
    gets the plain answer, which is the right one — there is nothing to be
    loyal to. */
-var BAND_HYST = 0.12;
+var BAND_HYST = 0.20;    // combo-mid: the band-flash margin, measured cheap
 var bandVote = new Int32Array(8);
 
 function pickBand(mean, cells, n) {
@@ -4384,11 +4395,33 @@ function buildVeins() {
       var lv = shpV[i];
       if (wallM[i]) { lmark[i] = 0; continue; }   /* as in pass one */
       var hold = lmark[i] ? LOBE_HOLD : 1;
-      if (lv < BODY_T * hold) { lmark[i] = 0; continue; }
-      var mass = knotF[i] > LOBE_MARK * hold ||
-                 (lv > LOBE_PAD * hold && feedAt[i] >= 0);
+      var mass = lv >= BODY_T * hold &&
+                 (knotF[i] > LOBE_MARK * hold ||
+                  (lv > LOBE_PAD * hold && feedAt[i] >= 0));
       lmark[i] = mass ? 1 : 0;
-      if (!mass) continue;
+      if (!mass) {
+        /* A mass the test just dropped still has its presence, and unlike a
+           vein cell it needs no chain to be drawn — the cell is the disc. So
+           it keeps being emitted at its DECAYING presence, display-only
+           (lenv and lseen untouched: it was not seen, it is being forgotten),
+           and the disc shrinks and fades out through the tiers instead of
+           vanishing at full size. This is the exit half of the scaling
+           animation; the veil only ever carried the alpha half.
+
+           Running dishes only, for the reason the veil's decay is zero on a
+           halted one: the verdict's rebuild is the last there will be, and a
+           mass mid-exit would freeze there as a translucent half-scaled disc
+           instead of finishing. A finished dish shows what it is. */
+        if (S.running && lseen[i] > -1e8) {
+          var abG = envNow - lseen[i] - dtE;
+          var pd = abG > 0.001 ? lenv[i] * Math.exp(-abG / ENV_DN_TAU) : lenv[i];
+          if (pd > 0.12) {
+            lbuck[lsegN] = envBucket(pd);
+            lseg[lsegN * 2] = x + 0.5; lseg[lsegN * 2 + 1] = y + 0.5; lsegN++;
+          }
+        }
+        continue;
+      }
       var abL = envNow - lseen[i] - dtE;
       if (abL > 0.001) lenv[i] *= Math.exp(-abL / ENV_DN_TAU);
       lseen[i] = envNow;
