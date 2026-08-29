@@ -4406,8 +4406,13 @@ function buildVeins() {
            (lenv and lseen untouched: it was not seen, it is being forgotten),
            and the disc shrinks and fades out through the tiers instead of
            vanishing at full size. This is the exit half of the scaling
-           animation; the veil only ever carried the alpha half. */
-        if (lseen[i] > -1e8) {
+           animation; the veil only ever carried the alpha half.
+
+           Running dishes only, for the reason the veil's decay is zero on a
+           halted one: the verdict's rebuild is the last there will be, and a
+           mass mid-exit would freeze there as a translucent half-scaled disc
+           instead of finishing. A finished dish shows what it is. */
+        if (S.running && lseen[i] > -1e8) {
           var abG = envNow - lseen[i] - dtE;
           var pd = abG > 0.001 ? lenv[i] * Math.exp(-abG / ENV_DN_TAU) : lenv[i];
           if (pd > 0.12) {
