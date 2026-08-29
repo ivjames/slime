@@ -1929,7 +1929,7 @@ var S = {
   simT: 0, peak: 0, cues: 0,
   nodeProg: null, nodeDone: null, nodeIdle: null, engulfed: 0,
   hab: 0, habPeak: 0, habBuilt: -1, fused: false,
-  dietP: 0, dietC: 0,
+  dietP: 0, dietC: 0, dietDoomedT: 0,
   growAcc: 0, starveAcc: 0,
   shockNext: 0, shockActive: false, shockWarn: false, shocksSurvived: 0,
   shockWarned: -1, shockCycle: 0, shockPeriod: 0,
@@ -3044,6 +3044,9 @@ function step() {
   /* --- end conditions --- */
   if (nAgents <= 0) { finish(false, 'starved'); return; }
   if (winMet(e)) { finish(true, ''); return; }
+  /* the beat is narrative, not mechanical: the outcome was decided the
+     moment the flake went in */
+  if (S.dietDoomedT && S.simT >= S.dietDoomedT + 4) { finish(false, 'ratio'); return; }
   if (e.timeLimit && S.simT >= e.timeLimit) { finish(false, 'timeout'); return; }
 }
 
@@ -3068,6 +3071,39 @@ function dietMet(e) {
   if (S.dietC <= 0) return false;
   var ratio = S.dietP / S.dietC;
   return ratio >= d.target - d.tol && ratio <= d.target + d.tol;
+}
+
+/* Whether the ratio is past saving. An eaten flake cannot be uneaten and the
+   diet totals only ever accumulate, so what this dish can still become is
+   exactly the subsets of what is left on the plate — brute-forced here, at
+   most 2^8 sums on the dish that asks, and only when a flake goes in. The
+   lose text has promised this ending ('the ratio drifted past saving') since
+   the dish was written; without this check the only implemented loss was the
+   clock, and a run that ate itself unwinnable sat in limbo until timeout.
+   A resealing dish is exempt: its flakes return and can be eaten again, so
+   the ratio can still be pulled — no subset argument holds there. */
+function dietDoomed(e) {
+  var d = e.diet;
+  if (!d || e.reseal) return false;
+  var remP = [], remC = [], reqM = 0, i;
+  for (i = 0; i < e.nodes.length; i++) if (!S.nodeDone[i]) {
+    var nut = e.nodes[i].nut;
+    if (e.required && e.required.indexOf(i) >= 0) reqM |= 1 << remP.length;
+    remP.push(nut ? nut[0] : 0); remC.push(nut ? nut[1] : 0);
+  }
+  var n = remP.length;
+  if (n > 16) return false; // too much left to enumerate; call it winnable
+  var lo = d.target - d.tol, hi = d.target + d.tol;
+  var needK = Math.max(d.min | 0, e.required ? 0 : ((e.holdWin | 0) || e.nodes.length));
+  for (var m = (1 << n) - 1; m >= 0; m--) {
+    if ((m & reqM) !== reqM) continue;
+    var p = S.dietP, c = S.dietC, k = S.engulfed;
+    for (var b = 0; b < n; b++) if (m & (1 << b)) { p += remP[b]; c += remC[b]; k++; }
+    if (k < needK || c <= 0) continue;
+    var r = p / c;
+    if (r >= lo && r <= hi) return false;
+  }
+  return true;
 }
 
 function winMet(e) {
@@ -5049,6 +5085,14 @@ function onEngulf(i) {
   var left = e.nodes.length - S.engulfed;
   /* What the flake actually was, in the two numbers the organism balances */
   if (nd.nut) { S.dietP += nd.nut[0]; S.dietC += nd.nut[1]; }
+  /* Reachability only changes when a flake goes in, so this is the one place
+     the question needs asking. The timestamp, not a finish() here: the end
+     runs from the tick's own end-condition block, a few seconds on, so the
+     engulf line and this one get read before the verdict covers them. */
+  if (e.diet && !S.dietDoomedT && dietDoomed(e)) {
+    S.dietDoomedT = S.simT;
+    logLine('the ratio is past saving. nothing left on the plate can pull it back.', true);
+  }
   var lines = [
     'something rich to the ' + dir + '. folded in.',
     nd.label + ' engulfed — the tube to the ' + dir + ' thickens.',
@@ -5667,7 +5711,7 @@ function startRun(i, seed, trace) {
   nodeHits.fill(0); nodeLoad.fill(0);
   S.engulfed = 0;
   S.hab = 0; S.habPeak = 0; S.habBuilt = -1; S.fused = false;
-  S.dietP = 0; S.dietC = 0;
+  S.dietP = 0; S.dietC = 0; S.dietDoomedT = 0;
   S.growAcc = 0; S.starveAcc = 0;
   S.shockNext = e.shock ? e.shock.first : 0;
   S.shockPeriod = e.shock ? e.shock.period : 0;
@@ -5781,6 +5825,8 @@ function buildResult(won) {
     body = 'The plate reached its scheduled end with the network incomplete. ' + e.lose;
   } else if (!won && S.failReason === 'starved') {
     body = 'The culture has starved. ' + e.lose;
+  } else if (!won && S.failReason === 'ratio') {
+    body = 'Nothing left on the plate could bring the ratio back into the band. ' + e.lose;
   } else if (!won) {
     body = e.lose;
   }
