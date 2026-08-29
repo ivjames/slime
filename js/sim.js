@@ -3754,14 +3754,18 @@ function paintField() {
              interior to be inside of — shading it only dirties the one thing
              this pass exists to make legible */
           if (vcov > 8 && !br && sx2 < GW - 2 * ISH_D - 1 && sy2 < GH - 2 * ISH_D - 1) {
+            /* the eased fields, like the coverage above them — one pixel
+               must not combine two temporal snapshots, and neighbour noise
+               in the raw field was still twitching the shade after the body
+               itself went quiet */
             var j1 = i + ISH_D * GW + ISH_D;
-            var a1 = shpA[j1];
-            var t1 = a1 + SHARP * (a1 - shpB[j1]);
+            var a1 = shpV[j1];
+            var t1 = a1 + SHARP * (a1 - shpVB[j1]);
             var g1 = (t1 * GAM_SCALE) | 0;
             if (g1 < 0) g1 = 0; else if (g1 >= GAMN) g1 = GAMN - 1;
             var j2 = i + 2 * ISH_D * GW + 2 * ISH_D;
-            var a2 = shpA[j2];
-            var t2 = a2 + SHARP * (a2 - shpB[j2]);
+            var a2 = shpV[j2];
+            var t2 = a2 + SHARP * (a2 - shpVB[j2]);
             var g2 = (t2 * GAM_SCALE) | 0;
             if (g2 < 0) g2 = 0; else if (g2 >= GAMN) g2 = GAMN - 1;
             var sh = vcov * (255 - 0.55 * GAM[g1] - 0.45 * GAM[g2]);
@@ -3970,6 +3974,11 @@ var lseg = new Float32Array(LOBE_CAP * 2);
 var lbuck = new Uint8Array(LOBE_CAP);
 var lsegN = 0;
 var lobePath = null;
+/* every mass at FULL radius, tier-independent — the veil composite's punch.
+   A lobe that returns in a smaller tier must still clear the whole footprint
+   of its former self from the accumulator, or the outer ring of the old disc
+   survives as a fading halo around the smaller new one. */
+var lobeMaskPath = null;
 var LOBE_STYLE = '';
 
 function tintVeins(vein) {
@@ -4543,16 +4552,22 @@ function buildVeins() {
      the same envelope, affordable here because a disc's size is one number. */
   if (lsegN) {
     var lps = [null, null, null];
+    var lmp = new Path2D();
+    var lmr = LOBE_DOT + 0.25;
     for (i = 0; i < lsegN; i++) {
       var lk = lbuck[i];
       var lp = lps[lk] || (lps[lk] = new Path2D());
       var lr = LOBE_DOT * LOBE_RK[lk];
       lp.moveTo(lseg[i * 2] + lr, lseg[i * 2 + 1]);
       lp.arc(lseg[i * 2], lseg[i * 2 + 1], lr, 0, Math.PI * 2);
+      lmp.moveTo(lseg[i * 2] + lmr, lseg[i * 2 + 1]);
+      lmp.arc(lseg[i * 2], lseg[i * 2 + 1], lmr, 0, Math.PI * 2);
     }
     lobePath = lps;
+    lobeMaskPath = lmp;
   } else {
     lobePath = null;
+    lobeMaskPath = null;
   }
 
   /* --- the front: one whisker per tip --- */
@@ -4585,20 +4600,15 @@ function strokeVeins(tc, sx, sy, mono) {
      mask, so the mono pass stays a single flat sweep. */
   var k, b;
   if (mono) {
-    if (lobePath) {
+    if (lobeMaskPath) {
       ctx.fillStyle = '#fff';
-      for (k = 0; k < 3; k++) if (lobePath[k]) ctx.fill(lobePath[k]);
+      ctx.fill(lobeMaskPath);
     }
     for (b = VEIN_BANDS.length - 1; b >= 0; b--) {
       if (!veinPath[b]) continue;
       ctx.lineWidth = VEIN_BANDS[b].w + 0.5;
       ctx.strokeStyle = '#fff';
       for (k = 0; k < 3; k++) if (veinPath[b][k]) ctx.stroke(veinPath[b][k]);
-    }
-    if (whiskPath) {
-      ctx.lineWidth = TIP_W + 0.5;
-      ctx.strokeStyle = '#fff';
-      ctx.stroke(whiskPath);
     }
     ctx.restore();
     return;
@@ -4646,12 +4656,24 @@ function strokeVeins(tc, sx, sy, mono) {
     if (veinPath[b][1]) punchThen(veinPath[b][1], false, VEIN_BANDS[b].style, BUCK_A[1]);
     if (veinPath[b][2]) ctx.stroke(veinPath[b][2]);
   }
-  if (whiskPath) {
-    ctx.lineWidth = TIP_W;
-    ctx.strokeStyle = TIP_STYLE;
-    ctx.stroke(whiskPath);
-  }
   ctx.restore();
+}
+
+/* The whiskers are the moving front and are drawn straight onto the frame,
+   OUTSIDE the veil: a tip can turn 0.79 radians in a step, which swings the
+   far end of a 2.6-cell whisker well clear of its own mask footprint, and
+   through the accumulator every turn left a translucent fan of the whisker's
+   old headings decaying behind it. The front updates immediately or it is
+   not the front. */
+function strokeWhiskers(tc, sx, sy) {
+  if (!whiskPath) return;
+  tc.save();
+  tc.setTransform(sx, 0, 0, sy, 0, 0);
+  tc.lineCap = 'round';
+  tc.lineWidth = TIP_W;
+  tc.strokeStyle = TIP_STYLE;
+  tc.stroke(whiskPath);
+  tc.restore();
 }
 
 /* mode 1 = cue, 2 = retract. touchMode is the verb the on-screen pads select;
@@ -4717,6 +4739,7 @@ function render() {
     veinFresh = false;
   }
   ctx.drawImage(veilAcc, 0, 0);
+  strokeWhiskers(ctx, sx, sy);
   ctx.save();
   ctx.setTransform(sx, 0, 0, sy, 0, 0);
 
