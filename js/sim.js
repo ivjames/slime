@@ -3183,6 +3183,12 @@ var dirtyFrames = 0;
 function initCanvas() {
   cv = $('cv');
   ctx = cv.getContext('2d', { alpha: false });
+  veil = document.createElement('canvas');
+  vlctx = veil.getContext('2d');
+  veilAcc = document.createElement('canvas');
+  vactx = veilAcc.getContext('2d');
+  veilTmp = document.createElement('canvas');
+  vtctx = veilTmp.getContext('2d');
   off = document.createElement('canvas');
   off.width = GW; off.height = GH;
   octx = off.getContext('2d', { alpha: false });
@@ -3200,6 +3206,17 @@ function resizeCanvas() {
   var h = Math.round(w * GH / GW);
   if (cv.width !== w || cv.height !== h) {
     cv.width = w; cv.height = h;
+    /* Sizing clears them, which is right: an accumulator holding strokes at
+       the old scale has nothing true to say at the new one. But a PAUSED dish
+       will not rebuild — its frames re-composite the accumulator that was
+       just wiped, and the veins would sit blank until the clock resumed. The
+       Path2Ds survive a resize (they are grid-space, the transform does the
+       scaling), so re-arm the composite to re-stroke them, with nothing to
+       decay in. */
+    if (veil) { veil.width = w; veil.height = h; }
+    if (veilAcc) { veilAcc.width = w; veilAcc.height = h; }
+    if (veilTmp) { veilTmp.width = w; veilTmp.height = h; }
+    if (veil) { veinFresh = true; veilDn = 0; }
   }
 }
 
@@ -3270,6 +3287,11 @@ var shpT = new Float32Array(NCELL);   // scratch for the separable pass
    few frames rather than being identical instantly. That is the trade, and it
    is the whole point of it. */
 var shpV = new Float32Array(NCELL);   // narrow, low-passed over sim time
+/* The wide field under the same low-pass, so the unsharp difference the
+   painter takes (narrow minus wide) compares two fields on the same clock.
+   Without it a temporally eased narrow field against an instantaneous wide
+   one would put a transient halo around anything that moved. */
+var shpVB = new Float32Array(NCELL);
 var VEIN_TAU = 0.25;                  // sim seconds of memory (~15 steps)
 var veinPrimed = false;               // has shpV been seeded at all?
 var veinT = 0;                        // S.simT at the last rebuild
@@ -3286,6 +3308,12 @@ function resetVeinTemporal() {
   rband.fill(255);
   rbandP.fill(255);
   lmark.fill(0);
+  /* a new dish starts from silence, and its first network fades in over the
+     envelope's own rise — which reads as the culture arriving, not a glitch */
+  venv.fill(0);
+  lenv.fill(0);
+  envT = S.simT;
+  if (vactx && veilAcc.width) vactx.clearRect(0, 0, veilAcc.width, veilAcc.height);
 }
 
 /* The other kind of cut: abandoning a replay, which puts a dish back that this
@@ -3309,38 +3337,53 @@ function resetVeinTemporal() {
    this one wrote. */
 function snapshotVeinTemporal(fs) {
   fs.shpV = new Float32Array(shpV);
+  fs.shpVB = new Float32Array(shpVB);
   fs.rdir = new Uint8Array(rdir);
   fs.rband = new Uint8Array(rband);
   fs.lmark = new Uint8Array(lmark);
+  /* the envelope is part of the finished picture: without it a replay exit
+     would put the dish back with every stroke snapped to full presence */
+  fs.venv = new Float32Array(venv);
+  fs.lenv = new Float32Array(lenv);
 }
 
 function restoreVeinTemporal(fs) {
   if (!fs || !fs.shpV) { resetVeinTemporal(); return; }
   shpV.set(fs.shpV);
+  if (fs.shpVB) shpVB.set(fs.shpVB);
   rdir.set(fs.rdir);
   rband.set(fs.rband);
   lmark.set(fs.lmark);
+  if (fs.venv) { venv.set(fs.venv); lenv.set(fs.lenv); }
   veinPrimed = true;
   veinT = S.simT;
+  envT = S.simT;
+  /* the accumulator holds the REPLAY's last strokes at this point, and the
+     next rebuild has dt 0 and so takes veilDn 0 — but clear it anyway, so no
+     path that skips that rebuild can composite another dish's ghosts */
+  if (vactx && veilAcc.width) vactx.clearRect(0, 0, veilAcc.width, veilAcc.height);
 }
 
 function smoothRidgeField() {
   var dt = S.simT - veinT;
   veinT = S.simT;
-  if (!veinPrimed) { shpV.set(shpA); veinPrimed = true; return; }
+  if (!veinPrimed) { shpV.set(shpA); shpVB.set(shpB); veinPrimed = true; return; }
   /* A dish that did not advance has nothing to average: holding shpV is both
      cheaper and more correct than folding the same field into itself, which
      would only walk the average toward a value it is already at. Backwards is
      a teleport that got past resetVeinTemporal, and takes the field as given. */
-  if (dt <= 0) { if (dt < 0) shpV.set(shpA); return; }
+  if (dt <= 0) { if (dt < 0) { shpV.set(shpA); shpVB.set(shpB); } return; }
   var k = 1 - Math.exp(-dt / VEIN_TAU);
-  if (k >= 0.999) { shpV.set(shpA); return; }
+  if (k >= 0.999) { shpV.set(shpA); shpVB.set(shpB); return; }
   /* Swept whole. Skipping the cells where shpA and shpV already agree is exact
      — the update is a no-op there — and measured as worth nothing, because
      trail DIFFUSES: after eight blurs there is a tail of some tiny nonzero
      value across nearly every cell of a running dish, and the cells that agree
      exactly are too few to pay for the test. */
-  for (var i = 0; i < NCELL; i++) shpV[i] += (shpA[i] - shpV[i]) * k;
+  for (var i = 0; i < NCELL; i++) {
+    shpV[i] += (shpA[i] - shpV[i]) * k;
+    shpVB[i] += (shpB[i] - shpVB[i]) * k;
+  }
 }
 
 /* one separable 1-2-1 pass, src -> dst, via shpT */
@@ -3498,8 +3541,11 @@ function buildBridges() {
     row = y * GW;
     for (x = 0; x < GW; x++) {
       i = row + x;
-      var a = shpA[i];
-      if (a + SHARP * (a - shpB[i]) < BODY_DRAW) { bStrong[i] = 0; bLab[i] = -1; continue; }
+      /* the same eased fields the painter reads, or the question of what is
+         body gets two answers again — smoothRidgeField has already run this
+         rebuild, so these are current */
+      var a = shpV[i];
+      if (a + SHARP * (a - shpVB[i]) < BODY_DRAW) { bStrong[i] = 0; bLab[i] = -1; continue; }
       bStrong[i] = 1;
       bQ[tail++] = i;
       l = -1;
@@ -3612,6 +3658,15 @@ function buildBridges() {
 function paintField() {
   var d = imgData;
   buildRidge();
+  /* Fold this rebuild's fields into the temporal average BEFORE painting, so
+     the body is drawn from the same eased surface the ridge pass reads. This
+     is where the sheet's own popping went: the body edge is a threshold, and
+     a threshold on the raw field flips whole stub branches in and out per
+     rebuild — the same coin-flip the veins had, at the sheet's scale. Painting
+     from shpV gives the edge the ridge pass's ~15 steps of memory, and since
+     the average is clocked in sim time it costs the same nothing at x12 that
+     shpV always has. buildVeins' own call right after finds dt 0 and holds. */
+  smoothRidgeField();
   buildBridges();
   for (var i = 0, p = 0; i < NCELL; i++, p += 4) {
     var r, g, b;
@@ -3639,10 +3694,10 @@ function paintField() {
           }
         }
       }
-      var a = shpA[i];
+      var a = shpV[i];
       var br = bridge[i];
       if (a > 0.004 || br) {
-        var t = a + SHARP * (a - shpB[i]);
+        var t = a + SHARP * (a - shpVB[i]);
         if (t > BODY_T * 0.5 || br) {
           var gi = (t * GAM_SCALE) | 0;
           if (gi < 0) gi = 0; else if (gi >= GAMN) gi = GAMN - 1;
@@ -3902,6 +3957,9 @@ var LOBE_CAP  = ((GW >> 1) + 1) * ((GH >> 1) + 1);
 var lmark = new Uint8Array(NCELL);
 var LOBE_HOLD = 0.74;
 var lseg = new Float32Array(LOBE_CAP * 2);
+/* the presence tier each emitted mass is drawn at — filled beside lseg, read
+   at bake; the envelope block further down holds the rest of the machinery */
+var lbuck = new Uint8Array(LOBE_CAP);
 var lsegN = 0;
 var lobePath = null;
 var LOBE_STYLE = '';
@@ -3929,6 +3987,11 @@ function tintVeins(vein) {
   LOBE_STYLE = rgba(mixWhite(vein, VEIN_BANDS[3].hot), '1');
 }
 var VEIN_CAP = 200000;                 /* floats held per band per rebuild */
+/* Each band's array holds RUNS now, not whole chains: [bucket, count, x0,y0,
+   ...] repeating, where bucket is the presence tier the run is drawn at. A
+   chain whose cells sit in different tiers is split at the boundaries, with
+   the boundary point in both runs so the line stays connected. veinPath[b] is
+   correspondingly [Path2D|null x3], one per tier. */
 var vseg = [], vsegN = [], veinPath = [];
 (function () {
   for (var i = 0; i < VEIN_BANDS.length; i++) {
@@ -3937,6 +4000,68 @@ var vseg = [], vsegN = [], veinPath = [];
     veinPath.push(null);
   }
 })();
+
+/* ---- the presence envelope: pop becomes fade ----
+   The hysteresis above reduces how often a cell's drawn/not-drawn decision
+   FLIPS; this reduces how loud each flip is. Every drawn cell carries a
+   presence that rises while the rebuild keeps choosing it and decays when it
+   stops, and the strokes are drawn at an alpha tier picked from it — so a
+   branch that blinks for one rebuild never reaches full contrast, and one
+   that vanishes leaves at a third strength rather than from full.
+
+   It is an envelope on the OUTPUT, not a low-pass on the input: geometry is
+   never delayed — a new branch is stroked in the right place on the rebuild
+   that finds it, merely starting quiet. That is the difference between this
+   and VEIN_TAU, whose smoothing genuinely lags the organism.
+
+   Clocked in SIM time, for the reason VEIN_TAU is: at x12 a rebuild advances
+   ~0.4 sim-seconds, the rise saturates and the decay empties in one step, and
+   the envelope self-disables — a time-lapse retract cannot leave comet tails,
+   because the fade is twelve times faster in wall terms exactly when the
+   organism is twelve times faster. At x1 a blink reaches ~0.3 presence and a
+   real branch is at full strength in ~0.2s of wall clock.
+
+   Presence is per CELL (the cell index is the identity), which is what lets
+   this work without tracking which chain this rebuild corresponds to which
+   chain last rebuild — the rebuild derives everything from scratch and has no
+   such correspondence to offer. */
+var venv = new Float32Array(NCELL);   // vein-crest presence
+var lenv = new Float32Array(NCELL);   // lobe-mass presence
+var envT = 0;                         // S.simT at the last envelope step
+var ENV_UP_TAU = 0.10;                // sim-seconds to rise
+var ENV_DN_TAU = 0.09;                // sim-seconds to fall
+/* Three tiers rather than a continuous alpha, because a continuous alpha is a
+   Path2D per distinct value: the whole layer stays a handful of draw calls. */
+var BUCK_A  = [0.35, 0.68, 1];        // stroke alpha per tier
+var LOBE_RK = [0.62, 0.82, 1];        // disc radius factor per tier: masses scale in
+function envBucket(p) { return p < 0.35 ? 0 : (p < 0.75 ? 1 : 2); }
+
+/* The other half of the envelope, and the half the tiers cannot do: FADE-OUT.
+   A cell the rebuild keeps can be drawn quiet, but a cell the rebuild drops is
+   in no chain at all — there is no geometry left to draw its exit with. So the
+   exit is done in pixels instead of paths: the vein layer is stroked into its
+   own canvas, and an accumulator keeps, per pixel, the brighter of the fresh
+   layer and its own decayed self —
+
+       acc = max(acc x veilDn, fresh)
+
+   A pixel both frames draw is unchanged (max picks the undecayed new value); a
+   pixel only the OLD frame drew fades exponentially instead of vanishing. No
+   identity, no correspondence, no extra geometry — 'lighten' is per-channel
+   max and three drawImage calls per rebuild buy the whole thing.
+
+   veilDn comes from the same sim-time dt as the tiers, so at x12 it is ~0.01
+   and the accumulator degenerates to a plain copy: a time-lapse retract
+   cannot smear, because the fade runs twelve times faster exactly when the
+   organism does. On a rebuild with no time behind it (a restore, the verdict
+   render) it is 0 outright, which makes the accumulator exactly the fresh
+   layer — a dish being put back must not inherit the fading ghosts of the
+   dish it replaces. */
+var veil = null, vlctx = null;        // this rebuild's strokes
+var veilAcc = null, vactx = null;     // the running max
+var veilTmp = null, vtctx = null;     // scratch for the in-place decay
+var veilDn = 0;                       // decay folded in at the next composite
+var veinFresh = false;                // buildVeins ran since the last composite
 var whiskPath = null;
 
 /* The four directions a vein can run ACROSS: the across unit vector, the
@@ -4118,6 +4243,23 @@ function buildVeins() {
 
   /* --- pass one: which cells are on a ridge, and which way it runs --- */
   smoothRidgeField();
+  /* Step the presence envelope. Decay everything now; the cells this rebuild
+     draws are bumped as their chains and masses are emitted below, so a cell
+     the rebuild keeps recovers what the decay just took and a cell it dropped
+     starts fading. dt <= 0 is a rebuild with no time behind it — the verdict
+     screen's by-hand render, a restore — and holds the envelope still rather
+     than decaying tissue on a dish that did not move. */
+  var dtE = S.simT - envT;
+  envT = S.simT;
+  var envUp = dtE > 0 ? 1 - Math.exp(-dtE / ENV_UP_TAU) : 0;
+  if (dtE > 0) {
+    var envDn = Math.exp(-dtE / ENV_DN_TAU);
+    for (i = 0; i < NCELL; i++) { venv[i] *= envDn; lenv[i] *= envDn; }
+    veilDn = envDn;
+  } else {
+    veilDn = 0;
+  }
+  veinFresh = true;
   /* last rebuild's maps become this one's memory by swapping the pairs, which
      costs a pointer where copying 106,000 bytes costs 106,000 bytes */
   var rswap = rprev; rprev = rdir; rdir = rswap;
@@ -4217,6 +4359,8 @@ function buildVeins() {
                  (lv > LOBE_PAD * hold && feedAt[i] >= 0);
       lmark[i] = mass ? 1 : 0;
       if (!mass) continue;
+      lenv[i] += (1 - lenv[i]) * envUp;
+      lbuck[lsegN] = envBucket(lenv[i]);
       lseg[lsegN * 2] = x + 0.5; lseg[lsegN * 2 + 1] = y + 0.5; lsegN++;
     }
   }
@@ -4304,25 +4448,46 @@ function buildVeins() {
 
       var mean = sum / n;
       b = pickBand(mean, chi, n);
-      for (var bw = 0; bw < n; bw++) rband[chi[bw]] = b;
       var arr = vseg[b], w = vsegN[b];
-      if (w + 1 + n * 2 > VEIN_CAP) continue;
-      arr[w++] = n;
-      for (var q = 0; q < n; q++) { arr[w++] = chx[q]; arr[w++] = chy[q]; }
+      /* Emitted as runs of constant presence tier, the boundary point in both
+         runs so the stroke stays continuous. Worst case every point changes
+         tier and each costs 6 floats — the closing copy, a fresh header, and
+         itself — so the cap is checked for that case, and a pathological
+         chain drops whole rather than half-writes. */
+      if (w + n * 6 + 2 > VEIN_CAP) continue;
+      var rq = 0, rk = -1, rstart = 0;
+      for (var bw = 0; bw < n; bw++) {
+        var ci2 = chi[bw];
+        rband[ci2] = b;
+        venv[ci2] += (1 - venv[ci2]) * envUp;
+        var kk2 = envBucket(venv[ci2]);
+        if (bw === 0) { rk = kk2; rstart = w; arr[w++] = kk2; arr[w++] = 0; }
+        else if (kk2 !== rk) {
+          /* close the run on this point, then open the next one on it too */
+          arr[w++] = chx[bw]; arr[w++] = chy[bw];
+          arr[rstart + 1] = bw - rq + 1;
+          rq = bw; rk = kk2; rstart = w; arr[w++] = kk2; arr[w++] = 0;
+        }
+        arr[w++] = chx[bw]; arr[w++] = chy[bw];
+      }
+      arr[rstart + 1] = n - rq;
       vsegN[b] = w;
     }
   }
 
-  /* Bake each band into a Path2D, in grid coordinates. Held rather than
+  /* Bake each band into Path2Ds, in grid coordinates — one per presence tier,
+     so the whole layer is still a handful of draw calls. Held rather than
      re-issued, so a frame that changed nothing re-strokes the same geometry
      without walking 109,200 cells or replaying the moveTo/lineTo calls. The
      canvas transform does the scaling, so these survive a resize too. */
   for (b = 0; b < VEIN_BANDS.length; b++) {
     var end = vsegN[b];
     if (!end) { veinPath[b] = null; continue; }
-    var a3 = vseg[b], pth = new Path2D(), r = 0;
+    var a3 = vseg[b], tier = [null, null, null], r = 0;
     while (r < end) {
-      var cnt = a3[r++];
+      var tk = a3[r++] | 0;
+      var cnt = a3[r++] | 0;
+      var pth = tier[tk] || (tier[tk] = new Path2D());
       pth.moveTo(a3[r], a3[r + 1]);
       if (cnt === 2) {
         pth.lineTo(a3[r + 2], a3[r + 3]);
@@ -4339,17 +4504,24 @@ function buildVeins() {
       }
       r += cnt * 2;
     }
-    veinPath[b] = pth;
+    veinPath[b] = tier;
   }
 
-  /* --- the masses: one disc per marked cell, baked as one path --- */
+  /* --- the masses: one disc per marked cell, baked per presence tier ---
+     A mass arrives by growing as well as brightening: the disc radius scales
+     with the tier, so a fresh lobe swells in from six-tenths size instead of
+     stamping on at full — which is the "short scaling animation" version of
+     the same envelope, affordable here because a disc's size is one number. */
   if (lsegN) {
-    var lp = new Path2D();
+    var lps = [null, null, null];
     for (i = 0; i < lsegN; i++) {
-      lp.moveTo(lseg[i * 2] + LOBE_DOT, lseg[i * 2 + 1]);
-      lp.arc(lseg[i * 2], lseg[i * 2 + 1], LOBE_DOT, 0, Math.PI * 2);
+      var lk = lbuck[i];
+      var lp = lps[lk] || (lps[lk] = new Path2D());
+      var lr = LOBE_DOT * LOBE_RK[lk];
+      lp.moveTo(lseg[i * 2] + lr, lseg[i * 2 + 1]);
+      lp.arc(lseg[i * 2], lseg[i * 2 + 1], lr, 0, Math.PI * 2);
     }
-    lobePath = lp;
+    lobePath = lps;
   } else {
     lobePath = null;
   }
@@ -4366,7 +4538,8 @@ function buildVeins() {
   whiskPath = any ? wp : null;
 }
 
-function strokeVeins(sx, sy) {
+function strokeVeins(tc, sx, sy) {
+  var ctx = tc;   /* shadow the module-level ctx: everything below targets tc */
   ctx.save();
   ctx.setTransform(sx, 0, 0, sy, 0, 0);
   ctx.lineCap = 'round';
@@ -4375,16 +4548,29 @@ function strokeVeins(sx, sy) {
      top of it rather than under it. One fill, no offset copy: what makes a
      lobe read as raised is the field's inner shadow, which has already
      shaded it as part of the shape. */
+  var k;
   if (lobePath) {
     ctx.fillStyle = LOBE_STYLE;
-    ctx.fill(lobePath);
+    for (k = 0; k < 3; k++) {
+      if (!lobePath[k]) continue;
+      ctx.globalAlpha = BUCK_A[k];
+      ctx.fill(lobePath[k]);
+    }
+    ctx.globalAlpha = 1;
   }
-  /* widest first, so the hairlines land on top of the trunks they join */
+  /* widest first, so the hairlines land on top of the trunks they join;
+     within a band, faint tiers first, so where a run boundary overlaps a
+     point the settled stroke wins */
   for (var b = VEIN_BANDS.length - 1; b >= 0; b--) {
     if (!veinPath[b]) continue;
     ctx.lineWidth = VEIN_BANDS[b].w;
     ctx.strokeStyle = VEIN_BANDS[b].style;
-    ctx.stroke(veinPath[b]);
+    for (k = 0; k < 3; k++) {
+      if (!veinPath[b][k]) continue;
+      ctx.globalAlpha = BUCK_A[k];
+      ctx.stroke(veinPath[b][k]);
+    }
+    ctx.globalAlpha = 1;
   }
   if (whiskPath) {
     ctx.lineWidth = TIP_W;
@@ -4418,9 +4604,31 @@ function render() {
   if ('imageSmoothingQuality' in ctx) ctx.imageSmoothingQuality = 'high';
   ctx.drawImage(off, 0, 0, cv.width, cv.height);
 
-  /* the sheet is the field; the veins are lines drawn over it */
+  /* The sheet is the field; the veins are lines drawn over it — through the
+     veil accumulator, so what leaves the picture fades instead of vanishing.
+     The fold runs once per rebuild: clean frames between rebuilds re-composite
+     the same accumulator, exactly as they re-stroked the same paths before. */
   var sx = cv.width / GW, sy = cv.height / GH;
-  strokeVeins(sx, sy);
+  if (veinFresh) {
+    vlctx.setTransform(1, 0, 0, 1, 0, 0);
+    vlctx.clearRect(0, 0, veil.width, veil.height);
+    strokeVeins(vlctx, sx, sy);
+    vtctx.setTransform(1, 0, 0, 1, 0, 0);
+    vtctx.clearRect(0, 0, veilTmp.width, veilTmp.height);
+    if (veilDn > 0.004) {
+      vtctx.globalAlpha = veilDn;
+      vtctx.drawImage(veilAcc, 0, 0);
+      vtctx.globalAlpha = 1;
+    }
+    vactx.setTransform(1, 0, 0, 1, 0, 0);
+    vactx.clearRect(0, 0, veilAcc.width, veilAcc.height);
+    vactx.drawImage(veilTmp, 0, 0);
+    vactx.globalCompositeOperation = 'lighten';
+    vactx.drawImage(veil, 0, 0);
+    vactx.globalCompositeOperation = 'source-over';
+    veinFresh = false;
+  }
+  ctx.drawImage(veilAcc, 0, 0);
   ctx.save();
   ctx.setTransform(sx, 0, 0, sy, 0, 0);
 
@@ -5763,13 +5971,15 @@ function init() {
     agents: function () { return nAgents; },
     /* how many of them are at the front — the population forkTip draws from */
     tips: function () { var c = 0; for (var k = 0; k < nAgents; k++) if (atip[k]) c++; return c; },
-    /* chains and points in the vein trace of the last painted frame — how far
-       the ridge walk gets before it loses the vein */
+    /* runs and points in the vein trace of the last painted frame — how far
+       the ridge walk gets before it loses the vein. These are presence-tier
+       RUNS since the envelope split chains at tier boundaries, so the count is
+       an upper bound on chains rather than the thing itself. */
     veins: function () {
       var ch = 0, pt = 0;
       for (var b = 0; b < vsegN.length; b++) {
         var r = 0, end = vsegN[b];
-        while (r < end) { var c = vseg[b][r++]; ch++; pt += c; r += c * 2; }
+        while (r < end) { r++; var c = vseg[b][r++]; ch++; pt += c; r += c * 2; }
       }
       return { chains: ch, points: pt, mean: ch ? +(pt / ch).toFixed(2) : 0 };
     },
@@ -5796,6 +6006,7 @@ function init() {
       for (var b = 0; b < vsegN.length; b++) {
         var a = vseg[b], end = vsegN[b], r = 0;
         while (r < end) {
+          r++;                       /* the run's presence tier — not a cell */
           var c = a[r++];
           for (var q = 0; q < c; q++) {
             var cx = a[r + q * 2] | 0, cy = a[r + q * 2 + 1] | 0;
