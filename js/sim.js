@@ -3361,6 +3361,10 @@ function snapshotVeinTemporal(fs) {
   fs.lenv = new Float32Array(lenv);
   fs.vseen = new Float32Array(vseen);
   fs.lseen = new Float32Array(lseen);
+  /* the corridor hold memory: routing consults it, so a restored dish
+     re-routed under a REPLAY's holds could bridge a different layout than
+     the verdict it is putting back */
+  fs.bridgeP = new Uint8Array(bridgeP);
 }
 
 function restoreVeinTemporal(fs) {
@@ -3372,6 +3376,7 @@ function restoreVeinTemporal(fs) {
   lmark.set(fs.lmark);
   if (fs.venv) { venv.set(fs.venv); lenv.set(fs.lenv); }
   if (fs.vseen) { vseen.set(fs.vseen); lseen.set(fs.lseen); }
+  if (fs.bridgeP) { bridgeP.set(fs.bridgeP); brenv.fill(0); brT = S.simT; }
   veinPrimed = true;
   veinT = S.simT;
   envT = S.simT;
@@ -3635,9 +3640,13 @@ function buildBridges() {
   }
   var seedEnd = tail, nl = 0;
   for (i = 0; i < np; i++) if (ufFind(i) === i) nl++;
-  /* one piece — or none — is nothing to bridge, which is the case a healthy
-     young dish is in and the case the title screen is in */
-  if (nl < 2) return;
+  /* One piece — or none — is nothing to bridge, which is the case a healthy
+     young dish is in and the case the title screen is in. Nothing to ROUTE is
+     not nothing to BOOK, though: the memory and the envelope still advance,
+     or a dish that just healed into one piece cuts its corridors to agar in a
+     single rebuild — the flash again — while bridgeP and brenv keep last
+     rebuild's corridors to corrupt the thresholds of the next split. */
+  if (nl < 2) { bridgeSettle(); return; }
   for (k = 0; k < seedEnd; k++) bLab[bQ[k]] = ufFind(bLab[bQ[k]]);
 
   /* 2. flood out of every piece at once, over supplied cells only, so each low
@@ -3720,13 +3729,18 @@ function buildBridges() {
       }
     }
   }
-  bridgeP.set(bridge);
+  bridgeSettle();
+}
 
-  /* 5. the envelope, one fused sweep: routed cells rise; any other cell
-     still carrying presence decays and is marked fading (2) so the painter
-     draws its exit, or is cleared when it reaches the floor — walls clear
-     outright, the mold is not on the wall. */
-  for (i = 0; i < NCELL; i++) {
+/* The bookkeeping tail of buildBridges, shared with its early return: commit
+   this rebuild's corridors as the next one's hold memory, then advance the
+   envelope in one fused sweep — routed cells rise; any other cell still
+   carrying presence decays and is marked fading (2) so the painter draws its
+   exit, or is cleared at the floor. Walls clear outright: the mold is not on
+   the wall. */
+function bridgeSettle() {
+  bridgeP.set(bridge);
+  for (var i = 0; i < NCELL; i++) {
     if (bridge[i] === 1) {
       var bev = brenv[i];
       if (bev < 1) brenv[i] = bev + (1 - bev) * brUp;
