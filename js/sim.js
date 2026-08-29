@@ -3323,6 +3323,9 @@ function resetVeinTemporal() {
   lenv.fill(0);
   vseen.fill(-1e9);
   lseen.fill(-1e9);
+  brenv.fill(0);
+  bridgeP.fill(0);
+  brT = S.simT;
   envT = S.simT;
   if (vactx && veilAcc.width) vactx.clearRect(0, 0, veilAcc.width, veilAcc.height);
 }
@@ -3358,6 +3361,10 @@ function snapshotVeinTemporal(fs) {
   fs.lenv = new Float32Array(lenv);
   fs.vseen = new Float32Array(vseen);
   fs.lseen = new Float32Array(lseen);
+  /* the corridor hold memory: routing consults it, so a restored dish
+     re-routed under a REPLAY's holds could bridge a different layout than
+     the verdict it is putting back */
+  fs.bridgeP = new Uint8Array(bridgeP);
 }
 
 function restoreVeinTemporal(fs) {
@@ -3369,6 +3376,7 @@ function restoreVeinTemporal(fs) {
   lmark.set(fs.lmark);
   if (fs.venv) { venv.set(fs.venv); lenv.set(fs.lenv); }
   if (fs.vseen) { vseen.set(fs.vseen); lseen.set(fs.lseen); }
+  if (fs.bridgeP) { bridgeP.set(fs.bridgeP); brenv.fill(0); brT = S.simT; }
   veinPrimed = true;
   veinT = S.simT;
   envT = S.simT;
@@ -3501,6 +3509,42 @@ var bAux    = new Int32Array(NCELL);
 var bridge  = new Uint8Array(NCELL);   // the cells this pass adds to the body
 var bN = 0;                            // how many of them, as a list in bAux
 
+/* Bridges were the last un-eased layer, and measurement made them the flashes
+   of large regions the rest of the calming left audible: a corridor is
+   qualified WHOLE, per rebuild, by a flood over the raw trail field — a
+   median of ~340 bridge cells flipped per rebuild at x1, in connected pieces
+   of 60-270 cells, drawn at up to 71% coverage with no ramp. Two mechanisms,
+   both the file's own patterns:
+
+   A qualification HOLD (RIDGE_HOLD's shape): a cell bridged last rebuild
+   re-qualifies at 72% of the threshold, so a corridor stops rerouting off a
+   one-unit dip. 0.72 x BRIDGE_MIN is 2.16, still above BODY_LO's 2.0 — the
+   held cell remains drawable, so the flood invariant (routed implies drawn)
+   survives, at the fading coverage a barely-held cell deserves.
+
+   A per-cell presence ENVELOPE on the drawn coverage (the lobes' shape): a
+   corridor rises in over ~0.25s and, when it goes, fades from wherever it
+   was instead of cutting to agar — the exit reads GAM_LO of the trail that
+   is still there, scaled by the decaying presence. Clocked on sim time but
+   CLAMPED per rebuild: a corridor does not translate, so easing it cannot
+   smear motion, and without the clamp a time-lapse rebuild would snap it —
+   which is the flash again, at the speed the dish is mostly watched at. On a
+   halted dish the envelope snaps to the truth, per the verdict rule. */
+var bridgeP = new Uint8Array(NCELL);   // last rebuild's corridors — the hold
+var BRIDGE_MIN_LO = BRIDGE_MIN * 0.72;
+var brenv = new Float32Array(NCELL);   // drawn-coverage presence per cell
+var brT = 0;                           // S.simT at the last bridge rebuild
+var BR_TAU = 0.12;                     // sim-seconds of rise/fall
+var BR_DT_CAP = 0.08;                  // per-rebuild clock clamp (see above)
+var brUp = 1, brDn = 0;                // folded per rebuild in buildBridges
+/* The envelope's bookkeeping lives in ONE dedicated sweep in buildBridges,
+   not in the paint loop: interleaving brenv updates with the painter's
+   innermost branches measured a sixth of the throttled frame budget, where a
+   tight sequential sweep costs bandwidth and nothing else. bridge[] is
+   tri-state after it — 0 none, 1 routed, 2 fading — so the paint loop learns
+   everything from the byte it already loads and reads brenv only inside the
+   corridor branches. */
+
 /* The cells whose eight neighbours are all on the grid, and the offsets to
    them. Both floods below are the same loop twice — by offset where the mask
    says it is safe, with the bounds tests and the divisions to recover x and y
@@ -3529,6 +3573,18 @@ function bridgeWalk(c) {
 
 function buildBridges() {
   var i, c, q, k, x, y, l, m, o, dx, dy, nx, ny, row, head, tail;
+  var dtB = S.simT - brT;
+  brT = S.simT;
+  if (dtB > 0 && S.running) {
+    if (dtB > BR_DT_CAP) dtB = BR_DT_CAP;
+    brUp = 1 - Math.exp(-dtB / BR_TAU);
+    brDn = Math.exp(-dtB / BR_TAU);
+  } else {
+    /* a halted or restored dish shows what it is: corridors at full
+       presence, everything else at none */
+    brUp = 1;
+    brDn = 0;
+  }
   bridge.fill(0);
   bN = 0;
 
@@ -3584,9 +3640,13 @@ function buildBridges() {
   }
   var seedEnd = tail, nl = 0;
   for (i = 0; i < np; i++) if (ufFind(i) === i) nl++;
-  /* one piece — or none — is nothing to bridge, which is the case a healthy
-     young dish is in and the case the title screen is in */
-  if (nl < 2) return;
+  /* One piece — or none — is nothing to bridge, which is the case a healthy
+     young dish is in and the case the title screen is in. Nothing to ROUTE is
+     not nothing to BOOK, though: the memory and the envelope still advance,
+     or a dish that just healed into one piece cuts its corridors to agar in a
+     single rebuild — the flash again — while bridgeP and brenv keep last
+     rebuild's corridors to corrupt the thresholds of the next split. */
+  if (nl < 2) { bridgeSettle(); return; }
   for (k = 0; k < seedEnd; k++) bLab[bQ[k]] = ufFind(bLab[bQ[k]]);
 
   /* 2. flood out of every piece at once, over supplied cells only, so each low
@@ -3598,7 +3658,7 @@ function buildBridges() {
     if (bInner[c]) {
       for (k = 0; k < 8; k++) {
         q = c + BOFF[k];
-        if (bLab[q] >= 0 || trail[q] < BRIDGE_MIN) continue;
+        if (bLab[q] >= 0 || trail[q] < (bridgeP[q] ? BRIDGE_MIN_LO : BRIDGE_MIN)) continue;
         bLab[q] = o; bPar[q] = c; bQ[tail++] = q;
       }
     } else {
@@ -3608,7 +3668,7 @@ function buildBridges() {
         nx = x + dx; ny = y + dy;
         if (nx < 0 || ny < 0 || nx >= GW || ny >= GH) continue;
         q = ny * GW + nx;
-        if (bLab[q] >= 0 || trail[q] < BRIDGE_MIN) continue;
+        if (bLab[q] >= 0 || trail[q] < (bridgeP[q] ? BRIDGE_MIN_LO : BRIDGE_MIN)) continue;
         bLab[q] = o; bPar[q] = c; bQ[tail++] = q;
       }
     }
@@ -3654,7 +3714,8 @@ function buildBridges() {
     if (bInner[c]) {
       for (i = 0; i < 8; i++) {
         q = c + BOFF[i];
-        if (!bridge[q] && !bStrong[q] && trail[q] >= BRIDGE_MIN) bridge[q] = 1;
+        if (!bridge[q] && !bStrong[q] &&
+            trail[q] >= (bridgeP[q] ? BRIDGE_MIN_LO : BRIDGE_MIN)) bridge[q] = 1;
       }
     } else {
       x = c % GW; y = (c / GW) | 0;
@@ -3663,7 +3724,38 @@ function buildBridges() {
         nx = x + dx; ny = y + dy;
         if (nx < 0 || ny < 0 || nx >= GW || ny >= GH) continue;
         q = ny * GW + nx;
-        if (!bridge[q] && !bStrong[q] && trail[q] >= BRIDGE_MIN) bridge[q] = 1;
+        if (!bridge[q] && !bStrong[q] &&
+            trail[q] >= (bridgeP[q] ? BRIDGE_MIN_LO : BRIDGE_MIN)) bridge[q] = 1;
+      }
+    }
+  }
+  bridgeSettle();
+}
+
+/* The bookkeeping tail of buildBridges, shared with its early return: commit
+   this rebuild's corridors as the next one's hold memory, then advance the
+   envelope in one fused sweep — routed cells rise; any other cell still
+   carrying presence decays and is marked fading (2) so the painter draws its
+   exit, or is cleared at the floor. Walls clear outright: the mold is not on
+   the wall. */
+function bridgeSettle() {
+  bridgeP.set(bridge);
+  for (var i = 0; i < NCELL; i++) {
+    if (bridge[i] === 1) {
+      var bev = brenv[i];
+      if (bev < 1) brenv[i] = bev + (1 - bev) * brUp;
+    } else {
+      var bef = brenv[i];
+      if (bef > 0.02) {
+        bef *= brDn;
+        if (bef > 0.02 && !wallM[i]) {
+          brenv[i] = bef;
+          bridge[i] = 2;
+        } else {
+          brenv[i] = 0;
+        }
+      } else if (bef !== 0) {
+        brenv[i] = 0;
       }
     }
   }
@@ -3709,6 +3801,8 @@ function paintField() {
         }
       }
       var a = shpV[i];
+      /* 0 none, 1 routed, 2 fading — see buildBridges; presence is read only
+         inside the branches that need it */
       var br = bridge[i];
       if (a > 0.004 || br) {
         var t = a + SHARP * (a - shpVB[i]);
@@ -3742,12 +3836,25 @@ function paintField() {
              noise has nowhere to show. Measured across five experiments and
              42,649 corridor cells, no cell drew under that floor. */
           var vcov;
-          if (br) {
+          if (br === 1) {
             var gt = (trail[i] * GAM_SCALE) | 0;
             if (gt < 0) gt = 0; else if (gt >= GAMN) gt = GAMN - 1;
-            vcov = GAM_LO[gt];
+            /* scaled by the presence, so a corridor arrives over ~0.25s
+               instead of stamping on at its full 79% */
+            vcov = (GAM_LO[gt] * brenv[i]) | 0;
           } else {
             vcov = GAM[gi];
+            /* A corridor the flood just dropped fades from wherever it was —
+               the trail that carried it is usually still there, which is
+               exactly why its cut used to read as a flash. Only where the
+               body draws (nearly) nothing of its own: a bridge cell that
+               thickened into real tissue keeps its GAM coverage untouched. */
+            if (br === 2 && vcov < 24) {
+              var gt2 = (trail[i] * GAM_SCALE) | 0;
+              if (gt2 < 0) gt2 = 0; else if (gt2 >= GAMN) gt2 = GAMN - 1;
+              var fv = (GAM_LO[gt2] * brenv[i]) | 0;
+              if (fv > vcov) vcov = fv;
+            }
           }
           /* the inner shadow (see ISH_D above): how much of the body is
              missing one and two throws down-light of this cell. The last
@@ -6115,6 +6222,11 @@ function init() {
     agents: function () { return nAgents; },
     /* how many of them are at the front — the population forkTip draws from */
     tips: function () { var c = 0; for (var k = 0; k < nAgents; k++) if (atip[k]) c++; return c; },
+    /* the bridge layer as drawn: 1 where this rebuild routed a corridor.
+       Differenced across rebuilds it answers whether the flashes of large
+       regions are bridges — corridors qualify whole per rebuild, so they are
+       the one layer that can flip a big connected area at once. */
+    bridgeMap: function () { return new Uint8Array(bridge); },
     /* how the emitted runs distribute over the presence tiers — the number
        that says whether steady tissue is reaching full strength (it must sit
        overwhelmingly in the last tier at x1) and whether blinks are being
