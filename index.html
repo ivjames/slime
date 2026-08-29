@@ -25,15 +25,6 @@
   --warn:#e0763c;
   --bad:#df6f8b;
   --quin:#bf82e2;
-  /* The ground every HUD block carries with it, over a canvas that is any
-     colour at all from one frame to the next. .95 rather than a rounder
-     number: the run's accent is solved per seed to 4.5:1 against the PAGE,
-     which is darker than any plate laid over lit slime, so the plate has to
-     stay dark enough not to spend that margin. Swept over the seed space, the
-     worst accent clears 4.5:1 on this plate over a pure white backdrop —
-     brighter than the dish can actually paint — and clears 4.04 at .9. */
-  --hud-bg:rgba(6,8,5,.95);
-  --hud-line:rgba(216,220,200,.13);
   /* --line draws the furniture — slab edges, the grid between dishes — and is
      deliberately faint. A control's own edge is the thing that says "this is a
      control", so it is held to 1.4.11's 3:1 against every ground in the sheet;
@@ -180,11 +171,11 @@ h1,h2,h3{font-weight:600;margin:0}
 .rsp.def{border-color:var(--slime);color:var(--slime)}
 body.touch #result .btn{min-height:44px;padding:11px 15px}
 
-/* While the verdict is on screen the plate is letterboxed to the same height
-   the short-viewport rule uses, so the dish stays whole AND the verdict row
-   lands above the fold. The play controls step aside — the panel carries the
-   only actions that still mean anything once the run is over. */
-#scr-sim.resulting .bench,#scr-sim.resulting #feed{max-width:var(--plate)}
+/* The play controls step aside once the run is over — the verdict panel
+   carries the only actions that still mean anything. (The plate is letterboxed
+   here too, but it no longer needs saying: the letterbox is unconditional now,
+   for the console's sake, so the dish is already the right size when the
+   verdict arrives.) */
 #scr-sim.resulting .simbar{display:none}
 
 @media(max-width:700px){
@@ -206,12 +197,11 @@ body.touch .keys-fine{display:none}
 body.touch .keys-touch{display:grid}
 
 /* ---------- sim ---------- */
-/* The bench is the plate plus the two readouts that ride over it where there
-   is room and step off it where there is not. It carries the letterbox width
-   and the size container, so #stage is simply all of it: the readouts overlay
-   lines up with the plate to the pixel, and the HUD still answers to how wide
-   the DISH is rather than how wide the window is — letterboxed landscape gives
-   a narrow plate in a wide viewport. */
+/* The bench is the plate and the console under it. It carries the letterbox
+   width, so the two are the same width to the pixel, and the size container,
+   so the console's layout answers to how wide the DISH is rather than how wide
+   the window is — a letterboxed landscape plate is narrow in a wide viewport,
+   and a three-column instrument band would be unreadable in it. */
 .bench{position:relative;width:100%;margin:0 auto;
   container-type:inline-size;container-name:dish}
 #stage{position:relative;width:100%;border:1px solid var(--line);border-radius:3px;
@@ -222,55 +212,75 @@ body.touch .keys-touch{display:grid}
    drag across it still scrolls the page on iOS. */
 #stage canvas{display:block;width:100%;height:auto;touch-action:none;
   -webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
-/* The console is every readout the run has, in one box: the code line and the
-   clock, the objective, the meters, the depot list and the note. On a bench
-   with room around it the box is laid OVER the plate, inset by the stage's own
-   border, and reads as the instrument glass it always was. On a small plate it
-   steps off the agar entirely (see the narrow rules) and becomes a panel under
-   the dish — one panel, not the four floating blocks it used to be.
+/* ---------- the console ---------- */
+/* Every readout the run has, in one panel UNDER the dish: the code line and
+   the clock, the objective, the meters, the depot list and the note.
 
-   Consequence of moving it out of #stage: the pause veil, which is still
-   inside the stage, no longer covers it. That is the right way round — a held
-   culture is a culture you are reading, and the numbers are what you read. */
-.console{position:absolute;inset:1px;pointer-events:none;
-  overflow:hidden;border-radius:2px}
-.hud{position:absolute;pointer-events:none;font-size:11px;letter-spacing:.08em}
-/* A readout over live cytoplasm has no fixed background to be measured
-   against: the same pixel is #070906 agar one second and #fff6b0 lit slime the
-   next, and no ink is 4.5:1 against both. So each block brings its own ground
-   — a near-opaque plate with a hairline edge — and the contrast is a number
-   again rather than a matter of what the organism happens to be doing. */
-.hud-tl,.hud-bl,.hud-br,.nodes{background:var(--hud-bg);
-  -webkit-backdrop-filter:blur(3px);backdrop-filter:blur(3px)}
-.hud-bl,.hud-br,.nodes{border:1px solid var(--hud-line);border-radius:3px;padding:8px 10px}
-/* An empty plate is just a box in the way — the note and the node list are
-   both blank on most dishes. */
+   It used to be four blocks floating over the agar, and on a phone that was
+   most of the organism covered by things describing it. The first pass moved
+   them off the plate at phone sizes only, which left the game looking like two
+   different games — a clean dish on a phone and an obscured one on a laptop.
+   Nothing about a big screen makes covering the specimen a better idea, and a
+   1180px dish has the MOST worth looking at. So the plate carries the culture
+   and the pause veil at every size, and this is where the numbers live.
+
+   What that deletes is the whole apparatus these blocks needed to survive over
+   live cytoplasm: the two --hud-* colours, the near-opaque plate each one carried
+   and the backdrop blur behind it, all of which existed because the same pixel
+   is #070906 agar one second and #fff6b0 lit slime the next and no ink is
+   4.5:1 against both. On a panel with a ground of its own, contrast is a
+   number again. */
+.console{margin-top:8px;border:1px solid var(--line);border-radius:3px;
+  background:linear-gradient(180deg,#14180f,#0f1210)}
+.hud{font-size:11px;letter-spacing:.08em}
+/* An empty row is a rule with nothing under it — the note and the depot list
+   are both blank on some dishes. */
 .hud-br:empty,.nodes:empty{display:none}
-.hud-tl{top:0;left:0;right:0;display:flex;justify-content:space-between;gap:12px;
-  padding:9px 12px;border-bottom:1px solid var(--hud-line)}
-.hud-tl .obj{color:var(--slime);text-align:center;flex:1}
+/* The header: what the dish is, what it wants, how long it has been running.
+   Narrow-first, like the band below it — the objective is ordered last and
+   given the whole width, so the code line and the clock share row one and the
+   objective gets row two rather than being wedged into the middle third of a
+   bar it wraps to four lines inside. The wide rules put it back in the middle. */
+.hud-tl{display:flex;flex-wrap:wrap;gap:2px 12px;padding:9px 14px;
+  border-bottom:1px solid var(--line)}
+.hud-tl .obj{order:3;flex:1 1 100%;text-align:left;color:var(--slime)}
 .hud-tl .lt,.hud-tl .rt{color:var(--dim);white-space:nowrap}
-.hud-bl{left:12px;bottom:11px;width:min(280px,46%)}
-.meter{margin-bottom:7px}
-.meter:last-child{margin-bottom:0}
-.meter .lab{display:flex;justify-content:space-between;color:var(--dim);font-size:10px;
-  letter-spacing:.18em;text-transform:uppercase;margin-bottom:3px}
-/* the ring keeps the empty part of the bar readable as a bar, now that the
-   track sits on a plate almost its own colour */
-.meter .bar{height:4px;background:#1b1f18;border-radius:2px;overflow:hidden;
+.hud-tl .rt{margin-left:auto}
+/* The instrument band. Narrow-first: one row per block, each drawing the rule
+   ABOVE it, so a dish with no depots and no note ends the panel at the meters
+   rather than on a rule with nothing under it — an empty row is display:none
+   and contributes no border, which a border-bottom on the row before it could
+   not know. The wide rules turn this into columns. */
+.crow>*{padding:9px 14px;border-top:1px solid var(--line)}
+.crow>*:first-child{border-top:0}
+/* One line per meter — label, track, figure. Stacked, two meters cost six
+   lines of panel to report two numbers. */
+.meter{display:flex;align-items:center;gap:10px}
+.meter+.meter{margin-top:7px}
+.meter .lab{display:contents}
+.meter .lab span{color:var(--dim);font-size:10px;letter-spacing:.18em;text-transform:uppercase}
+/* Wide enough for the longest label the two meters have, so the tracks of a
+   dish carrying BOTH line up instead of starting at two different columns.
+   Most dishes have only the biomass meter and so have nothing to line up with
+   — there, reserving room for the word HABITUATION is 30px taken off the
+   track for nothing, which on a letterboxed 695px band is most of it. sim.js
+   sets .twometer alongside the second meter's own display toggle. */
+.console.twometer .meter .lab span:first-child{flex:0 0 86px}
+.meter .bar{order:1;flex:1;height:4px;background:#1b1f18;border-radius:2px;overflow:hidden;
   box-shadow:inset 0 0 0 1px rgba(216,220,200,.16)}
+/* the figure gets a column rather than hugging the track, so the two meters
+   of a dish carrying both end on the same edge whatever they are counting —
+   "4,500" against "0%" against "p 12 · c 30" */
+.meter .lab span:last-child{order:2;color:var(--ink);flex:0 0 auto;
+  min-width:64px;text-align:right}
 .meter .fill{height:100%;width:0%;background:var(--slime);transition:width .18s}
 .meter.mass .fill{background:linear-gradient(90deg,#8f7f1e,var(--slime))}
 .meter.hab .fill{background:linear-gradient(90deg,#5b3479,var(--quin))}
 .meter.crit .fill{background:var(--bad)}
-/* On a plate with room, this is the layer it used to be: node list under the
-   top bar, note above the meters, both against the right edge. */
-.readouts{position:absolute;inset:0;pointer-events:none;display:flex;flex-direction:column;
-  align-items:flex-end;gap:8px;padding:46px 12px 11px}
-/* auto margin rather than space-between: the note belongs at the bottom of the
-   plate whether or not there is a node list above it to be spaced from */
-.hud-br{margin-top:auto;text-align:right;color:var(--dim);font-size:10.5px;letter-spacing:.08em;max-width:44%}
-.nodes{text-align:right;color:var(--dim);font-size:10.5px;line-height:1.7}
+.hud-br{color:var(--dim);font-size:11px;letter-spacing:.08em}
+/* the list reads across the panel, not down the side of a plate */
+.nodes{color:var(--dim);font-size:11px;line-height:1.5;
+  display:flex;flex-wrap:wrap;gap:2px 16px}
 /* not-yet-reached nodes were a half-opacity --dim, which is a colour you can
    see only if you already know what it says. They are dim ink now, not faded. */
 .nodes .n{color:#8b937d}
@@ -387,117 +397,52 @@ body.replay .verb{display:none}
 body.touch .btn{min-height:44px;padding:11px 18px}
 body.touch .dish{min-height:132px}
 
-/* What a small plate carries, and what steps off it. Stated twice on purpose:
-   the container query is the accurate one — it asks how wide the DISH is — and
-   the media query is the fallback where @container is unsupported.
+/* The instrument band goes to columns once the panel is wide enough to give
+   each block a readable measure — meters, depot list, note, side by side in
+   one ~56px band instead of three stacked rows. Asked of the DISH rather than
+   the window, because the panel is the dish's own width: a letterboxed
+   landscape plate is narrow inside a wide viewport, and the media query is
+   the fallback where @container is unsupported.
 
-   The fallback has to ask the question the long way round. A plate is small
-   either because the window is narrow or because it is SHORT: the letterbox
-   caps its height at 56vh, so its width is 56vh x 420/260 = 0.9046 of the
-   viewport height, which crosses 640px at a viewport 707px tall. Without the
-   second half of this condition, a wide short window — 800x390, say — hands
-   the fallback a 353px plate while the media query still sees an 800px
-   viewport and leaves nine rows of node list absolutely positioned over a
-   dish 219px tall. */
-@media(max-width:640px),(max-height:707px){
-  /* A phone-sized plate cannot hold any of this. At 320px the dish is 296x184;
-     the top bar wraps its objective and stands 52 to 103px tall, the
-     nine-depot list is 179px, and the biomass meter wants the bottom — the sum
-     is half again the plate. Anything left over the agar at this size is
-     either covering the organism or falling off a dish that clips, and the
-     organism is the entire reason the dish is on screen.
-
-     So the whole console steps off, into the strip between the dish and the
-     controls — which is where the narration already went, for the same
-     reason. Over the agar: nothing. The plate carries the culture and the
-     pause veil, and that is the list. */
-  .console{position:static;overflow:visible;pointer-events:auto;
-    margin-top:8px;border:1px solid var(--line);border-radius:3px;
-    background:linear-gradient(180deg,#14180f,#0f1210)}
-  .hud,.readouts{pointer-events:auto}
-  /* Off the plate they are rows of a panel, not blocks floating over an image,
-     so they drop the ground and the hairline each was carrying to survive over
-     live cytoplasm, and take the panel's instead. */
-  .hud-tl,.hud-bl,.hud-br,.nodes{background:none;
-    -webkit-backdrop-filter:none;backdrop-filter:none}
-  .hud-bl,.hud-br,.nodes{border:0;border-radius:0}
-  .hud-tl{position:static;flex-wrap:wrap;row-gap:2px;border-bottom:0;padding:8px 12px}
-  .hud-tl .lt,.hud-tl .rt{font-size:10px}
-  /* The objective wedged into the middle third of a narrow bar wraps to three
-     and four lines. Given the whole width on a second row it takes one. */
-  .hud-tl .obj{order:3;flex:1 1 100%;text-align:left}
-  /* Each row draws the rule ABOVE it rather than below, so a dish with no
-     depots and no note ends the panel at the meters instead of on a rule with
-     nothing under it — an empty row is display:none and contributes no
-     border, which a border-bottom on the row before it could not know. */
-  .hud-bl,.readouts>*{border-top:1px solid var(--line)}
-  .hud-bl{position:static;width:auto;padding:9px 12px}
-  /* One line per meter — label, track, figure — rather than a label row above
-     a bar. Stacked, two meters cost six lines of panel to report two numbers. */
-  .meter{display:flex;align-items:center;gap:10px;margin-bottom:0}
-  .meter+.meter{margin-top:7px}
-  .meter .lab{display:contents}
-  /* wide enough for the longest label the two meters have, so the tracks of a
-     dish carrying both line up instead of starting at two different columns */
-  .meter .lab span:first-child{flex:0 0 86px}
-  .meter .bar{order:1;flex:1}
-  .meter .lab span:last-child{order:2;color:var(--ink)}
-  .readouts{position:static;display:block;padding:0}
-  .hud-br{max-width:none;text-align:left;font-size:11px;padding:8px 12px}
-  /* the list reads across the strip instead of down the side of the plate:
-     nine rows become three lines of three */
-  .nodes{max-width:none;text-align:left;font-size:11px;line-height:1.5;padding:8px 12px;
-    display:flex;flex-wrap:wrap;gap:2px 16px}
+   The rule moves from the top of each block to its left edge, and :empty still
+   removes a block entirely — flex rather than grid precisely so that a dish
+   with no depots closes the gap instead of leaving a dead column. */
+@media(min-width:641px){
+  .crow{display:flex}
+  .crow>*{border-top:0;border-left:1px solid var(--line);min-width:0}
+  .crow>*:first-child{border-left:0}
+  /* The meters column spends a fixed 86px on the label and 76px on the figure
+     before the track gets anything, so at 34% the track was 67px — a bar you
+     read as an ornament rather than a quantity. 36/38/26 gives it half again
+     that and still leaves the depot list enough measure for three of the eight
+     blends per line on EXP-08, which is the widest list the game has. */
+  .crow>.hud-bl{flex:1 1 36%}
+  .crow>.nodes{flex:2 1 38%}
+  .crow>.hud-br{flex:1 1 26%}
+  .hud-tl .obj{order:0;flex:1;text-align:center}
 }
+@container dish (min-width:641px){
+  .crow{display:flex}
+  .crow>*{border-top:0;border-left:1px solid var(--line);min-width:0}
+  .crow>*:first-child{border-left:0}
+  /* The meters column spends a fixed 86px on the label and 76px on the figure
+     before the track gets anything, so at 34% the track was 67px — a bar you
+     read as an ornament rather than a quantity. 36/38/26 gives it half again
+     that and still leaves the depot list enough measure for three of the eight
+     blends per line on EXP-08, which is the widest list the game has. */
+  .crow>.hud-bl{flex:1 1 36%}
+  .crow>.nodes{flex:2 1 38%}
+  .crow>.hud-br{flex:1 1 26%}
+  .hud-tl .obj{order:0;flex:1;text-align:center}
+}
+/* ...and back to stacked rows on a plate too narrow for columns, which the
+   container query above simply stops matching. The media fallback has to say
+   it the other way round, because it cannot see the dish. */
 @container dish (max-width:640px){
-  /* A phone-sized plate cannot hold any of this. At 320px the dish is 296x184;
-     the top bar wraps its objective and stands 52 to 103px tall, the
-     nine-depot list is 179px, and the biomass meter wants the bottom — the sum
-     is half again the plate. Anything left over the agar at this size is
-     either covering the organism or falling off a dish that clips, and the
-     organism is the entire reason the dish is on screen.
-
-     So the whole console steps off, into the strip between the dish and the
-     controls — which is where the narration already went, for the same
-     reason. Over the agar: nothing. The plate carries the culture and the
-     pause veil, and that is the list. */
-  .console{position:static;overflow:visible;pointer-events:auto;
-    margin-top:8px;border:1px solid var(--line);border-radius:3px;
-    background:linear-gradient(180deg,#14180f,#0f1210)}
-  .hud,.readouts{pointer-events:auto}
-  /* Off the plate they are rows of a panel, not blocks floating over an image,
-     so they drop the ground and the hairline each was carrying to survive over
-     live cytoplasm, and take the panel's instead. */
-  .hud-tl,.hud-bl,.hud-br,.nodes{background:none;
-    -webkit-backdrop-filter:none;backdrop-filter:none}
-  .hud-bl,.hud-br,.nodes{border:0;border-radius:0}
-  .hud-tl{position:static;flex-wrap:wrap;row-gap:2px;border-bottom:0;padding:8px 12px}
-  .hud-tl .lt,.hud-tl .rt{font-size:10px}
-  /* The objective wedged into the middle third of a narrow bar wraps to three
-     and four lines. Given the whole width on a second row it takes one. */
+  .crow{display:block}
+  .crow>*{border-top:1px solid var(--line);border-left:0}
+  .crow>*:first-child{border-top:0}
   .hud-tl .obj{order:3;flex:1 1 100%;text-align:left}
-  /* Each row draws the rule ABOVE it rather than below, so a dish with no
-     depots and no note ends the panel at the meters instead of on a rule with
-     nothing under it — an empty row is display:none and contributes no
-     border, which a border-bottom on the row before it could not know. */
-  .hud-bl,.readouts>*{border-top:1px solid var(--line)}
-  .hud-bl{position:static;width:auto;padding:9px 12px}
-  /* One line per meter — label, track, figure — rather than a label row above
-     a bar. Stacked, two meters cost six lines of panel to report two numbers. */
-  .meter{display:flex;align-items:center;gap:10px;margin-bottom:0}
-  .meter+.meter{margin-top:7px}
-  .meter .lab{display:contents}
-  /* wide enough for the longest label the two meters have, so the tracks of a
-     dish carrying both line up instead of starting at two different columns */
-  .meter .lab span:first-child{flex:0 0 86px}
-  .meter .bar{order:1;flex:1}
-  .meter .lab span:last-child{order:2;color:var(--ink)}
-  .readouts{position:static;display:block;padding:0}
-  .hud-br{max-width:none;text-align:left;font-size:11px;padding:8px 12px}
-  /* the list reads across the strip instead of down the side of the plate:
-     nine rows become three lines of three */
-  .nodes{max-width:none;text-align:left;font-size:11px;line-height:1.5;padding:8px 12px;
-    display:flex;flex-wrap:wrap;gap:2px 16px}
 }
 /* ROW_NARROW — when the control row cannot afford its roomy layout. Kept in
    step with the DOCK query in sim.js, which is the same string: the sheet
@@ -574,12 +519,22 @@ body.touch .dish{min-height:132px}
   .keys b{margin-top:9px}
   .hint{font-size:10.5px;flex:1 1 100%}
 }
-/* Letterbox the dish rather than letting a fixed 420:260 canvas run off a
-   short viewport. Width-driven on a portrait phone, so this only bites in
-   landscape / short windows. */
-@media(pointer:coarse),(max-height:760px){
-  .bench,#controls,#feed{max-width:var(--plate)}
-}
+/* Letterbox the dish rather than letting a fixed 420:260 canvas run off the
+   viewport. This used to be conditional — coarse pointers and windows under
+   760px tall — because on a tall desktop window the dish could be as big as it
+   liked and the only thing under it was a button row.
+
+   It is unconditional now, because the console moved out from over the plate
+   and the dish no longer gets to spend the whole window. On a 1280x800 laptop
+   an uncapped dish is 731px tall, which put the console AND the control row
+   below the fold: the readouts were off the organism, which is what was
+   wanted, and also off the screen, which was not. Capping the dish at 56vh
+   buys back the ~120px the console and controls need, and everything the run
+   reports is visible while the run is happening at every size.
+
+   Width still wins on a portrait phone — --plate is a min() against 100% — so
+   this changes nothing there. */
+.bench,#controls,#feed{max-width:var(--plate)}
 @media(max-height:760px){
   #log{height:64px}
 }
@@ -646,24 +601,25 @@ body.touch .dish{min-height:132px}
         <div id="pauseveil">Culture held</div>
       </div>
 
-      <!-- Every readout the run has, in one console: laid over the plate where
-           the dish is big enough to carry it, a panel under the dish where it
-           is not. Which of the two is decided by how wide the DISH is, not the
-           window — a letterboxed landscape plate is narrow in a wide viewport. -->
+      <!-- Every readout the run has, in one console under the dish — at every
+           size, because nothing about a big screen makes covering the specimen
+           a better idea. A header, then an instrument band that is three
+           columns where the dish is wide enough to give each a readable
+           measure and three stacked rows where it is not. -->
       <div class="console" id="console">
         <div class="hud hud-tl">
           <div class="lt" id="h-code"></div>
           <div class="obj" id="h-obj"></div>
           <div class="rt" id="h-time"></div>
         </div>
-        <div class="hud hud-bl">
-          <div class="meter mass"><div class="lab"><span>Biomass</span><span id="h-mass">0</span></div>
-            <div class="bar"><div class="fill" id="h-massbar"></div></div></div>
-          <div class="meter hab" id="h-habwrap" style="display:none">
-            <div class="lab"><span id="h-meterlab">Habituation</span><span id="h-hab">0%</span></div>
-            <div class="bar"><div class="fill" id="h-habbar"></div></div></div>
-        </div>
-        <div class="readouts">
+        <div class="crow">
+          <div class="hud hud-bl">
+            <div class="meter mass"><div class="lab"><span>Biomass</span><span id="h-mass">0</span></div>
+              <div class="bar"><div class="fill" id="h-massbar"></div></div></div>
+            <div class="meter hab" id="h-habwrap" style="display:none">
+              <div class="lab"><span id="h-meterlab">Habituation</span><span id="h-hab">0%</span></div>
+              <div class="bar"><div class="fill" id="h-habbar"></div></div></div>
+          </div>
           <div class="nodes" id="h-nodes"></div>
           <div class="hud-br" id="h-note"></div>
         </div>

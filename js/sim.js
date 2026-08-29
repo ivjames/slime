@@ -5160,8 +5160,13 @@ function startRun(i, seed, trace) {
   $('h-obj').textContent = objText(e);
   $('h-time').textContent = '00:00';
   $('h-note').textContent = '';
-  /* One second meter, whichever of the two the dish is about. */
-  $('h-habwrap').style.display = (e.hab || e.diet) ? '' : 'none';
+  /* One second meter, whichever of the two the dish is about. The console is
+     told as well: with two meters their labels take a fixed column so the
+     tracks line up, and with one there is nothing to line up with and the
+     label takes only the room the word needs. */
+  var two = !!(e.hab || e.diet);
+  $('h-habwrap').style.display = two ? '' : 'none';
+  $('console').classList.toggle('twometer', two);
   $('h-meterlab').textContent = e.diet && !e.hab ? 'P : C' : 'Habituation';
   $('h-hab').textContent = e.diet && !e.hab ? 'p 0 · c 0' : '0%';
   $('h-habbar').style.width = '0%';
