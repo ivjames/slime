@@ -3522,10 +3522,18 @@ var bN = 0;                            // how many of them, as a list in bAux
    held cell remains drawable, so the flood invariant (routed implies drawn)
    survives, at the fading coverage a barely-held cell deserves.
 
-   A per-cell presence ENVELOPE on the drawn coverage (the lobes' shape): a
-   corridor rises in over ~0.25s and, when it goes, fades from wherever it
-   was instead of cutting to agar — the exit reads GAM_LO of the trail that
-   is still there, scaled by the decaying presence. Clocked on sim time but
+   A per-cell presence ENVELOPE on the drawn coverage (the lobes' shape),
+   read through a GROWTH GATE: a corridor does not fade in at its full
+   footprint, it grows out of the body it hangs from. The walk that marks a
+   corridor already traces the flood's parent chain home, so it records each
+   cell's normalized distance from its attachment for free, and the painter
+   draws a cell only once the shared envelope has risen past that distance —
+   the corridor sweeps in from both attachment ends and meets in the middle,
+   and on the way out it retreats tip-first back into the body. The gate
+   spends BR_FRONT of the envelope sweeping and the rest fading each cell at
+   the front, and it VANISHES at steady state: presence is exactly 1 for
+   every distance once the envelope saturates, so the meeting point wobbling
+   between rebuilds cannot show. The envelope is clocked on sim time but
    CLAMPED per rebuild: a corridor does not translate, so easing it cannot
    smear motion, and without the clamp a time-lapse rebuild would snap it —
    which is the flash again, at the speed the dish is mostly watched at. On a
@@ -3533,8 +3541,13 @@ var bN = 0;                            // how many of them, as a list in bAux
 var bridgeP = new Uint8Array(NCELL);   // last rebuild's corridors — the hold
 var BRIDGE_MIN_LO = BRIDGE_MIN * 0.72;
 var brenv = new Float32Array(NCELL);   // drawn-coverage presence per cell
+var bFrac = new Uint8Array(NCELL);     // distance from attachment, 0..255
 var brT = 0;                           // S.simT at the last bridge rebuild
-var BR_TAU = 0.12;                     // sim-seconds of rise/fall
+var BR_TAU_UP = 0.22;                  // sim-seconds of growth
+var BR_TAU_DN = 0.15;                  // sim-seconds of retreat
+var BR_FRONT = 0.75;                   // envelope fraction spent sweeping
+var BR_FR = BR_FRONT / 255;            // bFrac -> envelope threshold
+var BR_WIN = 1 / (1 - BR_FRONT);       // per-cell fade width at the front
 var BR_DT_CAP = 0.08;                  // per-rebuild clock clamp (see above)
 var brUp = 1, brDn = 0;                // folded per rebuild in buildBridges
 /* The envelope's bookkeeping lives in ONE dedicated sweep in buildBridges,
@@ -3566,9 +3579,26 @@ function ufFind(a) {
    (arrived) and on already-marked corridor (this stretch is someone else's
    already), which is what keeps a mass with many islands from re-walking the
    same trunk once per island. Every cell it steps through was reached by the
-   flood, so bPar under it is always a cell the flood wrote. */
+   flood, so bPar under it is always a cell the flood wrote.
+
+   Two passes over the same chain: the first measures it, the second marks
+   each cell with its distance from home as a fraction of the whole — the
+   growth gate's coordinate. Home is wherever the count stopped, and when
+   that is an already-marked trunk rather than the body, the spur's range
+   starts at the TRUNK CELL'S OWN fraction rather than at zero: the front
+   has to reach the junction before it turns up the spur, or a spur off a
+   not-yet-grown stretch would draw first as a floating segment. The re-walk
+   costs one pointer chase over the ~hundreds of corridor cells a rebuild
+   marks. */
 function bridgeWalk(c) {
-  while (c >= 0 && !bStrong[c] && !bridge[c]) { bridge[c] = 1; bAux[bN++] = c; c = bPar[c]; }
+  var L = 0, p = c;
+  while (p >= 0 && !bStrong[p] && !bridge[p]) { L++; p = bPar[p]; }
+  if (!L) return;
+  var b0 = (p >= 0 && bridge[p]) ? bFrac[p] : 0;
+  var j = L, s = (255 - b0) / L;
+  while (c >= 0 && !bStrong[c] && !bridge[c]) {
+    bridge[c] = 1; bFrac[c] = (b0 + j-- * s) | 0; bAux[bN++] = c; c = bPar[c];
+  }
 }
 
 function buildBridges() {
@@ -3577,8 +3607,8 @@ function buildBridges() {
   brT = S.simT;
   if (dtB > 0 && S.running) {
     if (dtB > BR_DT_CAP) dtB = BR_DT_CAP;
-    brUp = 1 - Math.exp(-dtB / BR_TAU);
-    brDn = Math.exp(-dtB / BR_TAU);
+    brUp = 1 - Math.exp(-dtB / BR_TAU_UP);
+    brDn = Math.exp(-dtB / BR_TAU_DN);
   } else {
     /* a halted or restored dish shows what it is: corridors at full
        presence, everything else at none */
@@ -3715,7 +3745,9 @@ function buildBridges() {
       for (i = 0; i < 8; i++) {
         q = c + BOFF[i];
         if (!bridge[q] && !bStrong[q] &&
-            trail[q] >= (bridgeP[q] ? BRIDGE_MIN_LO : BRIDGE_MIN)) bridge[q] = 1;
+            trail[q] >= (bridgeP[q] ? BRIDGE_MIN_LO : BRIDGE_MIN)) {
+          bridge[q] = 1; bFrac[q] = bFrac[c];
+        }
       }
     } else {
       x = c % GW; y = (c / GW) | 0;
@@ -3725,7 +3757,9 @@ function buildBridges() {
         if (nx < 0 || ny < 0 || nx >= GW || ny >= GH) continue;
         q = ny * GW + nx;
         if (!bridge[q] && !bStrong[q] &&
-            trail[q] >= (bridgeP[q] ? BRIDGE_MIN_LO : BRIDGE_MIN)) bridge[q] = 1;
+            trail[q] >= (bridgeP[q] ? BRIDGE_MIN_LO : BRIDGE_MIN)) {
+          bridge[q] = 1; bFrac[q] = bFrac[c];
+        }
       }
     }
   }
@@ -3837,23 +3871,37 @@ function paintField() {
              42,649 corridor cells, no cell drew under that floor. */
           var vcov;
           if (br === 1) {
-            var gt = (trail[i] * GAM_SCALE) | 0;
-            if (gt < 0) gt = 0; else if (gt >= GAMN) gt = GAMN - 1;
-            /* scaled by the presence, so a corridor arrives over ~0.25s
-               instead of stamping on at its full 79% */
-            vcov = (GAM_LO[gt] * brenv[i]) | 0;
+            /* the growth gate: the envelope against this cell's distance
+               from its attachment, so the corridor grows in from both ends
+               over ~0.4s instead of stamping on — or fading on — whole. At
+               a saturated envelope this is 1 for every distance, so it
+               costs a stable corridor nothing. */
+            var gp = (brenv[i] - bFrac[i] * BR_FR) * BR_WIN;
+            if (gp <= 0) {
+              vcov = 0;
+            } else {
+              if (gp > 1) gp = 1;
+              var gt = (trail[i] * GAM_SCALE) | 0;
+              if (gt < 0) gt = 0; else if (gt >= GAMN) gt = GAMN - 1;
+              vcov = (GAM_LO[gt] * gp) | 0;
+            }
           } else {
             vcov = GAM[gi];
-            /* A corridor the flood just dropped fades from wherever it was —
-               the trail that carried it is usually still there, which is
-               exactly why its cut used to read as a flash. Only where the
-               body draws (nearly) nothing of its own: a bridge cell that
-               thickened into real tissue keeps its GAM coverage untouched. */
+            /* A corridor the flood just dropped retreats tip-first from
+               wherever it was — the trail that carried it is usually still
+               there, which is exactly why its cut used to read as a flash.
+               Only where the body draws (nearly) nothing of its own: a
+               bridge cell that thickened into real tissue keeps its GAM
+               coverage untouched. */
             if (br === 2 && vcov < 24) {
-              var gt2 = (trail[i] * GAM_SCALE) | 0;
-              if (gt2 < 0) gt2 = 0; else if (gt2 >= GAMN) gt2 = GAMN - 1;
-              var fv = (GAM_LO[gt2] * brenv[i]) | 0;
-              if (fv > vcov) vcov = fv;
+              var gp2 = (brenv[i] - bFrac[i] * BR_FR) * BR_WIN;
+              if (gp2 > 0) {
+                if (gp2 > 1) gp2 = 1;
+                var gt2 = (trail[i] * GAM_SCALE) | 0;
+                if (gt2 < 0) gt2 = 0; else if (gt2 >= GAMN) gt2 = GAMN - 1;
+                var fv = (GAM_LO[gt2] * gp2) | 0;
+                if (fv > vcov) vcov = fv;
+              }
             }
           }
           /* the inner shadow (see ISH_D above): how much of the body is
