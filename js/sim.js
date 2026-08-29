@@ -4574,34 +4574,74 @@ function strokeVeins(tc, sx, sy, mono) {
      the veil composite's punch — where this rebuild drew ANYTHING, at any
      tier, the accumulator's old ink is removed outright before the fresh ink
      lands. Widths padded by half a cell so the punch swallows the old
-     stroke's antialiased skirt too. */
-  var k;
-  if (lobePath) {
-    ctx.fillStyle = mono ? '#fff' : LOBE_STYLE;
-    for (k = 0; k < 3; k++) {
-      if (!lobePath[k]) continue;
-      ctx.globalAlpha = mono ? 1 : BUCK_A[k];
-      ctx.fill(lobePath[k]);
+     stroke's antialiased skirt too. Tier interactions do not matter in a
+     mask, so the mono pass stays a single flat sweep. */
+  var k, b;
+  if (mono) {
+    if (lobePath) {
+      ctx.fillStyle = '#fff';
+      for (k = 0; k < 3; k++) if (lobePath[k]) ctx.fill(lobePath[k]);
     }
-    ctx.globalAlpha = 1;
+    for (b = VEIN_BANDS.length - 1; b >= 0; b--) {
+      if (!veinPath[b]) continue;
+      ctx.lineWidth = VEIN_BANDS[b].w + 0.5;
+      ctx.strokeStyle = '#fff';
+      for (k = 0; k < 3; k++) if (veinPath[b][k]) ctx.stroke(veinPath[b][k]);
+    }
+    if (whiskPath) {
+      ctx.lineWidth = TIP_W + 0.5;
+      ctx.strokeStyle = '#fff';
+      ctx.stroke(whiskPath);
+    }
+    ctx.restore();
+    return;
   }
-  /* widest first, so the hairlines land on top of the trunks they join;
-     within a band, faint tiers first, so where a run boundary overlaps a
-     point the settled stroke wins */
-  for (var b = VEIN_BANDS.length - 1; b >= 0; b--) {
-    if (!veinPath[b]) continue;
-    ctx.lineWidth = VEIN_BANDS[b].w + (mono ? 0.5 : 0);
-    ctx.strokeStyle = mono ? '#fff' : VEIN_BANDS[b].style;
-    for (k = 0; k < 3; k++) {
-      if (!veinPath[b][k]) continue;
-      ctx.globalAlpha = mono ? 1 : BUCK_A[k];
-      ctx.stroke(veinPath[b][k]);
-    }
+
+  /* The colored pass. A chain that crosses a tier boundary carries the
+     boundary point in both runs, and two source-over strokes on the shared
+     cap STACK — 0.68 over 0.35 lands at 0.79, a bright knot at every fade
+     boundary, and overlapping lobe discs of different tiers do the same.
+
+     Only the faint-over-faint pair can actually knot: anything landing on
+     the settled tier saturates near the settled alpha (0.35 over 0.90 is
+     0.935), a colour lean the eye cannot pick out. So tier 1 alone carries a
+     punch — one destination-out stroke of its own footprint before its ink,
+     which clears the tier-0 cap it would have stacked on. The punch cuts
+     whatever else lies under a transitional run too, another band's ink
+     included; that ink is redrawn where the run is, the runs live ~0.2s, and
+     the alternative — routing every mid-fade band through a scratch canvas —
+     measured a fifth of the frame budget on a throttled phone, which is the
+     wrong price for a one-cap artifact. Unpadded on purpose: padding would
+     erase a ring wider than the redraw and notch the line at each boundary. */
+  var punchThen = function (path, isFill, style, a) {
+    ctx.globalCompositeOperation = 'destination-out';
     ctx.globalAlpha = 1;
+    if (isFill) { ctx.fillStyle = '#fff'; ctx.fill(path); }
+    else { ctx.strokeStyle = '#fff'; ctx.stroke(path); }
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.globalAlpha = a;
+    if (isFill) { ctx.fillStyle = style; ctx.fill(path); }
+    else { ctx.strokeStyle = style; ctx.stroke(path); }
+    ctx.globalAlpha = 1;
+  };
+  if (lobePath) {
+    ctx.fillStyle = LOBE_STYLE;
+    if (lobePath[0]) { ctx.globalAlpha = BUCK_A[0]; ctx.fill(lobePath[0]); ctx.globalAlpha = 1; }
+    if (lobePath[1]) punchThen(lobePath[1], true, LOBE_STYLE, BUCK_A[1]);
+    if (lobePath[2]) ctx.fill(lobePath[2]);
+  }
+  /* widest first, so the hairlines land on top of the trunks they join */
+  for (b = VEIN_BANDS.length - 1; b >= 0; b--) {
+    if (!veinPath[b]) continue;
+    ctx.lineWidth = VEIN_BANDS[b].w;
+    ctx.strokeStyle = VEIN_BANDS[b].style;
+    if (veinPath[b][0]) { ctx.globalAlpha = BUCK_A[0]; ctx.stroke(veinPath[b][0]); ctx.globalAlpha = 1; }
+    if (veinPath[b][1]) punchThen(veinPath[b][1], false, VEIN_BANDS[b].style, BUCK_A[1]);
+    if (veinPath[b][2]) ctx.stroke(veinPath[b][2]);
   }
   if (whiskPath) {
-    ctx.lineWidth = TIP_W + (mono ? 0.5 : 0);
-    ctx.strokeStyle = mono ? '#fff' : TIP_STYLE;
+    ctx.lineWidth = TIP_W;
+    ctx.strokeStyle = TIP_STYLE;
     ctx.stroke(whiskPath);
   }
   ctx.restore();
