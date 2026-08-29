@@ -3189,6 +3189,8 @@ function initCanvas() {
   vactx = veilAcc.getContext('2d');
   veilTmp = document.createElement('canvas');
   vtctx = veilTmp.getContext('2d');
+  veilMask = document.createElement('canvas');
+  vmctx = veilMask.getContext('2d');
   off = document.createElement('canvas');
   off.width = GW; off.height = GH;
   octx = off.getContext('2d', { alpha: false });
@@ -3216,6 +3218,7 @@ function resizeCanvas() {
     if (veil) { veil.width = w; veil.height = h; }
     if (veilAcc) { veilAcc.width = w; veilAcc.height = h; }
     if (veilTmp) { veilTmp.width = w; veilTmp.height = h; }
+    if (veilMask) { veilMask.width = w; veilMask.height = h; }
     if (veil) { veinFresh = true; veilDn = 0; }
   }
 }
@@ -3312,6 +3315,8 @@ function resetVeinTemporal() {
      envelope's own rise — which reads as the culture arriving, not a glitch */
   venv.fill(0);
   lenv.fill(0);
+  vseen.fill(-1e9);
+  lseen.fill(-1e9);
   envT = S.simT;
   if (vactx && veilAcc.width) vactx.clearRect(0, 0, veilAcc.width, veilAcc.height);
 }
@@ -3345,6 +3350,8 @@ function snapshotVeinTemporal(fs) {
      would put the dish back with every stroke snapped to full presence */
   fs.venv = new Float32Array(venv);
   fs.lenv = new Float32Array(lenv);
+  fs.vseen = new Float32Array(vseen);
+  fs.lseen = new Float32Array(lseen);
 }
 
 function restoreVeinTemporal(fs) {
@@ -3355,6 +3362,7 @@ function restoreVeinTemporal(fs) {
   rband.set(fs.rband);
   lmark.set(fs.lmark);
   if (fs.venv) { venv.set(fs.venv); lenv.set(fs.lenv); }
+  if (fs.vseen) { vseen.set(fs.vseen); lseen.set(fs.lseen); }
   veinPrimed = true;
   veinT = S.simT;
   envT = S.simT;
@@ -4027,6 +4035,16 @@ var vseg = [], vsegN = [], veinPath = [];
    such correspondence to offer. */
 var venv = new Float32Array(NCELL);   // vein-crest presence
 var lenv = new Float32Array(NCELL);   // lobe-mass presence
+/* When each cell was last drawn, in sim time. Presence used to be decayed
+   across the whole grid every rebuild and then partially re-raised, and that
+   recurrence never converges: at the usual 0.033s rebuild interval it fixes at
+   0.56, below the full-strength tier, so established veins sat in the middle
+   tier forever. With a timestamp the rise is undamped while a cell is held —
+   full strength in ~5 rebuilds as intended — and the decay charged at the next
+   arrival is exactly the time the cell was actually absent: gap minus the one
+   interval a continuously-held cell always has. */
+var vseen = new Float32Array(NCELL);
+var lseen = new Float32Array(NCELL);
 var envT = 0;                         // S.simT at the last envelope step
 var ENV_UP_TAU = 0.10;                // sim-seconds to rise
 var ENV_DN_TAU = 0.09;                // sim-seconds to fall
@@ -4058,6 +4076,7 @@ function envBucket(p) { return p < 0.35 ? 0 : (p < 0.75 ? 1 : 2); }
    layer — a dish being put back must not inherit the fading ghosts of the
    dish it replaces. */
 var veil = null, vlctx = null;        // this rebuild's strokes
+var veilMask = null, vmctx = null;    // the same strokes, opaque — the punch
 var veilAcc = null, vactx = null;     // the running max
 var veilTmp = null, vtctx = null;     // scratch for the in-place decay
 var veilDn = 0;                       // decay folded in at the next composite
@@ -4252,13 +4271,8 @@ function buildVeins() {
   var dtE = S.simT - envT;
   envT = S.simT;
   var envUp = dtE > 0 ? 1 - Math.exp(-dtE / ENV_UP_TAU) : 0;
-  if (dtE > 0) {
-    var envDn = Math.exp(-dtE / ENV_DN_TAU);
-    for (i = 0; i < NCELL; i++) { venv[i] *= envDn; lenv[i] *= envDn; }
-    veilDn = envDn;
-  } else {
-    veilDn = 0;
-  }
+  var envNow = S.simT;
+  veilDn = dtE > 0 ? Math.exp(-dtE / ENV_DN_TAU) : 0;
   veinFresh = true;
   /* last rebuild's maps become this one's memory by swapping the pairs, which
      costs a pointer where copying 106,000 bytes costs 106,000 bytes */
@@ -4359,6 +4373,9 @@ function buildVeins() {
                  (lv > LOBE_PAD * hold && feedAt[i] >= 0);
       lmark[i] = mass ? 1 : 0;
       if (!mass) continue;
+      var abL = envNow - lseen[i] - dtE;
+      if (abL > 0.001) lenv[i] *= Math.exp(-abL / ENV_DN_TAU);
+      lseen[i] = envNow;
       lenv[i] += (1 - lenv[i]) * envUp;
       lbuck[lsegN] = envBucket(lenv[i]);
       lseg[lsegN * 2] = x + 0.5; lseg[lsegN * 2 + 1] = y + 0.5; lsegN++;
@@ -4459,6 +4476,11 @@ function buildVeins() {
       for (var bw = 0; bw < n; bw++) {
         var ci2 = chi[bw];
         rband[ci2] = b;
+        /* absent time is the gap minus the one interval a held cell always
+           has; a held cell pays zero decay and rises undamped */
+        var ab2 = envNow - vseen[ci2] - dtE;
+        if (ab2 > 0.001) venv[ci2] *= Math.exp(-ab2 / ENV_DN_TAU);
+        vseen[ci2] = envNow;
         venv[ci2] += (1 - venv[ci2]) * envUp;
         var kk2 = envBucket(venv[ci2]);
         if (bw === 0) { rk = kk2; rstart = w; arr[w++] = kk2; arr[w++] = 0; }
@@ -4538,7 +4560,7 @@ function buildVeins() {
   whiskPath = any ? wp : null;
 }
 
-function strokeVeins(tc, sx, sy) {
+function strokeVeins(tc, sx, sy, mono) {
   var ctx = tc;   /* shadow the module-level ctx: everything below targets tc */
   ctx.save();
   ctx.setTransform(sx, 0, 0, sy, 0, 0);
@@ -4548,12 +4570,17 @@ function strokeVeins(tc, sx, sy) {
      top of it rather than under it. One fill, no offset copy: what makes a
      lobe read as raised is the field's inner shadow, which has already
      shaded it as part of the shape. */
+  /* mono strokes everything opaque white: the same geometry as a MASK, for
+     the veil composite's punch — where this rebuild drew ANYTHING, at any
+     tier, the accumulator's old ink is removed outright before the fresh ink
+     lands. Widths padded by half a cell so the punch swallows the old
+     stroke's antialiased skirt too. */
   var k;
   if (lobePath) {
-    ctx.fillStyle = LOBE_STYLE;
+    ctx.fillStyle = mono ? '#fff' : LOBE_STYLE;
     for (k = 0; k < 3; k++) {
       if (!lobePath[k]) continue;
-      ctx.globalAlpha = BUCK_A[k];
+      ctx.globalAlpha = mono ? 1 : BUCK_A[k];
       ctx.fill(lobePath[k]);
     }
     ctx.globalAlpha = 1;
@@ -4563,18 +4590,18 @@ function strokeVeins(tc, sx, sy) {
      point the settled stroke wins */
   for (var b = VEIN_BANDS.length - 1; b >= 0; b--) {
     if (!veinPath[b]) continue;
-    ctx.lineWidth = VEIN_BANDS[b].w;
-    ctx.strokeStyle = VEIN_BANDS[b].style;
+    ctx.lineWidth = VEIN_BANDS[b].w + (mono ? 0.5 : 0);
+    ctx.strokeStyle = mono ? '#fff' : VEIN_BANDS[b].style;
     for (k = 0; k < 3; k++) {
       if (!veinPath[b][k]) continue;
-      ctx.globalAlpha = BUCK_A[k];
+      ctx.globalAlpha = mono ? 1 : BUCK_A[k];
       ctx.stroke(veinPath[b][k]);
     }
     ctx.globalAlpha = 1;
   }
   if (whiskPath) {
-    ctx.lineWidth = TIP_W;
-    ctx.strokeStyle = TIP_STYLE;
+    ctx.lineWidth = TIP_W + (mono ? 0.5 : 0);
+    ctx.strokeStyle = mono ? '#fff' : TIP_STYLE;
     ctx.stroke(whiskPath);
   }
   ctx.restore();
@@ -4610,22 +4637,36 @@ function render() {
      the same accumulator, exactly as they re-stroked the same paths before. */
   var sx = cv.width / GW, sy = cv.height / GH;
   if (veinFresh) {
+    /* Fresh wins wherever fresh drew; the decayed old survives only where it
+       did not. Stated that way rather than as a per-pixel max because canvas
+       has no max that includes alpha — 'lighten' blends colour but composes
+       alpha source-over, so a semi-transparent stroke repeated across
+       rebuilds ACCUMULATES opacity (a steady 0.35 stroke converges to 0.63),
+       which quietly defeats the tiers. The punch makes the recurrence exact:
+       decay the accumulator, remove it outright under this rebuild's opaque
+       mask, then lay the fresh ink down. A re-arriving cell shows its own
+       rising tier rather than the brighter ghost of its old self, which is
+       the more truthful picture anyway — presence governs, not history. */
     vlctx.setTransform(1, 0, 0, 1, 0, 0);
     vlctx.clearRect(0, 0, veil.width, veil.height);
-    strokeVeins(vlctx, sx, sy);
+    strokeVeins(vlctx, sx, sy, false);
+    vmctx.setTransform(1, 0, 0, 1, 0, 0);
+    vmctx.clearRect(0, 0, veilMask.width, veilMask.height);
+    strokeVeins(vmctx, sx, sy, true);
     vtctx.setTransform(1, 0, 0, 1, 0, 0);
     vtctx.clearRect(0, 0, veilTmp.width, veilTmp.height);
     if (veilDn > 0.004) {
       vtctx.globalAlpha = veilDn;
       vtctx.drawImage(veilAcc, 0, 0);
       vtctx.globalAlpha = 1;
+      vtctx.globalCompositeOperation = 'destination-out';
+      vtctx.drawImage(veilMask, 0, 0);
+      vtctx.globalCompositeOperation = 'source-over';
     }
     vactx.setTransform(1, 0, 0, 1, 0, 0);
     vactx.clearRect(0, 0, veilAcc.width, veilAcc.height);
     vactx.drawImage(veilTmp, 0, 0);
-    vactx.globalCompositeOperation = 'lighten';
     vactx.drawImage(veil, 0, 0);
-    vactx.globalCompositeOperation = 'source-over';
     veinFresh = false;
   }
   ctx.drawImage(veilAcc, 0, 0);
@@ -5971,6 +6012,24 @@ function init() {
     agents: function () { return nAgents; },
     /* how many of them are at the front — the population forkTip draws from */
     tips: function () { var c = 0; for (var k = 0; k < nAgents; k++) if (atip[k]) c++; return c; },
+    /* how the emitted runs distribute over the presence tiers — the number
+       that says whether steady tissue is reaching full strength (it must sit
+       overwhelmingly in the last tier at x1) and whether blinks are being
+       caught quiet (the churn arrives in the first) */
+    tierHist: function () {
+      var veins = [0, 0, 0], lobes = [0, 0, 0], b2, r2, e2, c2;
+      for (b2 = 0; b2 < vsegN.length; b2++) {
+        var a2 = vseg[b2]; e2 = vsegN[b2]; r2 = 0;
+        while (r2 < e2) {
+          var t2 = a2[r2++] | 0;
+          c2 = a2[r2++] | 0;
+          veins[t2] += c2;
+          r2 += c2 * 2;
+        }
+      }
+      for (r2 = 0; r2 < lsegN; r2++) lobes[lbuck[r2]]++;
+      return { veins: veins, lobes: lobes };
+    },
     /* runs and points in the vein trace of the last painted frame — how far
        the ridge walk gets before it loses the vein. These are presence-tier
        RUNS since the envelope split chains at tier boundaries, so the count is
