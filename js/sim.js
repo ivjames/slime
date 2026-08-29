@@ -4272,7 +4272,14 @@ function buildVeins() {
   envT = S.simT;
   var envUp = dtE > 0 ? 1 - Math.exp(-dtE / ENV_UP_TAU) : 0;
   var envNow = S.simT;
-  veilDn = dtE > 0 ? Math.exp(-dtE / ENV_DN_TAU) : 0;
+  /* A HALTED dish drops its ghosts. The verdict's final rebuild, and any
+     rebuild with no time behind it, folds with zero carry-over — so the
+     finished picture is exactly the drawn geometry, which is what the
+     snapshot captures and what a replay exit can therefore reproduce
+     pixel-for-pixel. Mid-fade pixels that lived only in the accumulator
+     vanish at the halt; they are at most 0.2 seconds and a third of an alpha
+     from gone, and a verdict that cannot be put back is the worse artifact. */
+  veilDn = (dtE > 0 && S.running) ? Math.exp(-dtE / ENV_DN_TAU) : 0;
   veinFresh = true;
   /* last rebuild's maps become this one's memory by swapping the pairs, which
      costs a pointer where copying 106,000 bytes costs 106,000 bytes */
