@@ -5478,12 +5478,26 @@ function noteText(e) {
    These four are. Each is a ratio of the run against itself, so none of them
    needs a per-dish par to be tuned and then to rot when a dish is rebalanced.
 
-     ECONOMY   the network the run was left holding, against the shortest one
-               that could have joined the same points. This is Tero 2010's own
-               comparison — the paper scores the plasmodium's network against
-               the minimum spanning tree over the same cities — and it is what
-               separates a run that reached the food from a run that flooded
-               the plate and reached the food somewhere in the middle of it.
+     ECONOMY   MEASURED AND FOUND WANTING — see the note below. It was meant
+               to be Tero 2010's comparison, the plasmodium's network against
+               the minimum spanning tree over the same cities. What it divides
+               is netMass(), the summed trail field, and trail is deposited per
+               agent per step and decays geometrically, so the total tracks
+               BIOMASS rather than network geometry: measured, mass per nucleus
+               held between 122 and 169 across every dish, seed and play style
+               sampled, a 1.39x spread, while the span it is divided by ranges
+               3.9x across the twenty dishes.
+
+               So the axis reads "how little biomass did you finish with",
+               inverted. On EXP-01 seed #555555, all three won: a run that
+               never touched the pointer scored 0.752, a run that swept the cue
+               over the whole plate scored 0.829, and a run that parked the
+               brush on the inoculation point and starved the culture scored a
+               perfect 1.000. Counting network AREA instead of mass orders them
+               the same way, so it is not a matter of the wrong summary of the
+               field — under-growing wins the axis however the network is
+               measured, because the win gate fires on engulfment and does not
+               care how much organism is left behind it.
      AUTONOMY  how little of the run the brush was held for. The dish is
                supposed to be solved by chemotaxis, with the player saying only
                which way is interesting; a run steered end to end has answered
@@ -5496,25 +5510,29 @@ function noteText(e) {
                first three, with the weights renormalised, rather than on a
                time limit invented here to have something to divide by.
 
-   NET_IDEAL is the one number here that is measured rather than derived: trail
-   mass per cell of ideal span for a network that earns full marks on economy.
-   Eight dishes were played to a win — EXP-01, 02, 03, 04, 06, 07, 11 and 15 —
-   and their finished networks came in between 1005 and 2661 mass per cell of
-   span, the low end being the dishes won quickly and directly and the high end
-   the ones won by spreading. 1000 puts a run at the lean end of that range on
-   full marks and a sprawling one near two fifths, which is the spread the axis
-   is for. It is not a physical constant and a rebalance of the trail field
-   would move it.
+   NET_IDEAL is trail mass per cell of ideal span for a network that earns full
+   marks on economy. It was set to 1000 from eight bot-played wins that came in
+   between 1005 and 2661; a later and wider sample of thirteen wins across more
+   play styles measured 713 to 3749, so 1000 is not the floor it was chosen to
+   be — runs below it clamp to 1.0 and stop being told apart.
+
+   Read the note above this one before trusting this axis at all: the quantity
+   it divides is not the one it is named for.
 
    Note what the ideal span is NOT: a true lower bound. It is a straight-line
    spanning tree, and it ignores walls, so on a cut labyrinth the reachable
    shortest network is genuinely longer than the ideal it is scored against and
-   the whole dish scores lower. That is left alone deliberately. A mark is
-   compared against your own best on that dish, and on the daily plate against
-   other people running that same dish — both comparisons hold the geometry
-   fixed, so a constant per-dish offset cancels out of every use the number
-   has. Routing the span through the walls would cost a pathfinder in a file
-   whose whole point is that nothing in it pathfinds. */
+   the whole dish scores lower. A mark is compared against your own best on
+   that dish, and on the daily plate against other people running that same
+   dish — both comparisons hold the geometry fixed, so a constant per-dish
+   offset cancels out of those two uses.
+
+   This used to say that routing the span through the walls "would cost a
+   pathfinder in a file whose whole point is that nothing in it pathfinds",
+   which was a good line and untrue: geodesicFrom already floods geodesic
+   distance through open agar, and rebuildGeo maintains it per node. The real
+   reason is only that the straight-line version was cheaper to write, and the
+   geodesic one is available whenever this axis is worth the accuracy. */
 var NET_IDEAL = 1000;
 var W_ECON = 0.40, W_AUTO = 0.30, W_VIG = 0.15, W_DISP = 0.15;
 
@@ -5639,6 +5657,17 @@ function writeSave() {
       window.localStorage.setItem(SAVE_KEY, JSON.stringify(save));
       return true;
     } catch (err) {
+      /* Shed only for the failure shedding can actually fix. A browser that
+         refuses EVERY write — storage disabled by policy throws SecurityError,
+         and private modes have historically thrown from setItem outright —
+         would otherwise walk this loop to the end and delete every recording
+         the player had, in memory, to make room that was never the problem;
+         and if a later write then succeeded, the deletions became permanent.
+         The name check is deliberately loose because browsers disagree on it:
+         anything that does not look like a space complaint is not one. */
+      var nm = (err && err.name) ? String(err.name) : '';
+      if (nm && nm.indexOf('Quota') < 0 && nm.indexOf('QUOTA') < 0 &&
+          nm !== 'NS_ERROR_DOM_QUOTA_REACHED') return false;
       codes = [];
       for (i in save.ghost) if (save.ghost[i]) codes.push(i);
       if (!codes.length) return false;   /* nothing left to shed — give up */
@@ -5761,11 +5790,20 @@ function renderDaily() {
   $('daily-st').textContent = dailyDone() ? 'logged' : 'open';
 }
 
-function goTitle() {
+/* Put down whatever is on the bench. Every route away from a live dish has to
+   do this: without it the abandoned run keeps stepping behind the screen you
+   moved to, reaches finish() unwatched, and writes progress, a mark and a
+   ghost for a plate nobody is looking at — and if it was a replay, its
+   showResult overwrites the verdict the replay was launched from. */
+function leaveRun() {
   stopRun();
   REPLAY.on = false; REPLAY.trace = null;
   setReplayUI(false);
   closeResult();
+}
+
+function goTitle() {
+  leaveRun();
   renderTitle();
   show('scr-title');
 }
@@ -5924,34 +5962,68 @@ function feedTrace(s) {
    best run's trace per dish turns the replay control into a ghost: the line
    you are trying to beat, played back on the plate you are about to run.
 
-   The wire format is one byte string, base64'd, carrying a fixed 10-byte
-   header and then 7 bytes an entry. The header is the version, the dish index,
-   the 24-bit seed, and the cue tally — that last one because cues are counted
-   from pointer events rather than from steps, so it is the one figure a replay
-   of the tape cannot rederive. Each entry is the step as a delta from the
-   previous one (Uint16, and a delta cannot overflow it — the longest dish is
-   900 sim-seconds, which is 54,000 steps), the mode, and the two Int16 quantum
-   counts. Fixed-width beats a varint here: the decoder is
-   four typed-array reads in a loop instead of a bit reader, and the saving a
-   varint would win on the step column is one byte an entry against the risk of
-   a decoder that is wrong in a way only a long run reveals.
+   The wire format is one byte string, base64'd, carrying a fixed 12-byte
+   header and then 9 bytes an entry. The header is the version, a signature
+   over the simulation the tape was recorded under (below), the dish index, a
+   reserved byte, the 24-bit seed, and the cue tally — that last one because
+   cues are counted from pointer events rather than from steps, so it is the
+   one figure a replay of the tape cannot rederive. Each entry is the absolute
+   step (Uint32), the mode, and the two Int16 quantum counts.
+
+   The step was briefly a Uint16 delta from the previous entry, on the reasoning
+   that a delta could not overflow because the longest dish is 900 sim-seconds.
+   Four dishes set no time limit at all, so a run has no step ceiling and the
+   reasoning was simply false — and the likeliest dish to break it was EXP-01,
+   which has no reserve either, so "touch once, let it run, touch again" is
+   ordinary play there and a 1092-second gap is 45 seconds of wall clock at
+   ×24. Absolute Uint32 costs two bytes an entry and needs no argument about
+   how long a dish can be, which is the better trade in a format that has
+   already been wrong once about exactly that.
 
    Both ends are total: a ghost that fails to decode for any reason — a
    truncated string, a version this build does not know, a length that is not a
    whole number of entries — returns null and the dish simply has no ghost. It
    is a recording of a run, and there is nothing here worth throwing an error
    over. */
-var GHOST_V = 1;
-var GHOST_HEAD = 10;
-var GHOST_ENT = 7;
+var GHOST_V = 2;
+var GHOST_HEAD = 12;
+var GHOST_ENT = 9;
+
+/* A ghost is a seed and a tape of brush-steps, so replaying it faithfully
+   depends on every constant the simulation reads while consuming them — the
+   three cue rates this file now has among them. Change one and a stored tape
+   still decodes perfectly and replays into a DIFFERENT run, which is the worst
+   shape a bug can take here: nothing looks broken. So the header carries a
+   byte derived from those constants, and a tape recorded under any other value
+   of them is refused the way a truncated one is.
+
+   It covers what a replay consumes, not what merely reads the result: the cue
+   rates and the pointer quantum change the dish a tape produces; NET_IDEAL and
+   the mark weights only change the number printed under it. */
+function ghostSig() {
+  var h = mix32(Math.round(CUE_CAP * 1000), Math.round(CUE_REGEN * 1000),
+                Math.round(CUE_RET * 1000));
+  return (mix32(h, CUE_Q, Math.round(BRUSH_PEAK * 1000) ^ CUE_R) & 0xFF);
+}
 
 /* The size of the ghost a single run may leave behind. A ceiling on one
    recording, not on the store: writeSave sheds ghosts when the browser
    actually refuses the write, and this only stops one pathological run from
-   being the reason it has to. 200k of base64 is around 21,000 recorded steps,
-   which is nearly six sim-minutes of held brush — more than the reserve
-   permits in any dish the schedule contains. */
-var GHOST_MAX = 200000;
+   being the reason it has to.
+
+   The figure used to be 200k, justified as "more than the reserve permits in
+   any dish". That was wrong twice over. recordBrush stores what the player
+   ASKED for, not what the reserve granted, so the reserve bounds nothing about
+   how long a tape gets — a hand held down for a whole run records every step
+   of it, denied or not. And even counting only granted steps, retract drains
+   at half rate, so a 900-second dish grants around 496 seconds of it: near
+   30,000 entries where 200k of base64 held 21,000.
+
+   400k covers a run that holds the brush down for every step of the longest
+   dish that sets a clock, which is the worst case a schedule dish can produce.
+   The four dishes with no clock can still exceed it, and that is what the
+   no-longer-destructive path below is for. */
+var GHOST_MAX = 400000;
 
 function encodeGhost(t) {
   /* A zero-entry trace is encoded, not refused. A dish CAN be won without the
@@ -5966,19 +6038,17 @@ function encodeGhost(t) {
   var bytes = new Uint8Array(GHOST_HEAD + t.n * GHOST_ENT);
   var dv = new DataView(bytes.buffer);
   dv.setUint8(0, GHOST_V);
-  dv.setUint8(1, t.idx & 0xFF);
-  dv.setUint32(2, t.seed >>> 0);
-  dv.setUint32(6, t.cues >>> 0);
-  var prev = 0;
+  dv.setUint8(1, ghostSig());
+  dv.setUint8(2, t.idx & 0xFF);
+  dv.setUint8(3, 0);
+  dv.setUint32(4, t.seed >>> 0);
+  dv.setUint32(8, t.cues >>> 0);
   for (var i = 0; i < t.n; i++) {
     var o = GHOST_HEAD + i * GHOST_ENT;
-    var d = t.step[i] - prev;
-    if (d < 0 || d > 0xFFFF) return null;   /* not representable — no ghost */
-    prev = t.step[i];
-    dv.setUint16(o, d);
-    dv.setUint8(o + 2, t.mode[i]);
-    dv.setInt16(o + 3, t.gx[i]);
-    dv.setInt16(o + 5, t.gy[i]);
+    dv.setUint32(o, t.step[i] >>> 0);
+    dv.setUint8(o + 4, t.mode[i]);
+    dv.setInt16(o + 5, t.gx[i]);
+    dv.setInt16(o + 7, t.gy[i]);
   }
   return b64enc(bytes);
 }
@@ -5990,20 +6060,21 @@ function decodeGhost(str) {
   if (body % GHOST_ENT !== 0) return null;
   var dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.length);
   if (dv.getUint8(0) !== GHOST_V) return null;
-  var idx = dv.getUint8(1);
+  /* recorded under a differently-tuned simulation — it would replay into
+     another run, so it is not this build's ghost to play */
+  if (dv.getUint8(1) !== ghostSig()) return null;
+  var idx = dv.getUint8(2);
   if (idx >= EXPERIMENTS.length) return null;
   var n = body / GHOST_ENT;
-  var t = newTrace(idx, dv.getUint32(2) & SEED_MASK);
-  t.cues = dv.getUint32(6);
+  var t = newTrace(idx, dv.getUint32(4) & SEED_MASK);
+  t.cues = dv.getUint32(8);
   while (t.cap < n) growTrace(t);
-  var prev = 0;
   for (var i = 0; i < n; i++) {
     var o = GHOST_HEAD + i * GHOST_ENT;
-    prev += dv.getUint16(o);
-    t.step[i] = prev;
-    t.mode[i] = dv.getUint8(o + 2);
-    t.gx[i] = dv.getInt16(o + 3);
-    t.gy[i] = dv.getInt16(o + 5);
+    t.step[i] = dv.getUint32(o);
+    t.mode[i] = dv.getUint8(o + 4);
+    t.gx[i] = dv.getInt16(o + 5);
+    t.gy[i] = dv.getInt16(o + 7);
   }
   t.n = n;
   return t;
@@ -6292,8 +6363,17 @@ function parseHash(h) {
     if (EXPERIMENTS[i].code !== code) continue;
     /* a code with no seed opens the brief rather than a plate: it names a dish
        and nothing about which run of it, so it is a link to the experiment */
+    /* The seed has to LOOK like a seed. normSeed falls back to 0 for anything
+       it cannot parse, and 0 is a perfectly good plate — so a link mangled in
+       transit ("%20a3f2c1" is what a chat client makes of one stray space, and
+       a truncated paste is commoner still) would have started a different dish
+       from the one it named, silently, and two people comparing marks on "the
+       same plate" would not have been on it. Anything that is not six hex
+       digits or fewer opens the brief instead, which names the dish and asks
+       for nothing the link could have got wrong. */
     var raw = parts.length > 1 ? parts[1] : '';
-    return { idx: i, seed: raw ? normSeed(raw) : null, via: VIA_LINK };
+    var ok = /^[0-9a-fA-F]{1,6}$/.test(raw);
+    return { idx: i, seed: ok ? normSeed(raw) : null, via: VIA_LINK };
   }
   return null;
 }
@@ -6303,7 +6383,10 @@ function parseHash(h) {
 function routeHash() {
   var r = parseHash(window.location.hash);
   if (!r) return false;
-  if (r.seed == null) { openBrief(r.idx); return true; }
+  /* A fragment naming only a dish opens its brief — which means leaving the
+     bench, so the dish on it has to be put down first. startRun does its own
+     teardown, so only this path needs saying. */
+  if (r.seed == null) { leaveRun(); openBrief(r.idx); return true; }
   pendingVia = r.via;
   startRun(r.idx, r.seed);
   return true;
@@ -6440,9 +6523,28 @@ function finish(won, reason) {
      the plate — a replay started from the verdict overwrites the trail field */
   S.netEnd = netMass();
 
+  /* A replay that runs all the way to its end is still only a viewing, and
+     ends the way abandoning one does: the original plate and verdict come
+     back. That distinction did not exist while every replay was the SAME run
+     — it reached an identical result, so letting it overwrite the verdict
+     changed nothing. A ghost is a different seed, and letting THAT overwrite
+     put the ghost's stats, its final lattice and its share link under a
+     heading the player had earned on another plate, with no way back:
+     showResult had already replaced LAST_RESULT and FINAL_STATE, and
+     REPLAY.on was cleared before it, so exitReplay could no longer undo it.
+     Handled here rather than inside showResult so that the two ways out of a
+     replay — running it out, and leaving early — are one path.
+
+     Both halves of the condition are load-bearing. A ghost can be started on a
+     page that has no original run behind it at all, and exitReplay restores
+     nothing and paints nothing when the snapshot and the verdict it reads are
+     absent — which left a finished dish on the bench under no panel, with
+     Abandon the only way off it. With nothing to go back to, the replay's own
+     verdict is the honest thing to show; it still writes nothing, because the
+     save block below is gated on not being a replay. */
+  if (REPLAY.on && LAST_RESULT && FINAL_STATE) { exitReplay(); return; }
+
   var e = S.exp;
-  /* A replay reaches exactly the result it is replaying, which is already in
-     the log — so it neither re-records the trace nor re-writes the save. */
   if (!REPLAY.on) {
     if (TRACE) TRACE.cues = S.cues;
     if (won) {
@@ -6469,9 +6571,16 @@ function finish(won, reason) {
            number beside it rather than whichever one happened to be last. */
         if (sc.score > (save.score[e.code] || 0)) {
           save.score[e.code] = sc.score;
+          /* A new best whose tape will not fit leaves the OLD recording where
+             it is. Deleting it kept the mark and the ghost describing the same
+             run, which was the tidier invariant and the wrong trade: it threw
+             away a recording the player still had, to avoid a Best-run button
+             that plays their second-best run instead of their best. A button
+             that plays the wrong good run is a small lie; deleting the only
+             copy of a run is data loss, and it fell hardest on the longest
+             dishes, which are the ones worth watching again. */
           var g = TRACE ? encodeGhost(TRACE) : null;
           if (g && g.length <= GHOST_MAX) save.ghost[e.code] = g;
-          else delete save.ghost[e.code];
         }
       }
       writeSave();
@@ -7086,8 +7195,11 @@ function bindButtons() {
    enough to be a recap, slow enough to see the front move.
 
    Rebuilt per verdict rather than once at boot, because the row now ends in a
-   button that only some dishes have: the best run on record, if one is stored
-   and it is not the run you are already looking at. */
+   button that only some dishes have: the best run on record, where one is
+   stored. It is offered even when the run just finished IS that best run —
+   the ghost is written before the verdict is painted — because the alternative
+   is a button that appears and disappears depending on whether you have just
+   beaten yourself, and pressing it then simply replays the run under it. */
 function buildReplayRow(idx) {
   var box = $('r-replay');
   if (!box) return;
