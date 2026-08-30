@@ -6141,6 +6141,14 @@ function setReplayUI(on) {
 function startReplay(sp) {
   if (!TRACE || TRACE.idx < 0) return false;
   var t = TRACE;
+  /* The replay inherits the provenance of the run it is replaying, because it
+     IS that run — same dish, same seed. Without this the replay started as a
+     schedule run, and Reset or R pressed before it finished then read that
+     back out of S and minted a random plate: the daily you were watching
+     yourself play, swapped for something else on the way out of a viewing.
+     Same failure as the restart controls had, reached through the one door
+     that did not go through restartRun. */
+  pendingVia = S.via; pendingViaDay = S.viaDay;
   startRun(t.idx, t.seed, t);
   setSpeed(sp || 4);
   return true;
@@ -7246,6 +7254,10 @@ function buildReplayRow(idx) {
    the run that scored. Leaving it early restores the verdict's own plate the
    way leaving any other replay does. */
 function startGhost(i, sp) {
+  /* No provenance staged, deliberately: a stored ghost is a recording of some
+     earlier run on its own seed, not the plate the player is currently on, so
+     restarting out of one gives a fresh plate of that dish rather than
+     pretending the ghost's seed was today's assignment. */
   var t = ghostFor(i);
   if (!t) {
     /* Filed but unreadable — a save edited by hand, or written by a build that
