@@ -66,10 +66,14 @@ follow-ups on the same machinery.
   shocks, a heat moat, and one wall that moves. Everything the schedule
   taught, at once.
 
-Every run's 24-bit seed doubles as its colour: the specimen line printed on
-the result screen (`#a3f2c1`) sets the hue the organism grows in, with
-saturation and lightness adjusted from the raw hex only as far as needed to
-hold WCAG contrast against the agar whatever the seed.
+Every run's 24-bit seed is printed on the result screen as a specimen line
+(`#a3f2c1`) and reproduces that dish cell for cell — `SLIME.start(idx, seed)`
+runs it again. It used to double as the run's colour, setting the hue the
+organism grew in; it no longer does. The organism is the colour the organism
+is, in every run: the chrome yellow of a *Physarum* plasmodium on agar,
+lit toward a warm cream on the trunks and thinning to a pale, milky film at
+the advancing front. The contrast solve that once had to survive any hue the
+seed might name is still there, now as a guard on that one palette.
 
 ## Controls
 
