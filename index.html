@@ -98,9 +98,17 @@ h1,h2,h3{font-weight:600;margin:0}
 .dish .bl{font-size:12px;color:#98a087;flex:1}
 .dish .st{font-size:10.5px;letter-spacing:.14em;text-transform:uppercase}
 .dish.done .st{color:var(--cyto)}
-/* A disabled control is exempt from 1.4.3, but nineteen of the twenty cards
-   on the landing screen are locked on a first visit — the exemption would
-   cover almost the whole page, which is not what it is for. Faded to .8, where
+/* The mark, where a dish has one, sits under the status line rather than
+   beside it: the two are different kinds of fact and a card that runs them
+   together reads as one long status. */
+.dish .mk{font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--dim)}
+.dish .mk b{color:var(--slime);font-weight:400}
+/* the daily plate is the one card that is not a place in the schedule */
+.dish.daily{min-height:0}
+.dish.daily .nm{color:var(--cyto)}
+/* A disabled control is exempt from 1.4.3, but most of the twenty cards on
+   the landing screen are locked on a first visit — the exemption would cover
+   almost the whole page, which is not what it is for. Faded to .8, where
    every line on the card still clears 4.5:1; what says "locked" is the grey
    name, the word itself, and the dead hover, not illegibility. */
 .dish.locked{opacity:.8;cursor:not-allowed}
@@ -259,12 +267,15 @@ body.touch .keys-touch{display:grid}
 .meter+.meter{margin-top:7px}
 .meter .lab{display:contents}
 .meter .lab span{color:var(--dim);font-size:10px;letter-spacing:.18em;text-transform:uppercase}
-/* Wide enough for the longest label the two meters have, so the tracks of a
-   dish carrying BOTH line up instead of starting at two different columns.
-   Most dishes have only the biomass meter and so have nothing to line up with
-   — there, reserving room for the word HABITUATION is 30px taken off the
-   track for nothing, which on a letterboxed 695px band is most of it. sim.js
-   sets .twometer alongside the second meter's own display toggle. */
+/* Every dish now carries at least two meters — biomass and the cue reserve —
+   so there is always something to line the tracks up with, and the label takes
+   a column rather than each meter's track starting wherever its own word ran
+   out. 58px is BIOMASS and RESERVE at this size; HABITUATION needs 86, and
+   reserving that on the sixteen dishes that never show it is 28px off a track
+   which on a letterboxed 695px band is most of it. So the wide column is
+   conditional and the narrow one is not: sim.js sets .twometer alongside the
+   third meter's own display toggle. */
+.meter .lab span:first-child{flex:0 0 58px}
 .console.twometer .meter .lab span:first-child{flex:0 0 86px}
 .meter .bar{order:1;flex:1;height:4px;background:#1b1f18;border-radius:2px;overflow:hidden;
   box-shadow:inset 0 0 0 1px rgba(216,220,200,.16)}
@@ -276,6 +287,11 @@ body.touch .keys-touch{display:grid}
 .meter .fill{height:100%;width:0%;background:var(--slime);transition:width .18s}
 .meter.mass .fill{background:linear-gradient(90deg,#977514,var(--slime))}
 .meter.hab .fill{background:linear-gradient(90deg,#5b3479,var(--quin))}
+/* The reserve reads as cytoplasm, because that is what it is standing in for:
+   the cost of telling the organism where to go. Declared above .crit so a
+   reserve running out still turns red — the two selectors weigh the same and
+   the later one wins. */
+.meter.cue .fill{background:linear-gradient(90deg,#2c6353,var(--cyto))}
 .meter.crit .fill{background:var(--bad)}
 .hud-br{color:var(--dim);font-size:11px;letter-spacing:.08em}
 /* the list reads across the panel, not down the side of a plate */
@@ -565,6 +581,13 @@ body.touch .dish{min-height:132px}
       million nuclei in a shared cytoplasm and a very good sense of where the food is.
       The laboratory has some questions. Answer them from the inside.</p>
     </div>
+    <!-- One plate, the same one everywhere, derived from the UTC day. It sits
+         above the schedule because it is not part of it: it ignores the unlock
+         gate and logging it advances nothing. -->
+    <div class="slab" style="margin-bottom:14px">
+      <div class="slab-h"><span>Plate of the day</span><span id="daily-st"></span></div>
+      <div class="dishes"><button class="dish daily" id="daily-go" type="button"></button></div>
+    </div>
     <div class="slab">
       <div class="slab-h"><span>Experiment schedule</span><span id="progress">0 / 20 logged</span></div>
       <div class="dishes" id="dishes"></div>
@@ -586,6 +609,7 @@ body.touch .dish{min-height:132px}
         <div class="keys keys-fine">
           <b>hold left / drag</b><span>emit a growth cue &mdash; the exploratory front flows toward it</span>
           <b>hold right / shift</b><span>retract &mdash; pull cytoplasm back out of a region</span>
+          <b>the reserve</b><span>cueing spends it and letting go rebuilds it, slower than it went; at zero the brush stops until you release. Nudge, let the chemotaxis run, nudge again</span>
           <b>space</b><span>hold the clock</span>
           <b>F</b><span>time-lapse &mdash; cycle the dish clock &times;1 / &times;4 / &times;12</span>
           <b>R</b><span>reset the dish</span>
@@ -593,6 +617,7 @@ body.touch .dish{min-height:132px}
         <div class="keys keys-touch">
           <b>hold / drag</b><span>emit a growth cue &mdash; the exploratory front flows toward your finger</span>
           <b>two fingers</b><span>retract &mdash; a second finger flips a live drag and pulls cytoplasm back out of a region</span>
+          <b>the reserve</b><span>cueing spends it and lifting your finger rebuilds it, slower than it went; at zero the brush stops until you lift</span>
           <b>Retract</b><span>the switch on the control row does the same one-handed, until you switch it back</span>
           <b>Hold / &times;N</b><span>the control row stops the dish clock, or winds it to &times;4 or &times;12 &mdash; same dish, watched faster</span>
           <b>Controls</b><span>resetting the plate and abandoning the dish are in there</span>
@@ -629,6 +654,9 @@ body.touch .dish{min-height:132px}
           <div class="hud hud-bl">
             <div class="meter mass"><div class="lab"><span>Biomass</span><span id="h-mass">0</span></div>
               <div class="bar"><div class="fill" id="h-massbar"></div></div></div>
+            <div class="meter cue" id="h-cuewrap">
+              <div class="lab"><span>Reserve</span><span id="h-cue">100%</span></div>
+              <div class="bar"><div class="fill" id="h-cuebar"></div></div></div>
             <div class="meter hab" id="h-habwrap" style="display:none">
               <div class="lab"><span id="h-meterlab">Habituation</span><span id="h-hab">0%</span></div>
               <div class="bar"><div class="fill" id="h-habbar"></div></div></div>
@@ -656,6 +684,15 @@ body.touch .dish{min-height:132px}
         <span class="rk">Replay</span>
         <div class="rrow" id="r-replay"></div>
         <span class="rnote" id="r-tracenote"></span>
+      </div>
+      <!-- the plate as an address: the seed already reproduces this dish cell
+           for cell, so a link carrying it hands someone else the same one -->
+      <div class="rband" id="r-shareband">
+        <span class="rk">This plate</span>
+        <div class="rrow">
+          <button class="btn ghost" id="r-copy" type="button">Copy link</button>
+        </div>
+        <span class="rnote" id="r-sharenote"></span>
       </div>
       <div class="rgrid">
         <p id="r-body"></p>
