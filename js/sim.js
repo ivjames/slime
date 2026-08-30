@@ -2011,8 +2011,9 @@ var S = {
      held — both stepped at a fixed DT inside the frame loop, so a replay of a
      recorded run rebuilds them exactly rather than approximately */
   cueRes: 0, cueHeld: 0,
-  /* how this run was reached — see VIA_* by the daily */
-  via: 0,
+  /* how this run was reached, and for a daily, which day's plate it was —
+     see VIA_* by the daily */
+  via: 0, viaDay: 0,
   nodeProg: null, nodeDone: null, nodeIdle: null, engulfed: 0,
   hab: 0, habPeak: 0, habBuilt: -1, fused: false,
   dietP: 0, dietC: 0, dietDoomedT: 0,
@@ -5603,7 +5604,16 @@ function writeSave() {
 }
 
 function isDone(i) { return !!save.done[EXPERIMENTS[i].code]; }
-function bestScore(i) { return save.score[EXPERIMENTS[i].code] || 0; }
+/* The stored mark for a dish, or -1 where there is none. Not `|| 0`, for the
+   reason the save path is not either: 0 is a real mark a real win can earn, so
+   a falsy test hides it — the dish showed "logged" with no mark beside it,
+   which reads as a run that was never scored rather than one that scored
+   badly. -1 because the callers want to ask "is there one", and every genuine
+   mark is at least 0. */
+function bestScore(i) {
+  var c = EXPERIMENTS[i].code;
+  return save.score.hasOwnProperty(c) ? (save.score[c] | 0) : -1;
+}
 
 /* Unlocking used to be a chain: dish i opened when dish i-1 was logged, and
    one dish a player could not beat therefore hid the twelve behind it for
@@ -5679,7 +5689,7 @@ function renderTitle() {
       }
 
       b.appendChild(c); b.appendChild(n); b.appendChild(l); b.appendChild(s);
-      if (done && bestScore(i)) {
+      if (done && bestScore(i) >= 0) {
         var m = document.createElement('div'); m.className = 'mk';
         m.innerHTML = 'mark <b></b>';
         m.querySelector('b').textContent = bestScore(i) + ' · ' + markFor(bestScore(i));
@@ -5911,20 +5921,32 @@ var GHOST_HEAD = 12;
 var GHOST_ENT = 9;
 
 /* A ghost is a seed and a tape of brush-steps, so replaying it faithfully
-   depends on every constant the simulation reads while consuming them — the
-   three cue rates this file now has among them. Change one and a stored tape
-   still decodes perfectly and replays into a DIFFERENT run, which is the worst
-   shape a bug can take here: nothing looks broken. So the header carries a
-   byte derived from those constants, and a tape recorded under any other value
-   of them is refused the way a truncated one is.
+   depends on the whole simulation that consumes them. Change anything a step
+   does and a stored tape still decodes perfectly and replays into a DIFFERENT
+   run, which is the worst shape a bug can take here: nothing looks broken. So
+   the header carries a byte, and a tape that disagrees with it is refused the
+   way a truncated one is.
 
-   It covers what a replay consumes, not what merely reads the result: the cue
-   rates and the pointer quantum change the dish a tape produces; the mark
-   weights only change the number printed under it. */
+   SIM_V is the actual contract and the only part that can be right. No hash of
+   constants can cover a change to what step() DOES — a reordered sense, a
+   different turn rule, an edit to a dish's walls — and a signature that hashed
+   only constants would sail straight through exactly the releases most likely
+   to break a tape. So: bump SIM_V whenever a change alters the dish a given
+   seed and tape produce. The constants below are folded in underneath it as a
+   backstop for the case the bump is forgotten, which is not the same as a
+   guarantee and is not written here as one. */
+var SIM_V = 1;
+
 function ghostSig() {
-  var h = mix32(Math.round(CUE_CAP * 1000), Math.round(CUE_REGEN * 1000),
-                Math.round(CUE_RET * 1000));
-  return (mix32(h, CUE_Q, Math.round(BRUSH_PEAK * 1000) ^ CUE_R) & 0xFF);
+  var h = mix32(SIM_V, Math.round(CUE_CAP * 1000), Math.round(CUE_REGEN * 1000));
+  h = mix32(h, Math.round(CUE_RET * 1000), CUE_Q);
+  h = mix32(h, Math.round(BRUSH_PEAK * 1000) ^ CUE_R, Math.round(DECAY * 10000));
+  h = mix32(h, Math.round(DIFF * 10000), Math.round(DEPOSIT * 1000));
+  h = mix32(h, Math.round(FOODW * 1000) ^ Math.round(CUEW * 1000),
+               Math.round(RETW * 1000) ^ Math.round(TURN * 1000));
+  h = mix32(h, Math.round(SPEED * 1000) ^ Math.round(TRAIL_MAX * 10),
+               Math.round(SPEED_REF * 100) ^ EXPERIMENTS.length);
+  return h & 0xFF;
 }
 
 /* The size of the ghost a single run may leave behind. A ceiling on one
@@ -5940,11 +5962,21 @@ function ghostSig() {
    at half rate, so a 900-second dish grants around 496 seconds of it: near
    30,000 entries where 200k of base64 held 21,000.
 
-   400k covers a run that holds the brush down for every step of the longest
-   dish that sets a clock, which is the worst case a schedule dish can produce.
-   The four dishes with no clock can still exceed it, and that is what the
-   no-longer-destructive path below is for. */
-var GHOST_MAX = 400000;
+   The replacement figure was 400k, said to cover a run that holds the brush
+   down for every step of the longest clocked dish. It did not, and the
+   arithmetic is not close: an entry is 9 bytes and the header 12, so a tape is
+   4*ceil((12 + 9n)/3) characters, and 900 sim-seconds at 60 steps a second is
+   54,000 entries — 486,012 bytes, 648,016 characters. 400k held 33,332
+   entries, or 556 seconds. Twice now this constant has been justified by a
+   sentence rather than by the formula sitting directly above it.
+
+   700k covers that worst case with room to spare. The four dishes with no
+   clock can still exceed it, and that is what the no-longer-destructive path
+   below is for — and the aggregate across twenty dishes is not this
+   constant's problem, because writeSave sheds the largest recording first
+   when a browser actually refuses the write, which is precisely the
+   pathological tape this cap would otherwise have to guess at. */
+var GHOST_MAX = 700000;
 
 function encodeGhost(t) {
   /* A zero-entry trace is encoded, not refused. A dish CAN be won without the
@@ -6327,6 +6359,10 @@ function startRun(i, seed, trace) {
   /* consumed, not merely read: the next run is a schedule run unless its
      caller says otherwise, so provenance cannot leak from one run to the next */
   S.via = pendingVia; pendingVia = VIA_SCHEDULE;
+  /* which day's plate this is, fixed at launch — both daily launch sites
+     refresh DAILY immediately before calling in, so this is today's as of the
+     moment the run started, and it stays that whatever the clock does next */
+  S.viaDay = (S.via === VIA_DAILY && DAILY) ? DAILY.day : 0;
 
   REPLAY.on = !!trace;
   REPLAY.i = 0;
@@ -6471,9 +6507,17 @@ function finish(won, reason) {
            advancing nothing, and it has to be: the daily ignores the unlock
            gate, so a daily win that also logged the dish would let anybody
            walk the whole schedule by playing one plate a day — or by opening
-           #daily on a dish twelve places past where they had got to. */
-        refreshDaily();
-        save.daily = { day: DAILY.day, score: Math.max(sc.score, dailyScore()) };
+           #daily on a dish twelve places past where they had got to.
+
+           Against the day the plate was LAUNCHED on, not the day it finished.
+           A run started at 23:58 and won at 00:01 is a run of yesterday's
+           dish on yesterday's seed; refreshing here and filing it under today
+           would have credited today's entirely different plate with a score
+           earned on another one, and the schedule would then have reported
+           today's dish as already logged by somebody who had not seen it. */
+        var dd = S.viaDay;
+        var pd = (save.daily && save.daily.day === dd) ? (save.daily.score | 0) : 0;
+        save.daily = { day: dd, score: Math.max(sc.score, pd) };
       } else if (isUnlocked(S.idx)) {
         /* And a plate link is the same argument in the other direction: it
            bypasses the gate too, so it logs progress only for a dish the gate
@@ -6486,7 +6530,15 @@ function finish(won, reason) {
            stored recording is meant to be the run the stored mark refers to,
            so a player replaying their best run watches the run that earned the
            number beside it rather than whichever one happened to be last. */
-        if (sc.score > (save.score[e.code] || 0)) {
+        /* hasOwnProperty, not `|| 0`: zero became a REACHABLE mark the moment
+           the axes were cut to two. A run that holds the brush down for its
+           whole length on a dish with no clock scores autonomy 0 and nothing
+           else, which is exactly 0 — and `0 > 0` is false, so that win logged
+           the dish while silently storing neither its mark nor its ghost, for
+           good. It was unreachable under the four-axis version, which is why
+           the idiom looked safe. */
+        var had = save.score.hasOwnProperty(e.code) ? (save.score[e.code] | 0) : -1;
+        if (sc.score > had) {
           save.score[e.code] = sc.score;
           /* A new best whose tape will not fit leaves the OLD recording where
              it is. Deleting it kept the mark and the ghost describing the same
@@ -6556,7 +6608,9 @@ function buildResult(won) {
     if (sc.disp >= 0) rows.push(['— dispatch', pct(sc.disp) + ' (of the plate\'s clock)']);
   }
   if (won && save.best[e.code] != null) rows.push(['Best run', fmtTime(save.best[e.code])]);
-  if (won && save.score[e.code]) rows.push(['Best mark', save.score[e.code] + ' / 100']);
+  if (won && save.score.hasOwnProperty(e.code)) {
+    rows.push(['Best mark', (save.score[e.code] | 0) + ' / 100']);
+  }
   /* The plate's provenance, last, the way a notebook records it: this dish is
      reproducible from that number alone — SLIME.start(idx, '#a3f2c1') runs it
      again, cell for cell, at any time-lapse setting. It used to carry a swatch
