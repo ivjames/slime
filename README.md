@@ -139,18 +139,29 @@ finished, at ×1, ×4 or ×12.
 - **Plate links.** The fragment addresses a dish and a seed, so any plate can
   be handed to somebody else. `#EXP-03/a3f2c1` opens that dish on that exact
   plate, `#EXP-03` alone opens its brief, and `#daily` opens the day's.
-  **Copy link** on the verdict screen puts the current one on the clipboard.
+  **Copy link** on the verdict screen puts the current one on the clipboard —
+  or, where the browser withholds the clipboard API (which several do on
+  `file://`, the way this is meant to be opened), falls back to a legacy copy
+  and then to selecting the link for you.
 - **The plate of the day.** One dish and one seed derived from the UTC day
   number, so every copy of the page derives the same plate and two people
   comparing marks are comparing the same run. It ignores the unlock gate and
   logging it advances nothing — it is a plate, not a place in the schedule.
+  Winning it records the day's mark and leaves your schedule untouched.
 
 ## The schedule
 
 Dishes unlock on a count rather than in a chain: two beyond your logged total
 stay open, so a dish you cannot beat can be walked around without the rest of
 the schedule being skippable. A locked card says how many more runs would open
-it. The daily plate and any plate link ignore the gate entirely.
+it.
+
+The daily plate and any plate link open a dish whatever the gate says — but
+neither can *move* the gate. A daily win marks the day only. A plate link logs
+a run the way any other route would when the dish is one the gate had already
+opened, and logs nothing when it is not: a link to a dish you have reached is
+just a run of it, and a link past the gate is a look ahead rather than a pass.
+Otherwise the gate would be bypassable by anyone willing to edit a URL.
 
 On a touch screen the same verbs are a hold or drag for a growth cue, a second
 finger to flip that drag into a retract, and a Grow / Retract switch on the
