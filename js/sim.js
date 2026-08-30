@@ -2013,10 +2013,6 @@ var S = {
   cueRes: 0, cueHeld: 0,
   /* how this run was reached — see VIA_* by the daily */
   via: 0,
-  /* total trail mass of the finished network, measured once when the run ends.
-     Against the dish's own geometry it is the economy score — the published
-     Physarum result stated as a number. */
-  netEnd: 0,
   nodeProg: null, nodeDone: null, nodeIdle: null, engulfed: 0,
   hab: 0, habPeak: 0, habBuilt: -1, fused: false,
   dietP: 0, dietC: 0, dietDoomedT: 0,
@@ -5198,30 +5194,6 @@ function cueFrac() {
 }
 
 /* ------------------------------------------------------------
-   10b. network mass
-   ------------------------------------------------------------
-   Total trail across the plate: the size of the network the run is holding.
-   A full-grid sum at 109,200 cells, so it is measured when a run ends and on
-   demand from the harness, never per step — nothing in the simulation reads
-   it, and the score it feeds is only ever asked for once.
-
-   This replaced a first attempt that measured PRUNING: peak network against
-   final, on the theory that withdrawing from the corridors that led nowhere
-   is the published result and ought therefore to be the score. It is the
-   published result, and it was still the wrong measure, because of when the
-   game ends. A dish is won the instant its objective is met, which is the
-   instant the network is at its fullest — the withdrawal the papers describe
-   happens over the hours AFTER the connection is made, and the run is over by
-   then. Measured across eight dishes it came out between 0.0 and 0.015 on
-   every won run: an axis that assigned the same near-zero to a careful run and
-   a sprawling one, and dragged both marks down by the same constant. */
-function netMass() {
-  var m = 0;
-  for (var i = 0; i < NCELL; i++) m += trail[i];
-  return m;
-}
-
-/* ------------------------------------------------------------
    11. narration
    ------------------------------------------------------------ */
 function logLine(text, hi) {
@@ -5475,100 +5447,47 @@ function noteText(e) {
    interesting measure this organism has: a plasmodium is not fast, and racing
    one is not what any of the twenty papers were about.
 
-   These four are. Each is a ratio of the run against itself, so none of them
-   needs a per-dish par to be tuned and then to rot when a dish is rebalanced.
+   Two axes, each a ratio of the run against itself or against the clock the
+   dish set, so neither needs a hand-tuned par per dish:
 
-     ECONOMY   MEASURED AND FOUND WANTING — see the note below. It was meant
-               to be Tero 2010's comparison, the plasmodium's network against
-               the minimum spanning tree over the same cities. What it divides
-               is netMass(), the summed trail field, and trail is deposited per
-               agent per step and decays geometrically, so the total tracks
-               BIOMASS rather than network geometry: measured, mass per nucleus
-               held between 122 and 169 across every dish, seed and play style
-               sampled, a 1.39x spread, while the span it is divided by ranges
-               3.9x across the twenty dishes.
-
-               So the axis reads "how little biomass did you finish with",
-               inverted. On EXP-01 seed #555555, all three won: a run that
-               never touched the pointer scored 0.752, a run that swept the cue
-               over the whole plate scored 0.829, and a run that parked the
-               brush on the inoculation point and starved the culture scored a
-               perfect 1.000. Counting network AREA instead of mass orders them
-               the same way, so it is not a matter of the wrong summary of the
-               field — under-growing wins the axis however the network is
-               measured, because the win gate fires on engulfment and does not
-               care how much organism is left behind it.
-     AUTONOMY  how little of the run the brush was held for. The dish is
-               supposed to be solved by chemotaxis, with the player saying only
-               which way is interesting; a run steered end to end has answered
-               the question with a cursor.
-     VIGOUR    biomass at the end against the peak. Pruning tubes is the
-               result; arriving at it starved is a different outcome that
-               happens to satisfy the same gate.
+     AUTONOMY  how little of the run the brush was held for. The dish is meant
+               to be solved by chemotaxis, with the player saying only which
+               way is interesting; a run steered end to end has answered the
+               question with a cursor.
      DISPATCH  the clock the dish gave you, against what you spent. Only on the
-               sixteen dishes that set one — the other four are scored on the
-               first three, with the weights renormalised, rather than on a
-               time limit invented here to have something to divide by.
+               sixteen dishes that set one — on the other four autonomy is the
+               whole mark, rather than a time limit being invented here to have
+               something to divide by.
 
-   NET_IDEAL is trail mass per cell of ideal span for a network that earns full
-   marks on economy. It was set to 1000 from eight bot-played wins that came in
-   between 1005 and 2661; a later and wider sample of thirteen wins across more
-   play styles measured 713 to 3749, so 1000 is not the floor it was chosen to
-   be — runs below it clamp to 1.0 and stop being told apart.
+   There were four. Two were cut after being measured rather than argued
+   about, and what they were is worth keeping written down, because both
+   failures are easy to design again.
 
-   Read the note above this one before trusting this axis at all: the quantity
-   it divides is not the one it is named for.
+   ECONOMY, at the heaviest weight of the four, was meant to be Tero 2010's
+   comparison: the finished network against the minimum spanning tree over the
+   same points. What it actually divided was the summed trail field, and trail
+   is deposited per agent per step and decays geometrically, so the total
+   tracks BIOMASS and not geometry — measured, mass per nucleus stayed between
+   122 and 169 across every dish, seed and play style sampled, a 1.39x spread,
+   against a span that ranges 3.9x across the twenty dishes. So it read "how
+   little biomass did you finish with", inverted. On EXP-01 seed #555555, all
+   three runs won: never touching the pointer scored 0.752, sweeping the cue
+   over the whole plate scored 0.829, and parking the brush on the inoculation
+   point until the culture starved scored a perfect 1.000. Counting network
+   AREA instead of mass ordered them the same way, so it was not a matter of
+   summarising the field differently: under-growing wins any such axis, because
+   the win gate fires on engulfment and does not care how much organism is left
+   behind it. Measuring this properly means normalising by biomass and routing
+   the span through the walls — geodesicFrom is right there — and it is a real
+   piece of design rather than a constant to retune.
 
-   Note what the ideal span is NOT: a true lower bound. It is a straight-line
-   spanning tree, and it ignores walls, so on a cut labyrinth the reachable
-   shortest network is genuinely longer than the ideal it is scored against and
-   the whole dish scores lower. A mark is compared against your own best on
-   that dish, and on the daily plate against other people running that same
-   dish — both comparisons hold the geometry fixed, so a constant per-dish
-   offset cancels out of those two uses.
-
-   This used to say that routing the span through the walls "would cost a
-   pathfinder in a file whose whole point is that nothing in it pathfinds",
-   which was a good line and untrue: geodesicFrom already floods geodesic
-   distance through open agar, and rebuildGeo maintains it per node. The real
-   reason is only that the straight-line version was cheaper to write, and the
-   geodesic one is available whenever this axis is worth the accuracy. */
-var NET_IDEAL = 1000;
-var W_ECON = 0.40, W_AUTO = 0.30, W_VIG = 0.15, W_DISP = 0.15;
-
-/* The shortest network that could have joined what this run actually joined:
-   a minimum spanning tree, by Prim, over the inoculation point and every node
-   the run was holding at the end. Over what it HELD rather than over every
-   node on the plate, because several dishes ask for a subset — four of nine
-   flakes, six of eight — and scoring a run against a network it was never
-   asked to build measures the brief, not the run. */
-function idealSpan(e) {
-  var pts = [[e.inoc.x, e.inoc.y]], i;
-  for (i = 0; i < e.nodes.length; i++) {
-    if (S.nodeDone && S.nodeDone[i]) pts.push([e.nodes[i].x, e.nodes[i].y]);
-  }
-  if (pts.length < 2) return 0;
-  var inTree = [true], best = [], n = pts.length, total = 0;
-  for (i = 1; i < n; i++) { inTree[i] = false; best[i] = Infinity; }
-  for (i = 1; i < n; i++) {
-    var dx = pts[i][0] - pts[0][0], dy = pts[i][1] - pts[0][1];
-    best[i] = Math.sqrt(dx * dx + dy * dy);
-  }
-  for (var added = 1; added < n; added++) {
-    var pick = -1;
-    for (i = 1; i < n; i++) if (!inTree[i] && (pick < 0 || best[i] < best[pick])) pick = i;
-    if (pick < 0) break;
-    inTree[pick] = true;
-    total += best[pick];
-    for (i = 1; i < n; i++) {
-      if (inTree[i]) continue;
-      var ex = pts[i][0] - pts[pick][0], ey = pts[i][1] - pts[pick][1];
-      var d = Math.sqrt(ex * ex + ey * ey);
-      if (d < best[i]) best[i] = d;
-    }
-  }
-  return total;
-}
+   VIGOUR was final biomass over peak, meant to catch a run that arrived
+   starved. S.peak is updated ten lines before winMet is tested, in the same
+   step, and the win fires on the step the last node completes — which is the
+   step that sets a new all-time peak. So nAgents === S.peak at almost every
+   verdict: twelve of thirteen measured wins scored 0.999 or better. It was
+   0.15 of the weight handed over for nothing. */
+var W_AUTO = 0.60, W_DISP = 0.40;
 
 /* The bands the observer writes in the margin. Five, because a scale with more
    than that is a number pretending to be a word. */
@@ -5581,24 +5500,28 @@ function markFor(score) {
   return MARKS[MARKS.length - 1][1];
 }
 
-/* The four axes and the weighted mark, as fractions of one. A dish abandoned
-   before it engulfed anything spans nothing and scores nothing on economy,
-   rather than dividing by zero into full marks for a network it never built. */
-function runScore(e) {
-  /* netEnd once the run is over, measured live before then — so the harness
-     can watch the axis move without the finished mark ever being re-derived
-     from a plate a replay has since painted over */
-  var net = S.netEnd || netMass();
-  var span = idealSpan(e);
-  var econ = (span > 0 && net > 0) ? (span * NET_IDEAL) / net : 0;
-  var auto  = S.simT > 0 ? 1 - S.cueHeld / S.simT : 1;
-  var vig   = S.peak > 0 ? nAgents / S.peak : 0;
-  econ = clamp(econ, 0, 1);
-  auto = clamp(auto, 0, 1);
-  vig  = clamp(vig, 0, 1);
+/* Both axes as fractions of one, and the weighted mark. A dish that sets no
+   clock is scored on autonomy alone rather than on a borrowed one.
 
-  var sum = W_ECON * econ + W_AUTO * auto + W_VIG * vig;
-  var wt  = W_ECON + W_AUTO + W_VIG;
+   A run that never touches the brush takes full autonomy, and on a dish the
+   simulation wins unaided it can therefore take the top band having done
+   nothing. That is left standing on purpose: an organism solving the dish
+   without being steered is the thing this whole game is about, and a mark that
+   punished it would be scoring the wrong party. Where a dish cannot be won
+   without a hand the question does not arise — a hands-off run loses there and
+   is not scored at all — and where it can, the axis rewards the run that
+   needed less steering, which is the same instruction either way.
+
+   Measured on EXP-01 and EXP-02, four play styles each, all eight winning:
+   hands-off 100 and 88, brief nudges 84 and 78, steering toward the next
+   target for three steps in five 40 and 54, and the brush parked down for the
+   whole run 0 and 28. Monotone, and in the direction the axis is named for —
+   which the axis this replaced was not: the parked run scored a PERFECT
+   economy for starving its way to the same win. */
+function runScore(e) {
+  var auto = S.simT > 0 ? clamp(1 - S.cueHeld / S.simT, 0, 1) : 1;
+  var sum = W_AUTO * auto;
+  var wt  = W_AUTO;
   var disp = -1;
   if (e.timeLimit) {
     disp = clamp(1 - S.simT / e.timeLimit, 0, 1);
@@ -5606,9 +5529,7 @@ function runScore(e) {
     wt  += W_DISP;
   }
   var score = Math.round(100 * sum / wt);
-  return { score: score, mark: markFor(score),
-           econ: econ, auto: auto, vig: vig, disp: disp,
-           net: net, span: span };
+  return { score: score, mark: markFor(score), auto: auto, disp: disp };
 }
 
 function pct(f) { return Math.round(f * 100) + '%'; }
@@ -5998,8 +5919,8 @@ var GHOST_ENT = 9;
    of them is refused the way a truncated one is.
 
    It covers what a replay consumes, not what merely reads the result: the cue
-   rates and the pointer quantum change the dish a tape produces; NET_IDEAL and
-   the mark weights only change the number printed under it. */
+   rates and the pointer quantum change the dish a tape produces; the mark
+   weights only change the number printed under it. */
 function ghostSig() {
   var h = mix32(Math.round(CUE_CAP * 1000), Math.round(CUE_REGEN * 1000),
                 Math.round(CUE_RET * 1000));
@@ -6422,7 +6343,6 @@ function startRun(i, seed, trace) {
   /* a fresh plate arrives with a full reserve — the scarcity is meant to shape
      a run, not to open one already short */
   S.cueRes = cueCapOf(e); S.cueHeld = 0;
-  S.netEnd = 0;
   S.nodeProg = new Float32Array(e.nodes.length);
   S.nodeIdle = new Float32Array(e.nodes.length);
   S.nodeDone = new Array(e.nodes.length);
@@ -6519,9 +6439,6 @@ function finish(won, reason) {
   S.failReason = reason;
   stopRun();
   ptr.down = false;
-  /* the network as the run leaves it, measured before anything else can touch
-     the plate — a replay started from the verdict overwrites the trail field */
-  S.netEnd = netMass();
 
   /* A replay that runs all the way to its end is still only a viewing, and
      ends the way abandoning one does: the original plate and verdict come
@@ -6635,9 +6552,7 @@ function buildResult(won) {
   if (won) {
     sc = runScore(e);
     rows.push(['Mark', sc.score + ' / 100 · ' + sc.mark]);
-    rows.push(['— economy', pct(sc.econ) + ' (against the shortest network)']);
     rows.push(['— autonomy', pct(sc.auto) + ' (run unsteered)']);
-    rows.push(['— vigour', pct(sc.vig) + ' (biomass held)']);
     if (sc.disp >= 0) rows.push(['— dispatch', pct(sc.disp) + ' (of the plate\'s clock)']);
   }
   if (won && save.best[e.code] != null) rows.push(['Best run', fmtTime(save.best[e.code])]);
@@ -7386,12 +7301,6 @@ function init() {
     cue: function () {
       return { res: S.cueRes, held: S.cueHeld,
                cap: cueCapOf(S.exp), frac: cueFrac() };
-    },
-    /* the network the plate is holding, and the shortest one that would have
-       joined the same points — the two numbers the economy axis is a ratio of */
-    net: function () {
-      return { mass: S.netEnd || netMass(),
-               span: S.exp ? idealSpan(S.exp) : 0 };
     },
     /* the four axes and the mark, for the run as it stands. Live, not only at
        the verdict: a harness watching it move is how the axes were calibrated. */

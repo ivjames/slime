@@ -104,26 +104,52 @@ rather than instructive.
 
 ## Marks
 
-A finished run is scored out of 100 on four axes, each a ratio of the run
-against itself or against the dish's own geometry, so none of them needs a
+A finished run is scored out of 100 on two axes, each a ratio of the run
+against itself or against the clock the dish set, so neither needs a
 hand-tuned par per dish.
 
 | axis | weight | what it reads |
 |---|---|---|
-| economy | .40 | the network you were left holding, against the shortest one that could have joined the same points — Tero 2010's own comparison, plasmodium against minimum spanning tree |
-| autonomy | .30 | how little of the run the brush was held for |
-| vigour | .15 | biomass at the end against the peak — pruning is the result, arriving starved is a different outcome that satisfies the same gate |
-| dispatch | .15 | how much of the plate's clock you left unspent (the sixteen dishes that set one; the other four renormalise over the first three) |
+| autonomy | .60 | how little of the run the brush was held for |
+| dispatch | .40 | how much of the plate's clock you left unspent (the sixteen dishes that set one; on the other four autonomy is the whole mark) |
 
 The mark bands are the observer's marginal note: **crude**, **workable**,
 **sound**, **clean**, **exemplary**. Your best mark per dish is kept beside
 your best time, and the run that earned it is kept with it — see below.
 
-The economy axis measures the finished network against a straight-line
-spanning tree, which ignores walls, so a cut labyrinth scores lower across the
-board than open agar does. That is left alone on purpose: a mark is only ever
-compared against your own best on that dish, or against other people running
-that same dish on the same day, and both comparisons hold the geometry fixed.
+A run that never touches the brush takes full autonomy, so on a dish the
+simulation wins unaided it can reach the top band having done nothing. That is
+deliberate. An organism solving its dish without being steered is what this
+whole thing is about, and a mark that punished it would be scoring the wrong
+party. Where a dish cannot be won without a hand, the question does not arise —
+a hands-off run loses there and is never scored — and where it can, the axis
+rewards the run that needed less steering.
+
+Measured on two dishes across four play styles, all eight runs winning:
+hands-off 100 and 88, brief nudges 84 and 78, steering toward the next target
+for three steps in five 40 and 54, brush parked down for the whole run 0 and
+28.
+
+### Two axes that were cut
+
+There were four. **Economy** was meant to be Tero 2010's comparison — the
+finished network against the minimum spanning tree over the same points — and
+it carried the heaviest weight. What it divided was the summed trail field,
+and trail is laid per agent per step and decays, so the total tracks *biomass*
+rather than geometry. It read "how little biomass did you finish with",
+inverted: on one dish and seed, all three runs winning, never touching the
+pointer scored .75, sweeping the cue across the whole plate scored .83, and
+parking the brush until the culture starved scored a perfect 1.00. Counting
+network area instead of mass ordered them identically — under-growing wins any
+such axis, because the win fires on engulfment and does not care how much
+organism is left behind it. Measuring it properly means normalising by biomass
+and routing the span through the walls; that is design work, not a constant to
+retune.
+
+**Vigour** was final biomass against peak, meant to catch a run that arrived
+starved. The peak is updated in the same step the win is tested, and the win
+fires on the step that sets the last peak — so twelve of thirteen measured
+wins scored .999 or better. It was weight handed over for nothing.
 
 ## Replays, ghosts and links
 
