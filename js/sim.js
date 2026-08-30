@@ -2014,6 +2014,10 @@ var S = {
   /* how this run was reached, and for a daily, which day's plate it was —
      see VIA_* by the daily */
   via: 0, viaDay: 0,
+  /* whether this run actually wrote anything to the save — read by the verdict
+     heading, which used to announce "Result logged" for every win including
+     the ones deliberately not logged */
+  logged: false,
   nodeProg: null, nodeDone: null, nodeIdle: null, engulfed: 0,
   hab: 0, habPeak: 0, habBuilt: -1, fused: false,
   dietP: 0, dietC: 0, dietDoomedT: 0,
@@ -6264,7 +6268,7 @@ var DAILY = null;
    decline to advance a schedule position that was legitimately earned, and a
    retry logs it. */
 var VIA_SCHEDULE = 0, VIA_DAILY = 1, VIA_LINK = 2;
-var pendingVia = VIA_SCHEDULE;
+var pendingVia = VIA_SCHEDULE, pendingViaDay = 0;
 
 /* The day's plate, recomputed if the day has turned over since it was last
    asked for. `init` derives it once, and a page left open across 00:00 UTC
@@ -6341,8 +6345,26 @@ function routeHash() {
      teardown, so only this path needs saying. */
   if (r.seed == null) { leaveRun(); openBrief(r.idx); return true; }
   pendingVia = r.via;
+  if (r.via === VIA_DAILY && DAILY) pendingViaDay = DAILY.day;
   startRun(r.idx, r.seed);
   return true;
+}
+
+/* Run this dish again. For a dish opened from the schedule that means a NEW
+   plate — a fresh seed, which is the whole point of Reset there and has been
+   since the beginning. For a dish reached as a specific plate it means THAT
+   plate: the daily is "the same plate for everyone today", and a Reset that
+   silently swapped it for a random one broke the only property it has, without
+   saying so. A plate link is the same argument — somebody handed you a
+   particular dish, not a particular experiment.
+
+   The three restart controls (Retry, Reset, R) all route through here, so they
+   cannot disagree about it. */
+function restartRun() {
+  if (S.idx < 0) return;
+  if (S.via === VIA_SCHEDULE) { startRun(S.idx); return; }
+  pendingVia = S.via; pendingViaDay = S.viaDay;
+  startRun(S.idx, S.seed);
 }
 
 /* trace: a recorded run to play back instead of taking live input. Passing one
@@ -6359,10 +6381,13 @@ function startRun(i, seed, trace) {
   /* consumed, not merely read: the next run is a schedule run unless its
      caller says otherwise, so provenance cannot leak from one run to the next */
   S.via = pendingVia; pendingVia = VIA_SCHEDULE;
-  /* which day's plate this is, fixed at launch — both daily launch sites
-     refresh DAILY immediately before calling in, so this is today's as of the
-     moment the run started, and it stays that whatever the clock does next */
-  S.viaDay = (S.via === VIA_DAILY && DAILY) ? DAILY.day : 0;
+  /* which day's plate this is, handed in by the launch site rather than read
+     from DAILY here. Reading it here was right for a first launch and wrong
+     for a restart: restarting yesterday's daily after midnight would have
+     stamped it with today's day and filed the result against a plate it was
+     not a run of. */
+  S.viaDay = pendingViaDay; pendingViaDay = 0;
+  S.logged = false;
 
   REPLAY.on = !!trace;
   REPLAY.i = 0;
@@ -6518,6 +6543,7 @@ function finish(won, reason) {
         var dd = S.viaDay;
         var pd = (save.daily && save.daily.day === dd) ? (save.daily.score | 0) : 0;
         save.daily = { day: dd, score: Math.max(sc.score, pd) };
+        S.logged = true;
       } else if (isUnlocked(S.idx)) {
         /* And a plate link is the same argument in the other direction: it
            bypasses the gate too, so it logs progress only for a dish the gate
@@ -6526,6 +6552,7 @@ function finish(won, reason) {
         var prev = save.best[e.code];
         if (!prev || S.simT < prev) save.best[e.code] = S.simT;
         save.done[e.code] = true;
+        S.logged = true;
         /* The mark, and with it the ghost. They move together on purpose: the
            stored recording is meant to be the run the stored mark refers to,
            so a player replaying their best run watches the run that earned the
@@ -6569,6 +6596,15 @@ function finish(won, reason) {
 var LAST_RESULT = null;
 var FINAL_STATE = null;
 
+/* What a win is called. Three outcomes, because there are three: a schedule
+   dish that was written to the log, the day's plate which is recorded against
+   the day rather than the schedule, and a run that was deliberately not
+   persisted at all. */
+function wonHead() {
+  if (S.via === VIA_DAILY) return 'Daily plate logged';
+  return S.logged ? 'Result logged' : 'Result not logged';
+}
+
 function buildResult(won) {
   var e = S.exp;
   var body = won ? e.win : e.lose;
@@ -6611,7 +6647,16 @@ function buildResult(won) {
   if (won && save.score.hasOwnProperty(e.code)) {
     rows.push(['Best mark', (save.score[e.code] | 0) + ' / 100']);
   }
-  /* The plate's provenance, last, the way a notebook records it: this dish is
+    /* A link that reaches past the unlock gate wins a real run and writes
+     nothing, by design — so it must not be told its result was logged. Going
+     back to the schedule and finding no mark and no completion against a
+     verdict that said "Result logged" is the kind of small lie that makes a
+     player distrust every other number on the panel. */
+  if (won && !S.logged) {
+    rows.push(['Not logged', 'this plate is ahead of the schedule — log the dishes before it and it counts']);
+  }
+
+/* The plate's provenance, last, the way a notebook records it: this dish is
      reproducible from that number alone — SLIME.start(idx, '#a3f2c1') runs it
      again, cell for cell, at any time-lapse setting. It used to carry a swatch
      of itself, from when the seed set the colour the culture was grown in; it
@@ -6628,7 +6673,7 @@ function buildResult(won) {
                 S.via !== VIA_DAILY && isUnlocked(S.idx + 1);
   return {
     code: e.code + ' · ' + e.name,
-    head: won ? 'Result logged' : 'Culture lost',
+    head: won ? wonHead() : 'Culture lost',
     body: body,
     rows: rows,
     idx: S.idx,
@@ -7060,7 +7105,7 @@ function bindInput() {
       /* R is always a fresh dish — a new seed, a new recording — whether it is
          pressed mid-run, mid-replay, or over the verdict */
       ev.preventDefault();
-      if (S.idx >= 0) startRun(S.idx);
+      restartRun();
     } else if (ev.code === 'Escape') {
       ev.preventDefault();
       /* Escape reads as "close the thing that is open", innermost first: the
@@ -7101,7 +7146,7 @@ function bindButtons() {
      would otherwise leave it hanging open over a dish it just restarted. */
   $('s-abort').addEventListener('click', function () { closeKeys(); goTitle(); });
   $('s-pause').addEventListener('click', function () { setPaused(!S.paused); });
-  $('s-reset').addEventListener('click', function () { closeKeys(); if (S.idx >= 0) startRun(S.idx); });
+  $('s-reset').addEventListener('click', function () { closeKeys(); restartRun(); });
   $('s-speed').addEventListener('click', cycleSpeed);
   $('s-exitrp').addEventListener('click', function () { closeKeys(); exitReplay(); });
   $('t-grow').addEventListener('click', function () { setTouchMode(1); });
@@ -7115,9 +7160,9 @@ function bindButtons() {
     if (mq[mi].addEventListener) mq[mi].addEventListener('change', dockActions);
     else if (mq[mi].addListener) mq[mi].addListener(dockActions);
   }
-  /* Retry is a NEW dish: no seed passed, so freshSeed() mints one and
-     startRun() opens a fresh recording over the replayed run's trace. */
-  $('r-retry').addEventListener('click', function () { startRun(S.idx); });
+  /* Retry is a new plate on a schedule dish and the SAME plate on a daily or
+     a link — restartRun decides which, so all three restart controls agree. */
+  $('r-retry').addEventListener('click', restartRun);
   $('r-menu').addEventListener('click', goTitle);
   $('r-next').addEventListener('click', function () {
     /* isUnlocked is re-tested rather than trusted from the dataset: the button
@@ -7143,7 +7188,7 @@ function bindButtons() {
      brief: there is no schedule position to arrive at. */
   $('daily-go').addEventListener('click', function () {
     if (!refreshDaily()) return;
-    pendingVia = VIA_DAILY;
+    pendingVia = VIA_DAILY; pendingViaDay = DAILY.day;
     startRun(DAILY.idx, DAILY.seed);
   });
   /* A link pasted into the bar of a page that is already open changes the
