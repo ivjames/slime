@@ -370,6 +370,39 @@ var CUE_DECAY = 0.905; // player fields dissipate after release
    is the range at which the player can lead the organism. */
 var CUE_R = 52;
 
+/* ---- the cue reserve ----
+   A cue used to be free: holding the pointer cost nothing, so the dominant
+   line of play on every one of the twenty dishes was the same one — park the
+   brush on the food and wait. That is not steering an organism, it is holding
+   a door open, and it flattened dishes whose whole difference is WHERE the
+   organism has to be persuaded to go.
+
+   So directing the front is now the scarce thing. The reserve is a pool of
+   cue-seconds: holding spends it, releasing refills it, and at zero the brush
+   paints nothing until you let go. The rule is deliberately one sentence long,
+   because the player has to be able to feel it without reading it — and it
+   makes the good line of play the one the biology already suggests. Nudge, let
+   the chemotaxis run, nudge again. The organism does the search; the player
+   only says which way is interesting.
+
+   Retract draws at a reduced rate. Pulling cytoplasm out of a dead end is the
+   corrective move, and the dishes that need it most — the shock schedules,
+   where a refuge has to be held through a dry cycle — are the ones where being
+   unable to afford it would be fatal rather than instructive.
+
+   REGEN is below 1: a full reserve costs more real time to rebuild than it
+   does to spend, which is what stops "hold, release, hold" from being the same
+   free brush at a stutter. */
+var CUE_CAP   = 26;   // seconds of continuous cueing a full reserve buys
+var CUE_REGEN = 0.55; // reserve-seconds recovered per second released
+var CUE_RET   = 0.5;  // retract's share of the drain rate
+var CUE_LOW   = 0.22; // fraction below which the meter reads critical
+
+/* Sub-cell quantum the pointer is snapped to, so a recorded position is an
+   Int16 rather than a double and a whole run fits in storage. The reasoning
+   is at toGrid, which is the one place it is applied. */
+var CUE_Q = 16;
+
 var HAZ_HEAT = 9.0;    // repulsion of a heat zone
 var HAZ_QUIN = 5.2;    // repulsion of a quinine zone (scaled by 1 - habituation)
 
@@ -557,7 +590,10 @@ var EXPERIMENTS = [
     ],
     walls: [], hazards: [],
     start: 4500, cap: 11000, sustain: 3200, grow: 300, starve: 40, grace: 40, engulf: 1.6,
-    timeLimit: 0, hab: false, shocks: false,
+    /* the one dish with no cue reserve. It is where a player finds out what a
+       cue does at all, and finding that out while being rationed teaches the
+       ration instead of the cue. Every dish after this one runs the default. */
+    timeLimit: 0, hab: false, shocks: false, cue: 0,
     script: [
       { t: 1.5, hi: true, text: 'hold the pointer on the agar — the front flows toward the cue.' },
       { t: 6, hi: true, text: 'right-click or shift pulls cytoplasm back out of a region.',
@@ -1971,6 +2007,14 @@ var S = {
   exp: null, idx: -1, seed: 0,
   running: false, paused: false, over: false,
   simT: 0, peak: 0, cues: 0,
+  /* the cue reserve, in reserve-seconds, and how long the brush was actually
+     held — both stepped at a fixed DT inside the frame loop, so a replay of a
+     recorded run rebuilds them exactly rather than approximately */
+  cueRes: 0, cueHeld: 0,
+  /* total trail mass of the finished network, measured once when the run ends.
+     Against the dish's own geometry it is the economy score — the published
+     Physarum result stated as a number. */
+  netEnd: 0,
   nodeProg: null, nodeDone: null, nodeIdle: null, engulfed: 0,
   hab: 0, habPeak: 0, habBuilt: -1, fused: false,
   dietP: 0, dietC: 0, dietDoomedT: 0,
@@ -5103,6 +5147,78 @@ function paintBrush(gx, gy, mode) {
   }
 }
 
+/* One step's worth of cue accounting, run once per sim step from the frame
+   loop whether or not the brush is down — the release refill is as much a part
+   of the reserve as the drain is. Returns whether the brush lands this step.
+
+   It sits in the stepping loop rather than in an input handler for the reason
+   everything else in the sim path does: the loop advances at a fixed DT, so
+   the reserve is a function of (seed, recorded brush, steps executed) and a
+   replay rebuilds the identical curve. Deciding it from pointer events instead
+   would make it a function of the frame rate, and a recorded run would replay
+   with a different reserve than the one it was played under.
+
+   Note what is NOT here: the reserve does not refill while the brush is held.
+   A run that holds through exhaustion stays exhausted until it lets go, which
+   is the whole instruction, and hysteresis at zero is unnecessary because
+   there is no boundary to chatter across. */
+function cueTick(down, mode) {
+  var cap = cueCapOf(S.exp);
+  /* Held time is counted on every dish, including the one that runs no
+     reserve. It is what the autonomy axis divides, and scoring it only where
+     a reserve exists would hand EXP-01 a free hundred per cent on an axis
+     measuring how much the player steered — on the dish that is nothing but
+     steering. Counted for the ASK, not the grant: a run that keeps holding
+     after the reserve is gone is still a run being steered at, and the axis
+     is about the player's hand, not about what the dish let it do. */
+  if (down) S.cueHeld += DT;
+  if (!cap) return down;                       /* dish opted out of the limit */
+  if (down) {
+    if (S.cueRes <= 0) return false;
+    S.cueRes -= DT * (mode === 2 ? CUE_RET : 1);
+    if (S.cueRes < 0) S.cueRes = 0;
+    return true;
+  }
+  S.cueRes = Math.min(cap, S.cueRes + DT * CUE_REGEN);
+  return false;
+}
+
+/* A dish may set its own reserve — `cue: 0` opts out of the limit entirely,
+   which EXP-01 does, because the dish that teaches you what a cue IS must not
+   also be the dish that takes them away. */
+function cueCapOf(e) {
+  return (e && e.cue != null) ? e.cue : CUE_CAP;
+}
+
+function cueFrac() {
+  var cap = cueCapOf(S.exp);
+  return cap ? clamp(S.cueRes / cap, 0, 1) : 1;
+}
+
+/* ------------------------------------------------------------
+   10b. network mass
+   ------------------------------------------------------------
+   Total trail across the plate: the size of the network the run is holding.
+   A full-grid sum at 109,200 cells, so it is measured when a run ends and on
+   demand from the harness, never per step — nothing in the simulation reads
+   it, and the score it feeds is only ever asked for once.
+
+   This replaced a first attempt that measured PRUNING: peak network against
+   final, on the theory that withdrawing from the corridors that led nowhere
+   is the published result and ought therefore to be the score. It is the
+   published result, and it was still the wrong measure, because of when the
+   game ends. A dish is won the instant its objective is met, which is the
+   instant the network is at its fullest — the withdrawal the papers describe
+   happens over the hours AFTER the connection is made, and the run is over by
+   then. Measured across eight dishes it came out between 0.0 and 0.015 on
+   every won run: an axis that assigned the same near-zero to a careful run and
+   a sprawling one, and dragged both marks down by the same constant. */
+function netMass() {
+  var m = 0;
+  for (var i = 0; i < NCELL; i++) m += trail[i];
+  return m;
+}
+
 /* ------------------------------------------------------------
    11. narration
    ------------------------------------------------------------ */
@@ -5255,6 +5371,18 @@ function updateHUD(force) {
     mwrap.className = 'meter mass';
   }
 
+  /* The reserve, whenever the dish is running one. Its critical band is the
+     same visual language the biomass meter already uses for the same reason:
+     the thing you steer with is about to stop answering. */
+  var cwrap = $('h-cuewrap');
+  if (cueCapOf(e)) {
+    var cf = cueFrac();
+    $('h-cue').textContent = Math.round(cf * 100) + '%';
+    $('h-cuebar').style.width = (cf * 100).toFixed(1) + '%';
+    var want = cf < CUE_LOW ? 'meter cue crit' : 'meter cue';
+    if (cwrap.className !== want) cwrap.className = want;
+  }
+
   if (e.hab) {
     $('h-hab').textContent = Math.round(S.hab * 100) + '%';
     $('h-habbar').style.width = (S.hab * 100).toFixed(1) + '%';
@@ -5300,6 +5428,10 @@ function objText(e) {
 }
 
 function noteText(e) {
+  /* Above the shock warning on purpose. A player who cannot steer needs to be
+     told that before being told what to steer away from — and the fix (let go)
+     is one word, so it costs the warning almost nothing to wait a beat. */
+  if (cueCapOf(e) && S.cueRes <= 0) return 'reserve spent — release to recover it';
   if (S.shockActive) return 'DRY SHOCK — hold the refuges';
   if (S.shockWarn && S.slow < 0.98) return 'thickening early — the interval has a shape';
   if (S.shockWarn) return 'humidity falling — ' + Math.max(0, Math.ceil(S.shockNext - S.simT)) + 's';
@@ -5333,10 +5465,145 @@ function noteText(e) {
 }
 
 /* ------------------------------------------------------------
+   12b. the observer's mark
+   ------------------------------------------------------------
+   The result screen has always reported a column of figures — peak biomass,
+   cues emitted, time in contact — and none of them decided anything. The only
+   thing a finished run wrote down was its elapsed time, which is the least
+   interesting measure this organism has: a plasmodium is not fast, and racing
+   one is not what any of the twenty papers were about.
+
+   These four are. Each is a ratio of the run against itself, so none of them
+   needs a per-dish par to be tuned and then to rot when a dish is rebalanced.
+
+     ECONOMY   the network the run was left holding, against the shortest one
+               that could have joined the same points. This is Tero 2010's own
+               comparison — the paper scores the plasmodium's network against
+               the minimum spanning tree over the same cities — and it is what
+               separates a run that reached the food from a run that flooded
+               the plate and reached the food somewhere in the middle of it.
+     AUTONOMY  how little of the run the brush was held for. The dish is
+               supposed to be solved by chemotaxis, with the player saying only
+               which way is interesting; a run steered end to end has answered
+               the question with a cursor.
+     VIGOUR    biomass at the end against the peak. Pruning tubes is the
+               result; arriving at it starved is a different outcome that
+               happens to satisfy the same gate.
+     DISPATCH  the clock the dish gave you, against what you spent. Only on the
+               sixteen dishes that set one — the other four are scored on the
+               first three, with the weights renormalised, rather than on a
+               time limit invented here to have something to divide by.
+
+   NET_IDEAL is the one number here that is measured rather than derived: trail
+   mass per cell of ideal span for a network that earns full marks on economy.
+   Eight dishes were played to a win — EXP-01, 02, 03, 04, 06, 07, 11 and 15 —
+   and their finished networks came in between 1005 and 2661 mass per cell of
+   span, the low end being the dishes won quickly and directly and the high end
+   the ones won by spreading. 1000 puts a run at the lean end of that range on
+   full marks and a sprawling one near two fifths, which is the spread the axis
+   is for. It is not a physical constant and a rebalance of the trail field
+   would move it.
+
+   Note what the ideal span is NOT: a true lower bound. It is a straight-line
+   spanning tree, and it ignores walls, so on a cut labyrinth the reachable
+   shortest network is genuinely longer than the ideal it is scored against and
+   the whole dish scores lower. That is left alone deliberately. A mark is
+   compared against your own best on that dish, and on the daily plate against
+   other people running that same dish — both comparisons hold the geometry
+   fixed, so a constant per-dish offset cancels out of every use the number
+   has. Routing the span through the walls would cost a pathfinder in a file
+   whose whole point is that nothing in it pathfinds. */
+var NET_IDEAL = 1000;
+var W_ECON = 0.40, W_AUTO = 0.30, W_VIG = 0.15, W_DISP = 0.15;
+
+/* The shortest network that could have joined what this run actually joined:
+   a minimum spanning tree, by Prim, over the inoculation point and every node
+   the run was holding at the end. Over what it HELD rather than over every
+   node on the plate, because several dishes ask for a subset — four of nine
+   flakes, six of eight — and scoring a run against a network it was never
+   asked to build measures the brief, not the run. */
+function idealSpan(e) {
+  var pts = [[e.inoc.x, e.inoc.y]], i;
+  for (i = 0; i < e.nodes.length; i++) {
+    if (S.nodeDone && S.nodeDone[i]) pts.push([e.nodes[i].x, e.nodes[i].y]);
+  }
+  if (pts.length < 2) return 0;
+  var inTree = [true], best = [], n = pts.length, total = 0;
+  for (i = 1; i < n; i++) { inTree[i] = false; best[i] = Infinity; }
+  for (i = 1; i < n; i++) {
+    var dx = pts[i][0] - pts[0][0], dy = pts[i][1] - pts[0][1];
+    best[i] = Math.sqrt(dx * dx + dy * dy);
+  }
+  for (var added = 1; added < n; added++) {
+    var pick = -1;
+    for (i = 1; i < n; i++) if (!inTree[i] && (pick < 0 || best[i] < best[pick])) pick = i;
+    if (pick < 0) break;
+    inTree[pick] = true;
+    total += best[pick];
+    for (i = 1; i < n; i++) {
+      if (inTree[i]) continue;
+      var ex = pts[i][0] - pts[pick][0], ey = pts[i][1] - pts[pick][1];
+      var d = Math.sqrt(ex * ex + ey * ey);
+      if (d < best[i]) best[i] = d;
+    }
+  }
+  return total;
+}
+
+/* The bands the observer writes in the margin. Five, because a scale with more
+   than that is a number pretending to be a word. */
+var MARKS = [
+  [88, 'exemplary'], [74, 'clean'], [58, 'sound'], [40, 'workable'], [0, 'crude']
+];
+
+function markFor(score) {
+  for (var i = 0; i < MARKS.length; i++) if (score >= MARKS[i][0]) return MARKS[i][1];
+  return MARKS[MARKS.length - 1][1];
+}
+
+/* The four axes and the weighted mark, as fractions of one. A dish abandoned
+   before it engulfed anything spans nothing and scores nothing on economy,
+   rather than dividing by zero into full marks for a network it never built. */
+function runScore(e) {
+  /* netEnd once the run is over, measured live before then — so the harness
+     can watch the axis move without the finished mark ever being re-derived
+     from a plate a replay has since painted over */
+  var net = S.netEnd || netMass();
+  var span = idealSpan(e);
+  var econ = (span > 0 && net > 0) ? (span * NET_IDEAL) / net : 0;
+  var auto  = S.simT > 0 ? 1 - S.cueHeld / S.simT : 1;
+  var vig   = S.peak > 0 ? nAgents / S.peak : 0;
+  econ = clamp(econ, 0, 1);
+  auto = clamp(auto, 0, 1);
+  vig  = clamp(vig, 0, 1);
+
+  var sum = W_ECON * econ + W_AUTO * auto + W_VIG * vig;
+  var wt  = W_ECON + W_AUTO + W_VIG;
+  var disp = -1;
+  if (e.timeLimit) {
+    disp = clamp(1 - S.simT / e.timeLimit, 0, 1);
+    sum += W_DISP * disp;
+    wt  += W_DISP;
+  }
+  var score = Math.round(100 * sum / wt);
+  return { score: score, mark: markFor(score),
+           econ: econ, auto: auto, vig: vig, disp: disp,
+           net: net, span: span };
+}
+
+function pct(f) { return Math.round(f * 100) + '%'; }
+
+/* ------------------------------------------------------------
    13. saved progress
    ------------------------------------------------------------ */
+/* The key is deliberately still v1. Everything v2 adds — marks, ghosts, the
+   daily record — is a new field beside the two v1 wrote, and a v1 payload
+   loads into it unchanged with those fields simply absent. Bumping the key
+   would have thrown away every logged run on the site to gain nothing. */
 var SAVE_KEY = 'slime980.v1';
-var save = { v: 1, done: {}, best: {} };
+var save = { v: 2, done: {}, best: {}, score: {}, ghost: {}, daily: null };
+
+function savedMap(o) { return (o && typeof o === 'object') ? o : {}; }
 
 function loadSave() {
   try {
@@ -5344,19 +5611,61 @@ function loadSave() {
     if (!raw) return;
     var o = JSON.parse(raw);
     if (o && typeof o === 'object') {
-      save.done = (o.done && typeof o.done === 'object') ? o.done : {};
-      save.best = (o.best && typeof o.best === 'object') ? o.best : {};
+      save.done  = savedMap(o.done);
+      save.best  = savedMap(o.best);
+      save.score = savedMap(o.score);
+      save.ghost = savedMap(o.ghost);
+      save.daily = (o.daily && typeof o.daily === 'object') ? o.daily : null;
     }
   } catch (err) { /* private mode, file:// restrictions, corrupt JSON — play anyway */ }
 }
 
+/* Ghosts are the only thing in the save with no ceiling on its size, so they
+   are the only thing that can push it past a browser's storage quota. When
+   that happens the ghosts give way, never the progress: a player losing twenty
+   logged runs and their marks to keep a recording of one of them is the wrong
+   trade in every possible case.
+
+   The biggest one goes first, and the write is retried, rather than all of
+   them going at once — the usual cause is a single marathon run on a single
+   dish, and clearing the other nineteen to make room for it is exactly
+   backwards. */
 function writeSave() {
-  try { window.localStorage.setItem(SAVE_KEY, JSON.stringify(save)); }
-  catch (err) { /* nothing to do; progress is just not persisted */ }
+  var codes, i;
+  for (var attempt = 0; attempt < 24; attempt++) {
+    try {
+      window.localStorage.setItem(SAVE_KEY, JSON.stringify(save));
+      return true;
+    } catch (err) {
+      codes = [];
+      for (i in save.ghost) if (save.ghost[i]) codes.push(i);
+      if (!codes.length) return false;   /* nothing left to shed — give up */
+      var big = codes[0];
+      for (i = 1; i < codes.length; i++) {
+        if (save.ghost[codes[i]].length > save.ghost[big].length) big = codes[i];
+      }
+      delete save.ghost[big];
+    }
+  }
+  return false;
 }
 
 function isDone(i) { return !!save.done[EXPERIMENTS[i].code]; }
-function isUnlocked(i) { return i === 0 || isDone(i - 1); }
+function bestScore(i) { return save.score[EXPERIMENTS[i].code] || 0; }
+
+/* Unlocking used to be a chain: dish i opened when dish i-1 was logged, and
+   one dish a player could not beat therefore hid the twelve behind it for
+   good. EXP-08's ratio band is a plausible place for that to happen, and a
+   schedule that ends at whichever dish someone got stuck on is not a schedule.
+
+   So the gate counts instead of pointing. SLACK dishes past your logged total
+   stay open, which lets a wall be walked around without letting the whole
+   schedule be skipped — and the daily dish (below) ignores the gate outright,
+   because a challenge everyone is running on the same day cannot be one that
+   half of them are locked out of. */
+var UNLOCK_SLACK = 2;
+function isUnlocked(i) { return i <= doneCount() + UNLOCK_SLACK; }
+function unlockNeed(i) { return Math.max(0, i - UNLOCK_SLACK - doneCount()); }
 function doneCount() {
   var c = 0;
   for (var i = 0; i < EXPERIMENTS.length; i++) if (isDone(i)) c++;
@@ -5404,16 +5713,49 @@ function renderTitle() {
       var n = document.createElement('div'); n.className = 'nm'; n.textContent = e.name;
       var l = document.createElement('div'); l.className = 'bl'; l.textContent = e.blurb;
       var s = document.createElement('div'); s.className = 'st';
-      if (!unlocked) s.textContent = 'locked';
-      else if (done) s.textContent = 'logged · ' + fmtTime(save.best[e.code] || 0);
-      else s.textContent = 'available';
+      if (!unlocked) {
+        /* A locked card says what would open it, not merely that it is shut.
+           With the gate counting rather than pointing, "locked" alone no
+           longer implies the answer — the dish in front of it is not
+           necessarily the one in the way. */
+        var need = unlockNeed(i);
+        s.textContent = 'locked · log ' + need + ' more';
+      } else if (done) {
+        s.textContent = 'logged · ' + fmtTime(save.best[e.code] || 0);
+      } else {
+        s.textContent = 'available';
+      }
 
       b.appendChild(c); b.appendChild(n); b.appendChild(l); b.appendChild(s);
+      if (done && bestScore(i)) {
+        var m = document.createElement('div'); m.className = 'mk';
+        m.innerHTML = 'mark <b></b>';
+        m.querySelector('b').textContent = bestScore(i) + ' · ' + markFor(bestScore(i));
+        b.appendChild(m);
+      }
       if (unlocked) b.addEventListener('click', function () { openBrief(i); });
       box.appendChild(b);
     })(i);
   }
   $('progress').textContent = doneCount() + ' / ' + EXPERIMENTS.length + ' logged';
+  renderDaily();
+}
+
+/* The day's plate, as a card. It names the dish and the specimen line, because
+   those two together ARE the challenge — someone comparing marks needs to be
+   able to see they ran the same one. */
+function renderDaily() {
+  var b = $('daily-go');
+  if (!b || !DAILY) return;
+  var e = EXPERIMENTS[DAILY.idx];
+  b.innerHTML = '';
+  var c = document.createElement('div'); c.className = 'code';
+  c.textContent = e.code + ' · ' + seedLabel(DAILY.seed);
+  var n = document.createElement('div'); n.className = 'nm'; n.textContent = e.name;
+  var st = document.createElement('div'); st.className = 'st';
+  st.textContent = dailyDone() ? 'logged · mark ' + dailyScore() : 'the same plate for everyone today';
+  b.appendChild(c); b.appendChild(n); b.appendChild(st);
+  $('daily-st').textContent = dailyDone() ? 'logged' : 'open';
 }
 
 function goTitle() {
@@ -5514,10 +5856,12 @@ var stepTarget = 0;
    that produced it. A held brush spans many steps and is recorded once per
    step; an idle run records nothing at all.
 
-   Positions are Float64: ptr.gx/gy are doubles, paintBrush reads them as
-   doubles, and rounding them to Float32 on the way into the trace would make
-   a replay land on a very slightly different cone. Same bits in, same dish
-   out — that is the whole contract. */
+   Positions are stored as the Int16 quantum count toGrid already snapped them
+   to (see CUE_Q). That is exact, not a rounding: ptr.gx is by construction a
+   multiple of 1/CUE_Q, so the trace holds the same number the sim consumed and
+   hands back the same number on the way out. Same bits in, same dish out —
+   that is the whole contract, and it is now a contract a trace can also be
+   written to storage and read back under. */
 var TRACE = null;
 var REPLAY = { on: false, i: 0, trace: null };
 
@@ -5527,8 +5871,8 @@ function newTrace(idx, seed) {
     idx: idx, seed: seed, n: 0, cap: cap, cues: 0,
     step: new Int32Array(cap),
     mode: new Uint8Array(cap),
-    gx: new Float64Array(cap),
-    gy: new Float64Array(cap)
+    gx: new Int16Array(cap),
+    gy: new Int16Array(cap)
   };
 }
 
@@ -5536,8 +5880,8 @@ function growTrace(t) {
   var c = t.cap * 2;
   var s = new Int32Array(c);   s.set(t.step); t.step = s;
   var m = new Uint8Array(c);   m.set(t.mode); t.mode = m;
-  var x = new Float64Array(c); x.set(t.gx);   t.gx = x;
-  var y = new Float64Array(c); y.set(t.gy);   t.gy = y;
+  var x = new Int16Array(c);   x.set(t.gx);   t.gx = x;
+  var y = new Int16Array(c);   y.set(t.gy);   t.gy = y;
   t.cap = c;
 }
 
@@ -5545,7 +5889,8 @@ function recordBrush(s, mode, gx, gy) {
   var t = TRACE;
   if (!t) return;
   if (t.n >= t.cap) growTrace(t);
-  t.step[t.n] = s; t.mode[t.n] = mode; t.gx[t.n] = gx; t.gy[t.n] = gy;
+  t.step[t.n] = s; t.mode[t.n] = mode;
+  t.gx[t.n] = Math.round(gx * CUE_Q); t.gy[t.n] = Math.round(gy * CUE_Q);
   t.n++;
 }
 
@@ -5561,13 +5906,135 @@ function feedTrace(s) {
   if (REPLAY.i < t.n && t.step[REPLAY.i] === s) {
     ptr.down = true;
     ptr.mode = t.mode[REPLAY.i];
-    ptr.gx = t.gx[REPLAY.i];
-    ptr.gy = t.gy[REPLAY.i];
+    ptr.gx = t.gx[REPLAY.i] / CUE_Q;
+    ptr.gy = t.gy[REPLAY.i] / CUE_Q;
     REPLAY.i++;
   } else {
     ptr.down = false;
   }
 }
+
+/* ------------------------------------------------------------
+   15c. ghosts — a trace written down
+   ------------------------------------------------------------
+   A trace already replays a run; it just never survived the tab. Storing the
+   best run's trace per dish turns the replay control into a ghost: the line
+   you are trying to beat, played back on the plate you are about to run.
+
+   The wire format is one byte string, base64'd, carrying a fixed 10-byte
+   header and then 7 bytes an entry. The header is the version, the dish index,
+   the 24-bit seed, and the cue tally — that last one because cues are counted
+   from pointer events rather than from steps, so it is the one figure a replay
+   of the tape cannot rederive. Each entry is the step as a delta from the
+   previous one (Uint16, and a delta cannot overflow it — the longest dish is
+   900 sim-seconds, which is 54,000 steps), the mode, and the two Int16 quantum
+   counts. Fixed-width beats a varint here: the decoder is
+   four typed-array reads in a loop instead of a bit reader, and the saving a
+   varint would win on the step column is one byte an entry against the risk of
+   a decoder that is wrong in a way only a long run reveals.
+
+   Both ends are total: a ghost that fails to decode for any reason — a
+   truncated string, a version this build does not know, a length that is not a
+   whole number of entries — returns null and the dish simply has no ghost. It
+   is a recording of a run, and there is nothing here worth throwing an error
+   over. */
+var GHOST_V = 1;
+var GHOST_HEAD = 10;
+var GHOST_ENT = 7;
+
+/* The size of the ghost a single run may leave behind. A ceiling on one
+   recording, not on the store: writeSave sheds ghosts when the browser
+   actually refuses the write, and this only stops one pathological run from
+   being the reason it has to. 200k of base64 is around 21,000 recorded steps,
+   which is nearly six sim-minutes of held brush — more than the reserve
+   permits in any dish the schedule contains. */
+var GHOST_MAX = 200000;
+
+function encodeGhost(t) {
+  if (!t || !t.n) return null;
+  var bytes = new Uint8Array(GHOST_HEAD + t.n * GHOST_ENT);
+  var dv = new DataView(bytes.buffer);
+  dv.setUint8(0, GHOST_V);
+  dv.setUint8(1, t.idx & 0xFF);
+  dv.setUint32(2, t.seed >>> 0);
+  dv.setUint32(6, t.cues >>> 0);
+  var prev = 0;
+  for (var i = 0; i < t.n; i++) {
+    var o = GHOST_HEAD + i * GHOST_ENT;
+    var d = t.step[i] - prev;
+    if (d < 0 || d > 0xFFFF) return null;   /* not representable — no ghost */
+    prev = t.step[i];
+    dv.setUint16(o, d);
+    dv.setUint8(o + 2, t.mode[i]);
+    dv.setInt16(o + 3, t.gx[i]);
+    dv.setInt16(o + 5, t.gy[i]);
+  }
+  return b64enc(bytes);
+}
+
+function decodeGhost(str) {
+  var bytes = b64dec(str);
+  if (!bytes || bytes.length < GHOST_HEAD) return null;
+  var body = bytes.length - GHOST_HEAD;
+  if (body % GHOST_ENT !== 0) return null;
+  var dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.length);
+  if (dv.getUint8(0) !== GHOST_V) return null;
+  var idx = dv.getUint8(1);
+  if (idx >= EXPERIMENTS.length) return null;
+  var n = body / GHOST_ENT;
+  var t = newTrace(idx, dv.getUint32(2) & SEED_MASK);
+  t.cues = dv.getUint32(6);
+  while (t.cap < n) growTrace(t);
+  var prev = 0;
+  for (var i = 0; i < n; i++) {
+    var o = GHOST_HEAD + i * GHOST_ENT;
+    prev += dv.getUint16(o);
+    t.step[i] = prev;
+    t.mode[i] = dv.getUint8(o + 2);
+    t.gx[i] = dv.getInt16(o + 3);
+    t.gy[i] = dv.getInt16(o + 5);
+  }
+  t.n = n;
+  return t;
+}
+
+/* btoa/atob take and return binary strings, so the bytes go through in chunks
+   — String.fromCharCode.apply on a 130,000-element array is an argument list
+   that long, and engines refuse it well before that. */
+function b64enc(bytes) {
+  try {
+    var out = '', CH = 8192;
+    for (var i = 0; i < bytes.length; i += CH) {
+      out += String.fromCharCode.apply(null, bytes.subarray(i, Math.min(i + CH, bytes.length)));
+    }
+    return window.btoa(out);
+  } catch (err) { return null; }
+}
+
+function b64dec(str) {
+  if (typeof str !== 'string' || !str) return null;
+  try {
+    var bin = window.atob(str);
+    var bytes = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return bytes;
+  } catch (err) { return null; }
+}
+
+/* The stored ghost for a dish, decoded, or null. Decoded on demand rather than
+   at load: twenty ghosts is a few hundred kilobytes of base64 that the title
+   screen has no use for, and the one being replayed is the only one anybody
+   ever looks at. */
+function ghostFor(i) {
+  var raw = save.ghost[EXPERIMENTS[i].code];
+  if (!raw) return null;
+  var t = decodeGhost(raw);
+  /* a ghost that decodes to a different dish than the one it is filed under is
+     a corrupt save, not a ghost — drop it rather than replaying the wrong dish */
+  return (t && t.idx === i) ? t : null;
+}
+
+function hasGhost(i) { return !!save.ghost[EXPERIMENTS[i].code]; }
 
 /* Where the three dish-ending controls live. On a bench with room they are on
    the control row, as they always were; on a phone they move inside the
@@ -5719,6 +6186,85 @@ var bootSalt = (Date.now() >>> 0);
 var attempts = 0;
 function freshSeed(i) { return mix32(i + 1, ++attempts, bootSalt) & SEED_MASK; }
 
+/* ---------- the daily dish ----------
+   The second clock read in the file, and the only other one. bootSalt asks
+   what time it is to avoid repeating itself; this asks to guarantee the
+   opposite — every copy of the page, everywhere, derives the same dish and the
+   same 24-bit seed from the same UTC day number, so "today's plate" is one
+   plate and two people comparing marks on it are comparing the same run.
+
+   UTC rather than local: a daily that rolls over at midnight in each player's
+   own zone is a different dish depending on where you opened it, which is the
+   one property it must not have.
+
+   It ignores the unlock gate. A challenge the whole site is running on the
+   same day cannot be one most of the site is locked out of, and a dish reached
+   this way is a single plate rather than a place in the schedule — logging it
+   marks the day, and the schedule is still walked in order. */
+var DAY_MS = 86400000;
+function dayNumber() { return Math.floor(Date.now() / DAY_MS); }
+
+function makeDaily(day) {
+  var h = mix32(day, 0x5DA11, 0x9E3779B9);
+  return {
+    day: day,
+    idx: h % EXPERIMENTS.length,
+    seed: mix32(day, h, 0x85EBCA6B) & SEED_MASK
+  };
+}
+
+var DAILY = null;
+
+/* the mark logged against TODAY's plate, 0 if the record is for another day */
+function dailyScore() {
+  return (save.daily && DAILY && save.daily.day === DAILY.day) ? (save.daily.score | 0) : 0;
+}
+function dailyDone() { return !!(save.daily && DAILY && save.daily.day === DAILY.day); }
+
+/* ---------- plates as addresses ----------
+   A run is already reproducible from (dish, seed) — the result screen has
+   printed the seed since the beginning and SLIME.start() has always taken it
+   back. What was missing was a way to hand that pair to somebody without
+   asking them to open a console: the same two values in the URL fragment,
+   which the page reads on load and on every change to it.
+
+   `#EXP-03/a3f2c1` is the dish and the specimen line, spelled the way the
+   notebook spells them. `#daily` is today's plate. Both bypass the unlock
+   gate, for the reason the daily does: a link is a plate, not a place in the
+   schedule, and the schedule is still walked in order. */
+function runLink(i, seed) {
+  var base = String(window.location.href).split('#')[0];
+  return base + '#' + EXPERIMENTS[i].code + '/' + seedLabel(seed).slice(1);
+}
+
+function parseHash(h) {
+  h = String(h == null ? '' : h).replace(/^#/, '');
+  if (!h) return null;
+  if (h.toLowerCase() === 'daily') {
+    return DAILY ? { idx: DAILY.idx, seed: DAILY.seed } : null;
+  }
+  var parts = h.split('/');
+  var code = parts[0].toUpperCase();
+  for (var i = 0; i < EXPERIMENTS.length; i++) {
+    if (EXPERIMENTS[i].code !== code) continue;
+    /* a code with no seed opens the brief rather than a plate: it names a dish
+       and nothing about which run of it, so it is a link to the experiment */
+    var raw = parts.length > 1 ? parts[1] : '';
+    return { idx: i, seed: raw ? normSeed(raw) : null };
+  }
+  return null;
+}
+
+/* Act on the fragment. Returns whether it went anywhere, so boot can fall
+   back to the title screen when it did not. */
+function routeHash() {
+  var r = parseHash(window.location.hash);
+  if (!r) return false;
+  if (r.seed == null) openBrief(r.idx);
+  else startRun(r.idx, r.seed);
+  return true;
+}
+
 /* trace: a recorded run to play back instead of taking live input. Passing one
    makes this a REPLAY — no fresh seed is minted, nothing is recorded, and the
    stored trace is left exactly as it was so it can be replayed again. */
@@ -5742,6 +6288,10 @@ function startRun(i, seed, trace) {
   setSpeed(1);
   S.running = true; S.paused = false; S.over = false;
   S.simT = 0; S.peak = 0; S.cues = 0;
+  /* a fresh plate arrives with a full reserve — the scarcity is meant to shape
+     a run, not to open one already short */
+  S.cueRes = cueCapOf(e); S.cueHeld = 0;
+  S.netEnd = 0;
   S.nodeProg = new Float32Array(e.nodes.length);
   S.nodeIdle = new Float32Array(e.nodes.length);
   S.nodeDone = new Array(e.nodes.length);
@@ -5784,6 +6334,13 @@ function startRun(i, seed, trace) {
   var two = !!(e.hab || e.diet);
   $('h-habwrap').style.display = two ? '' : 'none';
   $('console').classList.toggle('twometer', two);
+  /* EXP-01 runs no reserve, so it shows no meter for one: a dish teaching what
+     a cue is must not also be the dish that rations them. */
+  var cap = cueCapOf(e);
+  $('h-cuewrap').style.display = cap ? '' : 'none';
+  $('h-cuewrap').className = 'meter cue';
+  $('h-cue').textContent = '100%';
+  $('h-cuebar').style.width = '100%';
   $('h-meterlab').textContent = e.diet && !e.hab ? 'P : C' : 'Habituation';
   $('h-hab').textContent = e.diet && !e.hab ? 'p 0 · c 0' : '0%';
   $('h-habbar').style.width = '0%';
@@ -5831,6 +6388,9 @@ function finish(won, reason) {
   S.failReason = reason;
   stopRun();
   ptr.down = false;
+  /* the network as the run leaves it, measured before anything else can touch
+     the plate — a replay started from the verdict overwrites the trail field */
+  S.netEnd = netMass();
 
   var e = S.exp;
   /* A replay reaches exactly the result it is replaying, which is already in
@@ -5841,6 +6401,20 @@ function finish(won, reason) {
       var prev = save.best[e.code];
       if (!prev || S.simT < prev) save.best[e.code] = S.simT;
       save.done[e.code] = true;
+      /* The mark, and with it the ghost. They move together on purpose: the
+         stored recording is meant to be the run the stored mark refers to, so
+         a player replaying their best run watches the run that earned the
+         number beside it rather than whichever one happened to be last. */
+      var sc = runScore(e);
+      if (sc.score > (save.score[e.code] || 0)) {
+        save.score[e.code] = sc.score;
+        var g = TRACE ? encodeGhost(TRACE) : null;
+        if (g && g.length <= GHOST_MAX) save.ghost[e.code] = g;
+        else delete save.ghost[e.code];
+      }
+      if (DAILY && DAILY.idx === S.idx && S.seed === DAILY.seed) {
+        save.daily = { day: DAILY.day, score: Math.max(sc.score, dailyScore()) };
+      }
       writeSave();
     }
   }
@@ -5885,7 +6459,21 @@ function buildResult(won) {
   if (e.donor) rows.push(['Fusion', S.fused ? 'achieved' : 'never made contact']);
   if (e.diet) rows.push(['Diet', 'P ' + Math.round(S.dietP) + ' · C ' + Math.round(S.dietC) + ' · ratio ' + dietRatio()]);
   if (e.shocks) rows.push(['Dry shocks survived', String(S.shocksSurvived)]);
+  /* The mark and what it was made of. Only on a win: the four axes are a
+     reading of how a result was reached, and a culture that died on the agar
+     did not reach one — scoring the pruning of a network that starved rather
+     than withdrew would be flattering the wrong thing. */
+  var sc = null;
+  if (won) {
+    sc = runScore(e);
+    rows.push(['Mark', sc.score + ' / 100 · ' + sc.mark]);
+    rows.push(['— economy', pct(sc.econ) + ' (against the shortest network)']);
+    rows.push(['— autonomy', pct(sc.auto) + ' (run unsteered)']);
+    rows.push(['— vigour', pct(sc.vig) + ' (biomass held)']);
+    if (sc.disp >= 0) rows.push(['— dispatch', pct(sc.disp) + ' (of the plate\'s clock)']);
+  }
   if (won && save.best[e.code] != null) rows.push(['Best run', fmtTime(save.best[e.code])]);
+  if (won && save.score[e.code]) rows.push(['Best mark', save.score[e.code] + ' / 100']);
   /* The plate's provenance, last, the way a notebook records it: this dish is
      reproducible from that number alone — SLIME.start(idx, '#a3f2c1') runs it
      again, cell for cell, at any time-lapse setting. It used to carry a swatch
@@ -5900,6 +6488,9 @@ function buildResult(won) {
     head: won ? 'Result logged' : 'Culture lost',
     body: body,
     rows: rows,
+    idx: S.idx,
+    /* the plate, addressable: the same dish and seed anyone else can open */
+    link: runLink(S.idx, S.seed),
     nextText: hasNext ? 'Next experiment' : 'Schedule',
     nextMode: hasNext ? 'next' : 'menu'
   };
@@ -5938,6 +6529,35 @@ function paintResult(R) {
       ? fmtNum(TRACE.n) + ' cue-steps recorded'
       : 'no cues recorded — the dish ran itself';
   }
+
+  buildReplayRow(R.idx);
+
+  SHARE_LINK = R.link || '';
+  var sn = $('r-sharenote');
+  if (sn) sn.textContent = SHARE_LINK.replace(/^[a-z]+:\/\//, '');
+  var cp = $('r-copy');
+  if (cp) cp.textContent = 'Copy link';
+}
+
+/* The link the copy button is currently offering. Held here rather than read
+   back off the note element, so what gets copied is the URL and not whatever
+   the note had to do to it to fit on one line. */
+var SHARE_LINK = '';
+
+/* Clipboard access is permission-gated, absent on file:// in some browsers,
+   and rejects asynchronously — so the button says what happened rather than
+   assuming. Falling back to selecting the text gives a keyboard copy a target
+   on the browsers that refuse the API outright. */
+function copyShareLink() {
+  var b = $('r-copy');
+  if (!SHARE_LINK || !b) return;
+  var ok = function () { b.textContent = 'Copied'; };
+  var no = function () { b.textContent = 'Copy failed'; };
+  try {
+    if (window.navigator && navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(SHARE_LINK).then(ok, no);
+    } else { no(); }
+  } catch (err) { no(); }
 }
 
 /* The panel lives under the dish and shows without switching screens: the
@@ -6033,10 +6653,15 @@ function frame(ts) {
          brush actually was. Either way the paint call below is the same one,
          so what is recorded is precisely what the sim consumed. */
       if (REPLAY.on) feedTrace(stepsRun);
-      if (ptr.down) {
-        paintBrush(ptr.gx, ptr.gy, ptr.mode);
-        if (!REPLAY.on) recordBrush(stepsRun, ptr.mode, ptr.gx, ptr.gy);
-      }
+      /* The reserve is stepped from what the player ASKED for, and the brush
+         is painted only if it could be afforded. What goes into the trace is
+         the ask, not the outcome: a replay re-runs this same accounting over
+         the same steps and denies the same ones, so recording the outcome
+         would store a decision the replay is about to make for itself — and
+         store it in a form that could not survive a change to the rates. */
+      var want = ptr.down;
+      if (cueTick(want, ptr.mode)) paintBrush(ptr.gx, ptr.gy, ptr.mode);
+      if (want && !REPLAY.on) recordBrush(stepsRun, ptr.mode, ptr.gx, ptr.gy);
       step(); stepsRun++; acc -= DT; steps++;
       /* Checked after the step rather than before it, so a frame always makes
          progress: a box smaller than a single step still runs one, and the
@@ -6096,12 +6721,31 @@ function frame(ts) {
 /* ------------------------------------------------------------
    17. input
    ------------------------------------------------------------ */
+/* Pointer position, in grid cells, snapped to CUE_Q steps of a cell.
+
+   The snap is what makes a run STORABLE. A trace is the whole recording of a
+   run, and an arbitrary double per axis per step is 16 bytes that compress to
+   nothing; snapped, the same position is two Int16s and a ghost fits in a
+   browser's storage instead of overflowing it. The quantum is a sixteenth of
+   a cell — on the widest plate the sheet allows, about a tenth of a screen
+   pixel, which is below the resolution of the pointer that produced it.
+
+   It is applied HERE, at the one place a position enters the program, rather
+   than on the way into storage. Snapping on the way to disk would mean a
+   stored ghost replayed from slightly different numbers than the run it was
+   recorded from, and the dish is chaotic enough that "slightly different" is
+   a different dish by the end of it. Snapped at the source, the live run, the
+   in-memory trace and the stored ghost all carry the same numbers, and the
+   contract the replay rests on — same bits in, same dish out — holds across
+   all three. */
+function snapQ(v) { return Math.round(v * CUE_Q) / CUE_Q; }
+
 function toGrid(ev) {
   var r = cv.getBoundingClientRect();
   if (!r.width || !r.height) return null;
   var gx = (ev.clientX - r.left) / r.width * GW;
   var gy = (ev.clientY - r.top) / r.height * GH;
-  return { x: clamp(gx, 0, GW - 1), y: clamp(gy, 0, GH - 1) };
+  return { x: snapQ(clamp(gx, 0, GW - 1)), y: snapQ(clamp(gy, 0, GH - 1)) };
 }
 
 function setTouchMode(m) {
@@ -6306,19 +6950,38 @@ function bindButtons() {
     }
   });
   $('btn-wipe').addEventListener('click', function () {
-    if (!window.confirm('Wipe the specimen log? All logged runs and best times are lost.')) return;
-    save.done = {}; save.best = {};
+    if (!window.confirm('Wipe the specimen log? All logged runs, marks and recorded best runs are lost.')) return;
+    save.done = {}; save.best = {}; save.score = {}; save.ghost = {}; save.daily = null;
     try { window.localStorage.removeItem(SAVE_KEY); } catch (err) { /* nothing to remove */ }
     renderTitle();
   });
-  buildReplayRow();
+  $('r-copy').addEventListener('click', copyShareLink);
+  /* The daily bypasses the gate, so it starts a run rather than opening a
+     brief: there is no schedule position to arrive at. */
+  $('daily-go').addEventListener('click', function () {
+    if (DAILY) startRun(DAILY.idx, DAILY.seed);
+  });
+  /* A link pasted into the bar of a page that is already open changes the
+     fragment without reloading, so the fragment has to be watched and not only
+     read at boot. Unconditionally: nothing in the file ever writes the
+     fragment itself — runLink only builds the string the copy button hands
+     over — so every change to it is somebody asking to go there, including
+     while a dish is running. A fragment that names no dish routes nowhere and
+     leaves the screen alone, which is what makes an edited or truncated link
+     harmless rather than a way to lose a live plate. */
+  window.addEventListener('hashchange', routeHash);
+  buildReplayRow(null);
 }
 
 /* The replay control: the same rates the time-lapse button cycles, offered as
    one button each because from the verdict you are choosing how long to spend
    watching, not stepping through a cycle. ×4 is the suggested rate — fast
-   enough to be a recap, slow enough to see the front move. */
-function buildReplayRow() {
+   enough to be a recap, slow enough to see the front move.
+
+   Rebuilt per verdict rather than once at boot, because the row now ends in a
+   button that only some dishes have: the best run on record, if one is stored
+   and it is not the run you are already looking at. */
+function buildReplayRow(idx) {
   var box = $('r-replay');
   if (!box) return;
   box.innerHTML = '';
@@ -6333,10 +6996,45 @@ function buildReplayRow() {
       box.appendChild(b);
     })(SPEEDS[i]);
   }
+  if (idx == null || !hasGhost(idx)) return;
+  var g = document.createElement('button');
+  g.type = 'button';
+  g.className = 'btn ghost rsp';
+  g.textContent = 'Best run';
+  g.setAttribute('aria-label', 'Replay the best run on record for this dish');
+  g.addEventListener('click', function () { startGhost(idx, 4); });
+  box.appendChild(g);
+}
+
+/* Play back the stored best run for a dish. It is the ordinary replay path
+   with a trace that came off disk instead of out of this session — the plate
+   it builds is the ghost's own seed, which is a different dish from the one
+   under the verdict and is meant to be: the point of watching it is that it is
+   the run that scored. Leaving it early restores the verdict's own plate the
+   way leaving any other replay does. */
+function startGhost(i, sp) {
+  var t = ghostFor(i);
+  if (!t) {
+    /* Filed but unreadable — a save edited by hand, or written by a build that
+       spelled the format differently. hasGhost only knows that a string is on
+       file, so the button was offered on the strength of that; rather than
+       leave a control that does nothing when pressed, drop the entry and take
+       the button away with it. */
+    if (save.ghost[EXPERIMENTS[i].code]) {
+      delete save.ghost[EXPERIMENTS[i].code];
+      writeSave();
+      if (LAST_RESULT) buildReplayRow(LAST_RESULT.idx);
+    }
+    return false;
+  }
+  startRun(t.idx, t.seed, t);
+  setSpeed(sp || 4);
+  return true;
 }
 
 function init() {
   loadSave();
+  DAILY = makeDaily(dayNumber());
   if (detectCoarse()) markTouch();
   initCanvas();
   bindInput();
@@ -6346,6 +7044,10 @@ function init() {
   setSpeed(1);
   renderTitle();
   show('scr-title');
+  /* A fragment naming a dish opens it; anything else — including nothing —
+     leaves the schedule up. The title screen is rendered either way so that
+     leaving a linked plate arrives somewhere already built. */
+  routeHash();
 
   /* read-only handle for the harness; nothing in the game reads it back */
   window.SLIME = {
@@ -6457,6 +7159,41 @@ function init() {
     start: function (i, seed) {
       startRun(clamp(i | 0, 0, EXPERIMENTS.length - 1), seed);
       return S.seed;
+    },
+    /* the cue reserve as the meter reads it, plus the raw seconds either side
+       of it — held is what the autonomy axis divides, res is what the brush
+       spends, and a test that cannot see both cannot tell a drain from a
+       refusal to paint */
+    cue: function () {
+      return { res: S.cueRes, held: S.cueHeld,
+               cap: cueCapOf(S.exp), frac: cueFrac() };
+    },
+    /* the network the plate is holding, and the shortest one that would have
+       joined the same points — the two numbers the economy axis is a ratio of */
+    net: function () {
+      return { mass: S.netEnd || netMass(),
+               span: S.exp ? idealSpan(S.exp) : 0 };
+    },
+    /* the four axes and the mark, for the run as it stands. Live, not only at
+       the verdict: a harness watching it move is how the axes were calibrated. */
+    score: function () { return S.exp ? runScore(S.exp) : null; },
+    /* today's plate, and the link that addresses any plate */
+    daily: function () {
+      return DAILY ? { day: DAILY.day, idx: DAILY.idx, seed: DAILY.seed,
+                       label: seedLabel(DAILY.seed), done: dailyDone(),
+                       score: dailyScore() } : null;
+    },
+    link: function () { return S.idx >= 0 ? runLink(S.idx, S.seed) : ''; },
+    /* the ghost store, addressable: encode round-trips the live trace, play
+       replays what is filed for a dish, and has says whether anything is */
+    ghost: {
+      encode: function () { return TRACE ? encodeGhost(TRACE) : null; },
+      decode: function (str) {
+        var t = decodeGhost(str);
+        return t ? { idx: t.idx, seed: t.seed, n: t.n, cues: t.cues } : null;
+      },
+      has: function (i) { return hasGhost(i); },
+      play: function (i, sp) { return startGhost(i, sp); }
     },
     /* recorded brush-steps of the last played run (0 for an idle run) */
     trace: function () { return TRACE ? TRACE.n : 0; },

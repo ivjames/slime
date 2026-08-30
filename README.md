@@ -86,6 +86,72 @@ seed might name is still there, now as a guard on that one palette.
 | R | reset the dish |
 | Escape | close the key list, leave a replay, abandon the dish — in that order |
 
+### The cue reserve
+
+Cueing is not free. Every dish but EXP-01 runs a reserve of cue-seconds:
+holding the brush spends it, letting go rebuilds it at rather less than the
+rate it went, and at zero the brush paints nothing until you release. The
+meter on the console reads it, and the note line says so when it runs out.
+
+It exists because a free brush had exactly one dominant line of play on all
+twenty dishes — park the cue on the food and wait — which is not steering an
+organism so much as holding a door open for it. The intended rhythm is nudge,
+let the chemotaxis run, nudge again: the organism does the searching, and the
+player only says which way looks interesting. Retract draws at half rate,
+because pulling out of a dead end is the corrective move and the dishes that
+need it most are the ones where being unable to afford it would be fatal
+rather than instructive.
+
+## Marks
+
+A finished run is scored out of 100 on four axes, each a ratio of the run
+against itself or against the dish's own geometry, so none of them needs a
+hand-tuned par per dish.
+
+| axis | weight | what it reads |
+|---|---|---|
+| economy | .40 | the network you were left holding, against the shortest one that could have joined the same points — Tero 2010's own comparison, plasmodium against minimum spanning tree |
+| autonomy | .30 | how little of the run the brush was held for |
+| vigour | .15 | biomass at the end against the peak — pruning is the result, arriving starved is a different outcome that satisfies the same gate |
+| dispatch | .15 | how much of the plate's clock you left unspent (the sixteen dishes that set one; the other four renormalise over the first three) |
+
+The mark bands are the observer's marginal note: **crude**, **workable**,
+**sound**, **clean**, **exemplary**. Your best mark per dish is kept beside
+your best time, and the run that earned it is kept with it — see below.
+
+The economy axis measures the finished network against a straight-line
+spanning tree, which ignores walls, so a cut labyrinth scores lower across the
+board than open agar does. That is left alone on purpose: a mark is only ever
+compared against your own best on that dish, or against other people running
+that same dish on the same day, and both comparisons hold the geometry fixed.
+
+## Replays, ghosts and links
+
+Every run records the cues that produced it, and the dish is a pure function
+of its seed and those cues — so the verdict screen can replay the run you just
+finished, at ×1, ×4 or ×12.
+
+- **Ghosts.** The run that earned your best mark on a dish is kept, and
+  **Best run** on the verdict screen plays it back. It replays cell for cell,
+  not approximately: the pointer is snapped to a sixteenth of a cell when it
+  enters the program, which is below the resolution of the pointer that
+  produced it and is what lets a whole run be written down and read back.
+- **Plate links.** The fragment addresses a dish and a seed, so any plate can
+  be handed to somebody else. `#EXP-03/a3f2c1` opens that dish on that exact
+  plate, `#EXP-03` alone opens its brief, and `#daily` opens the day's.
+  **Copy link** on the verdict screen puts the current one on the clipboard.
+- **The plate of the day.** One dish and one seed derived from the UTC day
+  number, so every copy of the page derives the same plate and two people
+  comparing marks are comparing the same run. It ignores the unlock gate and
+  logging it advances nothing — it is a plate, not a place in the schedule.
+
+## The schedule
+
+Dishes unlock on a count rather than in a chain: two beyond your logged total
+stay open, so a dish you cannot beat can be walked around without the rest of
+the schedule being skippable. A locked card says how many more runs would open
+it. The daily plate and any plate link ignore the gate entirely.
+
 On a touch screen the same verbs are a hold or drag for a growth cue, a second
 finger to flip that drag into a retract, and a Grow / Retract switch on the
 control row for retracting one-handed. Hold and the time-lapse sit beside it;
