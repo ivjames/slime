@@ -81,13 +81,22 @@ function pick(arr) { return arr[(rnd() * arr.length) | 0]; }
 /* ------------------------------------------------------------
    0c. colour: HSL, WCAG contrast
    ------------------------------------------------------------
-   The run seed is printed as a hex colour, so the organism is grown in that
-   colour. Which means a seed can name any colour at all, including ones that
-   vanish against a nearly black dish or turn the dark-on-accent buttons into
-   mud. Everything below exists so the specimen line can own the palette
-   without the palette becoming unreadable: contrast is COMPUTED against the
-   real backgrounds and the lightness is walked until it clears the bar.
-   Pure arithmetic, no draws — the tint must not perturb the sim stream. */
+   The organism is grown in the colour the organism actually is: the chrome
+   yellow of a Physarum plasmodium on agar. One palette, every run — the seed
+   still names the plate and still reproduces it cell for cell, but it no
+   longer names its colour, because a specimen line is a specimen line and a
+   slime mold is yellow.
+
+   The machinery below outlived the seed that needed it. It was written when
+   the seed picked the hue and so could pick one that vanished against a
+   nearly black dish or turned the dark-on-accent buttons into mud, and it
+   answers that by COMPUTING contrast against the real backgrounds and walking
+   the lightness until it clears the bar. With one fixed colour the walk has
+   nothing to do — the shipped tone clears every floor with margin, see
+   applyPalette — so what is left is a guard: change PLASMODIUM to a tone that
+   does not clear, and the dish stays legible rather than silently going
+   unreadable. Pure arithmetic, no draws — the palette must not perturb the
+   sim stream. */
 function srgbLin(c) {
   c = c / 255;
   return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
@@ -132,11 +141,19 @@ function hslToRgb(h, s, l) {
   }
   return [Math.round(r * 255), Math.round(g * 255), Math.round(b * 255)];
 }
-function mixWhite(c, k) {
-  return [Math.round(c[0] + (255 - c[0]) * k),
-          Math.round(c[1] + (255 - c[1]) * k),
-          Math.round(c[2] + (255 - c[2]) * k)];
+function mixToward(c, t, k) {
+  return [Math.round(c[0] + (t[0] - c[0]) * k),
+          Math.round(c[1] + (t[1] - c[1]) * k),
+          Math.round(c[2] + (t[2] - c[2]) * k)];
 }
+/* Two different walks, and which one a thing takes is a claim about what the
+   thing IS. mixWhite is translucency: a film thin enough to see the lamp
+   through loses colour as it thins, which is what the advancing fan does.
+   mixLamp is illumination: a lit surface keeps its pigment and gains the
+   lamp's, which is what a tube's crest does. Walking a crest toward white was
+   the old way and it bleached the trunks — see VEIN_BANDS. */
+function mixWhite(c, k) { return mixToward(c, [255, 255, 255], k); }
+function mixLamp(c, k) { return mixToward(c, LAMP, k); }
 function hex2(n) { var h = (n | 0).toString(16); return h.length < 2 ? '0' + h : h; }
 function hexOf(c) { return '#' + hex2(c[0]) + hex2(c[1]) + hex2(c[2]); }
 function rgba(c, a) { return 'rgba(' + c[0] + ',' + c[1] + ',' + c[2] + ',' + a + ')'; }
@@ -1635,11 +1652,12 @@ var nAgents = 0;
    expressed the way the organism expresses it, by how WIDE the tube is, which
    the field renders directly and the vein lines in 9b render as line weight.
 
-   WHICH flat colour is the RUN'S, not the photograph's. The tint derived from
-   the seed in applyTint feeds this ramp and the vein bands below it, so the
-   threshold keeps the hard edge and the seed keeps the specimen its colour;
-   the reference plate is then simply the run whose seed happens to be that
-   yellow. */
+   WHICH flat colour is the photograph's. PLASMODIUM feeds this ramp and the
+   vein bands below it, so the threshold keeps the hard edge and the plate
+   keeps the colour of the thing it is a plate of. It used to be the RUN'S
+   instead — derived from the seed, any hue at all — and the reference yellow
+   survived only as the tone a run got when its seed happened to land near it.
+   A dish of magenta slime is a nice number and the wrong organism. */
 var AGAR = [20, 22, 17];        // the dish, unoccupied
 var BODY_T    = 9.0;            // trail at which tissue begins
 var BODY_SOFT = 1.4;            // trail over which the edge resolves
@@ -1675,7 +1693,7 @@ var BRUSH_PEAK = 1.15;        // the brush cone's tip, the most cueF/retF holds
    without the slime mat's film on the unoccupied side. The mat is the
    unkind one: it fades under tissue, so it lifts the ground WITHOUT lifting
    the rim. Additive light compresses a contrast ratio from below, so the
-   floor in applyTint is demanded against all of these, not against bare
+   floor in applyPalette is demanded against all of these, not against bare
    agar. Sixteen bases, each with a matless and a matted ground luminance;
    the body beside them shares everything but the mat. All static, so built
    once. */
@@ -1731,11 +1749,12 @@ var FLOOR_STACKS = (function () {
    own shadow lives on the shape. */
 var ISH_D     = 2;      // throw, in cells, diagonally down-light per tap
 var ISH_DEPTH = 0.30;   // full-shade depth, on the body's contribution
-/* The depth the RUN actually paints with. Usually ISH_DEPTH; applyTint trims
-   it for the rare seed whose tint cannot be walked light enough for its
-   fully shaded edge to keep the 3:1 body floor (see the solve). Legibility
-   outranks modelling: a specimen the player can see beats one with the
-   handsomest shading. */
+/* The depth the plate actually paints with. ISH_DEPTH, unless applyPalette's
+   guard has to trim it: a tissue tone that cannot be walked light enough for
+   its fully shaded edge to keep the 3:1 body floor gives up shadow instead
+   (see the solve). The shipped yellow needs no trim, so this is ISH_DEPTH
+   today; it exists because legibility outranks modelling, and a specimen the
+   player can see beats one with the handsomest shading. */
 var ishDepth  = ISH_DEPTH;
 
 var LUT = new Uint8Array(256 * 3);
@@ -1796,18 +1815,39 @@ function buildLUT(tr, tg, tb) {
   }
 }
 
-/* The default plate colour, and the tone every derived string starts at, so
-   the first paint before any run is the one the stylesheet declares. */
-var TINT = [227, 210, 74];
+/* The organism's colour, and the lamp that lights it. Everything the plate is
+   painted in comes from these two.
+
+   PLASMODIUM is a Physarum polycephalum plasmodium as it looks on agar under
+   bench light: chrome yellow, the egg-yolk tone the cultures are known for.
+   It is warmer and considerably more saturated than the yellow that used to
+   sit here — hue 45° rather than 53°, so it leans amber instead of lime, and
+   HSL saturation 0.86 rather than 0.73, which is 189 of chroma against 153.
+   That old value was the DEFAULT of a per-seed palette rather than a claim
+   about the organism, and it had drifted the way a default does.
+
+   LAMP is where a lit crest walks TO. Not white: a warm cream at the tissue's
+   own hue, saturated to the top of the cube. A lamp on a yellow tube leaves a
+   golden highlight, not a colourless one, so the crest brightens without
+   draining — see VEIN_BANDS for the arithmetic and for what walking toward
+   white cost instead. */
+var PLASMODIUM = [239, 193, 50];
+var LAMP       = [255, 240, 176];
+
+/* The live palette. One run's is every run's, but the painter reads these
+   rather than the constants above, because applyPalette owns the contrast
+   guard and would hand back a lightened tone if PLASMODIUM were ever edited
+   to one that does not clear the floors. */
+var TINT = PLASMODIUM;
 var ACC_CUE = rgba(TINT, '.75');
 var ACC_ARC = rgba(TINT, '.85');
 buildLUT(TINT[0], TINT[1], TINT[2]);
-/* The vein bands want the same default. tintVeins is a hoisted declaration so
-   it is callable here, but VEIN_BANDS is a var initialised further down and is
-   still undefined at this point — so this is deferred to the bottom of the
-   file rather than called inline. Nothing renders before a run starts (render
-   returns early without S.exp, and startRun calls applyTint first), so this is
-   belt and braces against a future caller that paints earlier. */
+/* The vein bands want the same. tintVeins is a hoisted declaration so it is
+   callable here, but VEIN_BANDS is a var initialised further down and is
+   still undefined at this point — so the whole solve is deferred to the
+   applyPalette() call at the bottom of the file rather than run inline.
+   Nothing renders before that (render returns early without S.exp), so this
+   is belt and braces against a future caller that paints earlier. */
 
 /* The two backgrounds the accent has to survive: the page ground, and the dark
    ink the primary button paints ITSELF onto the accent. Both are floors rather
@@ -1819,55 +1859,57 @@ var DISH_L = relLum(AGAR[0], AGAR[1], AGAR[2]);
 var PAGE_L = relLum(11, 13, 12);
 var INK_L  = relLum(20, 23, 13);
 
-/* Derive the run's palette from its 24-bit seed. Hue is preserved exactly —
-   that is the player's specimen line and the number they can write down.
-   Saturation is clamped to a range a lab would tolerate near a microscope,
-   and lightness is walked upward until the vein tone STILL clears WCAG
-   1.4.11 against every ground the dish can compose at the bottom of the
-   inner shadow — it is the down-light rim of the body, not the sheet, that
-   has to stay distinguishable, and what it must stay distinguishable FROM
-   is not bare agar but FLOOR_STACKS: each hazard field, under the brush's
-   full cue or retract haze, with the slime mat's film on the unoccupied
-   side. Additive light lands on rim and ground alike (the painter shades
-   only the body's contribution, so the two ride the same base), and equal
-   addition always compresses a contrast ratio; the floor therefore has to
-   be demanded where the adding is worst. Checking bare agar alone left the
-   rim under 3:1 for seven percent of seed-and-ground pairs, all of them in
-   the lit-field corner where a player is most likely to be cueing. The hot
-   tone clears 7:1 as before, and the unshaded sheet clears 3:1 a fortiori.
-   Demanding it of the shaded tone roughly doubles what the old check asked,
-   and the old check was already there because the seed is allowed to be any
-   colour and "almost any" is not a guarantee: without it, four in ten seeds
-   shade their own outline below the floor.
+/* Build the plate's palette from PLASMODIUM, and prove it legible before the
+   painter is allowed to use it.
 
-   For a handful of seeds — deep blues, mostly — the lightness cap arrives
-   before the shaded rim clears, and for those the run's shadow DEPTH gives
-   way instead: ishDepth is trimmed until the rim passes. Measured across the
-   seed space the trim touches under one seed in a hundred and never goes
-   below 0.28 of the 0.30, but the invariant is the point, not the margin.
+   What has to stay legible is not the sheet but the RIM: the down-light side
+   of the body's outline, at the bottom of the inner shadow, is the darkest
+   tissue the dish draws, and if that falls into its background the organism
+   loses its edge. What it must stay distinguishable FROM is not bare agar but
+   FLOOR_STACKS — each hazard field, under the brush's full cue or retract
+   haze, with the slime mat's film on the unoccupied side. Additive light
+   lands on rim and ground alike (the painter shades only the body's
+   contribution, so the two ride the same base), and equal addition always
+   compresses a contrast ratio, so the floor is demanded where the adding is
+   worst. Checking bare agar alone used to leave the rim under 3:1 in the
+   lit-field corner, which is exactly where a player is most likely to be
+   cueing. The lit tone clears 7:1, and the unshaded sheet clears 3:1 a
+   fortiori.
 
-   The hot tone MUST be the one the widest band actually strokes, and is read
+   Every number here was tuned when the SEED picked the hue, which meant the
+   palette could be any colour at all and the walk was load-bearing: without
+   it, four in ten seeds shaded their own outline below the floor, and deep
+   blues needed the shadow DEPTH trimmed on top of that. One fixed yellow
+   needs none of it — the shipped tone clears the rim at 3.98 against its
+   worst ground and the trunk clears the dish at 12.8, and both loops below
+   fall through on their first pass. They are kept as a GUARD rather than as a
+   mechanism: PLASMODIUM is a constant someone will one day want to nudge, and
+   the difference between nudging it and breaking the dish should be a fact
+   the code checks rather than one a reviewer remembers. When it holds, the
+   tone is used exactly as written — no round trip through HSL — so the plate
+   is painted in the constant and not in a re-derivation of it.
+
+   The lit tone MUST be the one the widest band actually strokes, and is read
    off VEIN_BANDS rather than written here as a number so it cannot drift from
    it. A brighter stand-in does not make the test safer: the agar is dark, so
    contrast RISES with brightness, and asking 7:1 of a tone brighter than
    anything drawn is a weaker demand than asking it of the band itself. That
-   was a live gap and not a theoretical one — this solve tested mixWhite 0.70
-   against a band drawn at 0.48, which happened to hold across the seed space
-   by luck rather than by construction, and the moment the band came down to
-   0.40 the trunk fell under 7:1 for a fifth of all seeds while the solve went
-   on reporting success. Reading the band closes it by construction.
+   was a live gap and not a theoretical one — this solve once tested a mix of
+   0.70 against a band drawn at 0.48, which held by luck rather than by
+   construction, and the moment the band came down to 0.40 the trunk fell
+   under 7:1 for a fifth of all seeds while the solve went on reporting
+   success. Reading the band closes it by construction.
 
    VEIN_BANDS is a var initialised further down the file, so this reads it at
-   CALL time, not definition time. The only caller is startRun, long after the
-   file has finished evaluating; the fallback covers a future caller that runs
-   earlier rather than any path that exists today. */
+   CALL time, not definition time. The fallback covers a future caller that
+   runs before the file has finished evaluating rather than any path that
+   exists today. */
 function hotBandK() {
-  return VEIN_BANDS ? VEIN_BANDS[VEIN_BANDS.length - 1].hot : 0.40;
+  return VEIN_BANDS ? VEIN_BANDS[VEIN_BANDS.length - 1].hot : 0.44;
 }
-function applyTint(seed) {
-  var hsl = rgbToHsl((seed >>> 16) & 255, (seed >>> 8) & 255, seed & 255);
-  var hue = hsl[0], sat = clamp(hsl[1], 0.35, 0.80);
-  var l = clamp(hsl[2], 0.45, 0.72);
+function applyPalette() {
+  var hsl = rgbToHsl(PLASMODIUM[0], PLASMODIUM[1], PLASMODIUM[2]);
+  var hue = hsl[0], sat = hsl[1], l = hsl[2];
   var hotK = hotBandK();
   var rimHolds = function (v, k) {
     var m = 1 - k, i2, st, bl;
@@ -1881,14 +1923,14 @@ function applyTint(seed) {
     }
     return true;
   };
-  var vein = hslToRgb(hue, sat, l), hot = mixWhite(vein, hotK), i;
+  var vein = PLASMODIUM, hot = mixLamp(vein, hotK), i;
   for (i = 0; i < 24; i++) {
-    vein = hslToRgb(hue, sat, l);
-    hot = mixWhite(vein, hotK);
     if (rimHolds(vein, ISH_DEPTH) &&
         contrast(relLum(hot[0], hot[1], hot[2]), DISH_L) >= 7.0) break;
     if (l >= 0.72) break;
     l = Math.min(0.72, l + 0.02);
+    vein = hslToRgb(hue, sat, l);
+    hot = mixLamp(vein, hotK);
   }
   ishDepth = ISH_DEPTH;
   while (ishDepth > 0 && !rimHolds(vein, ishDepth)) {
@@ -1901,16 +1943,18 @@ function applyTint(seed) {
   ACC_ARC = rgba(vein, '.85');
 
   /* The UI accent is a separate solve: it is text on the page ground AND the
-     background under dark button ink, so it has to clear both at 4.5:1. */
+     background under dark button ink, so it has to clear both at 4.5:1. The
+     tissue tone clears both, so the accent IS the tissue tone and the chrome
+     around the dish is the colour of what is in it. */
   var ul = l, ui = vein;
   for (i = 0; i < 30; i++) {
-    ui = hslToRgb(hue, sat, ul);
     var uL = relLum(ui[0], ui[1], ui[2]);
     if (contrast(uL, PAGE_L) >= 4.5 && contrast(uL, INK_L) >= 4.5) break;
     if (ul >= 0.92) break;
     ul = Math.min(0.92, ul + 0.02);
+    ui = hslToRgb(hue, sat, ul);
   }
-  setAccent(hexOf(ui), hexOf(mixWhite(ui, 0.75)));
+  setAccent(hexOf(ui), hexOf(mixLamp(ui, 0.75)));
 }
 
 function setAccent(a, hotA) {
@@ -4068,28 +4112,47 @@ var RIDGE_K   = 0.55;  // minimum across-vein curvature to count as a ridge
 var RIDGE_REL = 0.14;  // ...as a fraction of the cell's own trail
 
 /* Bands: trail ceiling, line width in cells, colour, alpha. A minor vein is a
-   bright hairline; a trunk is broad, and pale because it is carrying
+   bright hairline; a trunk is broad, and brightest because it is carrying
    everything. */
 /* Five generations of vein, because the organism has about that many and the
    hierarchy is most of what the picture is. Widths span roughly eight to one,
    the ratio the real thing shows between its finest branches and its trunk.
 
-   The COLOURS are the run's, and have to be: the body is tinted from the seed,
-   so a fixed yellow set here would draw a blue specimen with yellow veins.
-   Each band is the tint walked toward white by its own amount — a fine vein is
-   thin enough to be translucent and sits near the tissue tone, a trunk stands
-   proudest and catches the most light — and `dim` pulls the finest band back
-   under the tissue so it reads as a groove in the sheet rather than a tube on
-   top of it. Rebuilt per run alongside the LUT.
+   `hot` is how far each band walks from the tissue tone toward LAMP — the
+   bench light on the crest of a tube. `dim` pulls the finest band back UNDER
+   the tissue so it reads as a groove in the sheet rather than a tube on top
+   of it. Built once, by tintVeins, off the same palette the field is painted
+   in, so a band can never disagree with the body it sits on.
 
-   `hot` used to run half again as far, and that is what the white streaks
-   were. The walk toward white holds the hue and holds HSL saturation; what it
-   cannot hold is CHROMA, because there is less and less room for any at the
-   top of the cube. A trunk at hot 0.48 landed on lightness 0.75, where a
-   saturated green has a quarter of the colour it started with, and the eye
-   reads a line that light as white however green the number says it is. The
-   band now tops out around lightness 0.68, which is still plainly the
-   brightest thing on the plate and still plainly the specimen's colour.
+   Where the highlight walks TO is the whole argument, and the honest version
+   of it is narrower than it first looks. White is the one tone on this plate
+   that never means tissue, and a walk toward it holds hue and holds HSL
+   saturation but cannot hold CHROMA, because there is less and less room for
+   any at the top of the cube. So the old ramp was capped at 0.24 to stop the
+   trunks arriving there as pale streaks, and the cap was doing real work.
+
+   Walking toward LAMP does not repeal that — every walk to a lighter tone
+   gives up chroma, this one included, and the ramp below still falls from 180
+   at the sheet to 141 at the trunk. What it changes is the exchange rate.
+   LAMP is a cream at the tissue's own hue rather than a neutral, so at the
+   SAME trunk lightness the crest keeps 141 of chroma where a white walk on
+   this same body keeps 135, and HSL saturation 0.887 against 0.860. A few
+   percent, not a transformation. It compounds with the body change, though,
+   and that one is not a few percent: the old trunk, white-walked off the old
+   yellow, held 117.
+
+   The larger `hot` numbers are not a loosened cap. LAMP sits far closer to
+   the tissue than white does, so a longer walk buys the same distance: 0.44
+   here lands the trunk at lightness 0.688, which is exactly where the old
+   0.24 landed it. The hierarchy below spans 0.49 to 0.69 and every step of it
+   is plainly yellow. What the cap protected against is simply gone — walk
+   this ramp as far as it goes and it arrives at #fff0b0, a warm cream, rather
+   than at white.
+
+   The 7:1 floor still binds, and still binds HERE: applyPalette reads the
+   widest band's `hot` through hotBandK, so raising or lowering this number
+   tightens or loosens the same solve rather than escaping it. The shipped
+   trunk clears the dish at 12.8.
 
    These lines are the HIGHLIGHTS and nothing else. The bands used to carry
    shadows too — a dark stroke offset beside each crest, tried at several
@@ -4100,31 +4163,12 @@ var RIDGE_REL = 0.14;  // ...as a fraction of the cell's own trail
    inner shadow now (section 9, ISH_D), computed from the SHAPE of the mold
    rather than drawn along its veins; the crests stay where light belongs,
    on top of it. */
-/* `hot` is how much WHITE each band's stroke is mixed with — the lamp on the
-   crest of a tube. It used to top out at 0.40 on the trunks, which drew a
-   near-white core down the middle of every wide vein and, in the dense middle
-   of a dish, a string of white beads where the trunks crowd. Two things go
-   wrong at that strength. The specimen's colour is the one thing the seed
-   gives the player, and the widest, most-looked-at tissue was the place it was
-   least present. And white is the one tone on this plate that never means
-   tissue — the lobes' own comment says so — so a network cored in it reads as
-   lit wire rather than as a mold with a highlight.
-
-   Scaled to 0.6 of what it was, which keeps the hierarchy between the bands
-   exactly (they are the same ramp, shorter) and hands the tint back the crest.
-   0.24 is not arbitrary: applyTint demands 7:1 of the widest band against the
-   dish, and the band is where that solve READS the hot tone, so lowering this
-   tightens the solve rather than escaping it. Swept over 4000 seeds, the
-   worst-case trunk contrast is 9.20 at 0.40, 7.45 here, and 7.22 at 0.22 —
-   which is the floor: 0.18 puts 26 seeds under 7:1 and 0.00 puts 496 under.
-   Nothing else in the solve moves, because the binding constraint on the
-   tint's lightness is the shaded rim's 3:1 and not this. */
 var VEIN_BANDS = [
   { max: 6,        w: 0.34, hot: 0.00, dim: 0.86, alpha: 0.90, style: '' },
-  { max: 10,       w: 0.62, hot: 0.05, dim: 1.00, alpha: 0.97, style: '' },
-  { max: 16,       w: 1.05, hot: 0.11, dim: 1.00, alpha: 1 },
-  { max: 26,       w: 1.75, hot: 0.17, dim: 1.00, alpha: 1 },
-  { max: Infinity, w: 2.70, hot: 0.24, dim: 1.00, alpha: 1 }
+  { max: 10,       w: 0.62, hot: 0.08, dim: 1.00, alpha: 0.97, style: '' },
+  { max: 16,       w: 1.05, hot: 0.18, dim: 1.00, alpha: 1 },
+  { max: 26,       w: 1.75, hot: 0.30, dim: 1.00, alpha: 1 },
+  { max: Infinity, w: 2.70, hot: 0.44, dim: 1.00, alpha: 1 }
 ];
 /* The lobe layer: the swellings, drawn as swellings.
 
@@ -4183,11 +4227,17 @@ var LOBE_STYLE = '';
 function tintVeins(vein) {
   for (var i = 0; i < VEIN_BANDS.length; i++) {
     var band = VEIN_BANDS[i];
-    var c = mixWhite(vein, band.hot);
+    var c = mixLamp(vein, band.hot);
     band.style = 'rgba(' + Math.round(c[0] * band.dim) + ','
                          + Math.round(c[1] * band.dim) + ','
                          + Math.round(c[2] * band.dim) + ',' + band.alpha + ')';
   }
+  /* The advancing front, and the one place mixWhite is still right. A tip is
+     a filament with no tube behind it yet — film thin enough that the plate
+     shows through, which is what a fan of new growth looks like on agar:
+     pale, milky, barely coloured, nothing like the trunks it will thicken
+     into. So it walks toward white and LOSES chroma, where a crest walks
+     toward the lamp and gains it. The two walks disagreeing is the point. */
   TIP_STYLE = rgba(mixWhite(vein, 0.42), '0.34');
   /* A mass catches the lamp about as hard as the second-widest band does: it
      is the same tissue standing at about the same height, and taking it any
@@ -4200,7 +4250,7 @@ function tintVeins(vein) {
      would have been 0.24 against 0.17, and the pads would have become the
      BRIGHTEST thing on the plate while the comment went on claiming they
      matched. Derived, it cannot drift from what it says it is. */
-  LOBE_STYLE = rgba(mixWhite(vein, VEIN_BANDS[3].hot), '1');
+  LOBE_STYLE = rgba(mixLamp(vein, VEIN_BANDS[3].hot), '1');
 }
 var VEIN_CAP = 200000;                 /* floats held per band per rebuild */
 /* Each band's array holds RUNS now, not whole chains: [bucket, count, x0,y0,
@@ -4454,18 +4504,10 @@ function ridgeStep(cx, cy, d, sign) {
 
 /* The tip whisker: a short line back along the heading, so the front reads as
    a fan of spikes rather than as a scatter of dots. A tip has no tube yet for
-   the ridge walk to find, so without this the newest growth would be the one
-   thing not drawn. */
-var TIP_WHISK = 2.6;   // cells
-var TIP_STYLE = 'rgba(255,248,206,0.34)';
-var TIP_W = 0.17;
-
-/* The tip whisker: a short line back along the heading, so the front reads as
-   a fan of spikes rather than as a scatter of dots. A tip has no tube yet for
    the ridge walk to find, so without this the newest growth — the part worth
    watching — would be the one thing not drawn. */
 var TIP_WHISK = 2.6;   // cells
-var TIP_STYLE = 'rgba(244,238,120,0.30)';   /* replaced per run by tintVeins */
+var TIP_STYLE = rgba(mixWhite(PLASMODIUM, 0.42), '0.34');  /* tintVeins owns it */
 var TIP_W = 0.17;
 
 function buildVeins() {
@@ -5177,7 +5219,7 @@ function refreshNodeRows() {
 function flashNodeRow(i) {
   var el = nodeEls[i];
   if (!el) return;
-  el.style.color = '#fff6b0';
+  el.style.color = 'var(--slime-hot)';
   setTimeout(function () { el.style.color = ''; }, 420);
 }
 
@@ -5687,10 +5729,6 @@ function startRun(i, seed, trace) {
      standing before anything in the dish is placed. */
   S.seed = (seed == null || seed === '') ? freshSeed(i) : normSeed(seed);
   rndSeed(mix32(S.seed, 0x9E3779B9, 0x85EBCA6B));
-  /* The plate number and the plate colour are the same number. Pure
-     arithmetic on the seed, drawing nothing, so the stream is untouched —
-     and a replay re-derives the identical palette from the same seed. */
-  applyTint(S.seed);
 
   REPLAY.on = !!trace;
   REPLAY.i = 0;
@@ -5850,9 +5888,11 @@ function buildResult(won) {
   if (won && save.best[e.code] != null) rows.push(['Best run', fmtTime(save.best[e.code])]);
   /* The plate's provenance, last, the way a notebook records it: this dish is
      reproducible from that number alone — SLIME.start(idx, '#a3f2c1') runs it
-     again, cell for cell, at any time-lapse setting. The swatch is the same
-     number again, as the colour the culture was actually grown in. */
-  rows.push(['Specimen line', seedLabel(S.seed), hexOf(TINT)]);
+     again, cell for cell, at any time-lapse setting. It used to carry a swatch
+     of itself, from when the seed set the colour the culture was grown in; it
+     no longer sets it, and a swatch that no longer answers to the number
+     beside it is worse than none. Every culture is the colour Physarum is. */
+  rows.push(['Specimen line', seedLabel(S.seed)]);
 
   var hasNext = won && S.idx < EXPERIMENTS.length - 1;
   return {
@@ -6297,9 +6337,6 @@ function buildReplayRow() {
 
 function init() {
   loadSave();
-  /* Declare the default palette on the element rather than leaving it to the
-     stylesheet, so the first paint and every later run come from one place. */
-  setAccent('#e3d24a', '#fff6b0');
   if (detectCoarse()) markTouch();
   initCanvas();
   bindInput();
@@ -6405,7 +6442,7 @@ function init() {
     /* the seed of the current run, raw and as the notebook prints it */
     seed: function () { return S.seed; },
     seedLabel: function () { return seedLabel(S.seed); },
-    /* the vein tone the seed resolved to, after the contrast solve */
+    /* the tissue tone the plate is painted in, after the contrast guard */
     tint: function () { return hexOf(TINT); },
     hab: function () { return S.hab; },
     diet: function () { return { p: S.dietP, c: S.dietC }; },
@@ -6439,7 +6476,12 @@ function init() {
   };
 }
 
-tintVeins(TINT);
+/* The palette, once, for the life of the page: the field's transfer, the vein
+   bands, the brush strokes and the CSS accent all come out of this one call.
+   It used to run per run, because the seed picked the colour; nothing about
+   it varies now, so it runs here — after VEIN_BANDS exists for hotBandK to
+   read, and before init paints anything. */
+applyPalette();
 
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', init);

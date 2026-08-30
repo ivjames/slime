@@ -19,8 +19,8 @@
      gradient, --bad wherever it labels rather than fills. These clear AA on
      every ground in the sheet, and on the HUD plate over lit slime. */
   --dim:#99a28b;
-  --slime:#e3d24a;
-  --slime-hot:#fff6b0;
+  --slime:#efc132;
+  --slime-hot:#fbe491;
   --cyto:#7fd1b9;
   --warn:#e0763c;
   --bad:#df6f8b;
@@ -80,7 +80,7 @@ h1,h2,h3{font-weight:600;margin:0}
 /* ---------- title ---------- */
 .hero{text-align:center;padding:8px 0 20px}
 .hero .glyph{font-size:clamp(56px,13vw,124px);line-height:.86;letter-spacing:.16em;
-  color:var(--slime);text-shadow:0 0 34px rgba(227,210,74,.30);margin-right:-.16em}
+  color:var(--slime);text-shadow:0 0 34px rgba(239,193,50,.30);margin-right:-.16em}
 .hero .sub{color:var(--dim);letter-spacing:.30em;font-size:11px;text-transform:uppercase;margin-top:14px}
 .hero .tag{max-width:56ch;margin:16px auto 0;color:#a9b199}
 
@@ -227,7 +227,7 @@ body.touch .keys-touch{display:grid}
    What that deletes is the whole apparatus these blocks needed to survive over
    live cytoplasm: the two --hud-* colours, the near-opaque plate each one carried
    and the backdrop blur behind it, all of which existed because the same pixel
-   is #070906 agar one second and #fff6b0 lit slime the next and no ink is
+   is #070906 agar one second and #f6d669 lit slime the next and no ink is
    4.5:1 against both. On a panel with a ground of its own, contrast is a
    number again. */
 .console{margin-top:8px;border:1px solid var(--line);border-radius:3px;
@@ -274,7 +274,7 @@ body.touch .keys-touch{display:grid}
 .meter .lab span:last-child{order:2;color:var(--ink);flex:0 0 auto;
   min-width:64px;text-align:right}
 .meter .fill{height:100%;width:0%;background:var(--slime);transition:width .18s}
-.meter.mass .fill{background:linear-gradient(90deg,#8f7f1e,var(--slime))}
+.meter.mass .fill{background:linear-gradient(90deg,#977514,var(--slime))}
 .meter.hab .fill{background:linear-gradient(90deg,#5b3479,var(--quin))}
 .meter.crit .fill{background:var(--bad)}
 .hud-br{color:var(--dim);font-size:11px;letter-spacing:.08em}
