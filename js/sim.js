@@ -2011,6 +2011,8 @@ var S = {
      held — both stepped at a fixed DT inside the frame loop, so a replay of a
      recorded run rebuilds them exactly rather than approximately */
   cueRes: 0, cueHeld: 0,
+  /* how this run was reached — see VIA_* by the daily */
+  via: 0,
   /* total trail mass of the finished network, measured once when the run ends.
      Against the dish's own geometry it is the economy score — the published
      Physarum result stated as a number. */
@@ -5738,6 +5740,7 @@ function renderTitle() {
     })(i);
   }
   $('progress').textContent = doneCount() + ' / ' + EXPERIMENTS.length + ' logged';
+  refreshDaily();
   renderDaily();
 }
 
@@ -5951,7 +5954,15 @@ var GHOST_ENT = 7;
 var GHOST_MAX = 200000;
 
 function encodeGhost(t) {
-  if (!t || !t.n) return null;
+  /* A zero-entry trace is encoded, not refused. A dish CAN be won without the
+     brush ever going down — that is the best possible autonomy score, so it is
+     exactly the run most likely to hold the best mark — and its recording is a
+     valid one: the header carries the seed, the body is empty, and replaying
+     it drives ptr.down false at every step, which is precisely the run that
+     happened. Refusing it also had a second edge: the caller deletes the
+     stored ghost when encoding returns null, so a hands-off best run threw
+     away the recording of the previous one and left the mark with no run. */
+  if (!t) return null;
   var bytes = new Uint8Array(GHOST_HEAD + t.n * GHOST_ENT);
   var dv = new DataView(bytes.buffer);
   dv.setUint8(0, GHOST_V);
@@ -6215,6 +6226,35 @@ function makeDaily(day) {
 
 var DAILY = null;
 
+/* How the run about to start was reached. A dish opened from the schedule is a
+   place in the schedule; the daily plate and a pasted plate link are not, and
+   both of them deliberately ignore the unlock gate — so a win reached through
+   either must not be able to write the progress that gate is counting, or the
+   gate is bypassable by anyone who can edit a URL.
+
+   Set immediately before startRun and consumed by it, rather than passed as a
+   fourth argument: startRun already takes (i, seed, trace) and is called from
+   seven places, six of which have nothing to say about provenance and would
+   have to pass a placeholder. Consuming it on read means a caller that forgets
+   to set it gets SCHEDULE, which is the safe default — the worst it can do is
+   decline to advance a schedule position that was legitimately earned, and a
+   retry logs it. */
+var VIA_SCHEDULE = 0, VIA_DAILY = 1, VIA_LINK = 2;
+var pendingVia = VIA_SCHEDULE;
+
+/* The day's plate, recomputed if the day has turned over since it was last
+   asked for. `init` derives it once, and a page left open across 00:00 UTC
+   would otherwise keep serving yesterday's dish and seed from its card, its
+   `#daily` route and its completion record, while a copy opened a minute later
+   served today's — which breaks the one property the daily exists to have.
+   Called wherever the plate is about to be shown or launched; a day that has
+   not turned costs one integer compare. */
+function refreshDaily() {
+  var d = dayNumber();
+  if (!DAILY || DAILY.day !== d) DAILY = makeDaily(d);
+  return DAILY;
+}
+
 /* the mark logged against TODAY's plate, 0 if the record is for another day */
 function dailyScore() {
   return (save.daily && DAILY && save.daily.day === DAILY.day) ? (save.daily.score | 0) : 0;
@@ -6241,7 +6281,10 @@ function parseHash(h) {
   h = String(h == null ? '' : h).replace(/^#/, '');
   if (!h) return null;
   if (h.toLowerCase() === 'daily') {
-    return DAILY ? { idx: DAILY.idx, seed: DAILY.seed } : null;
+    /* refreshed here too: a link opened after midnight on a page that has been
+       sitting since yesterday must land on today's plate, not the stale one */
+    refreshDaily();
+    return DAILY ? { idx: DAILY.idx, seed: DAILY.seed, via: VIA_DAILY } : null;
   }
   var parts = h.split('/');
   var code = parts[0].toUpperCase();
@@ -6250,7 +6293,7 @@ function parseHash(h) {
     /* a code with no seed opens the brief rather than a plate: it names a dish
        and nothing about which run of it, so it is a link to the experiment */
     var raw = parts.length > 1 ? parts[1] : '';
-    return { idx: i, seed: raw ? normSeed(raw) : null };
+    return { idx: i, seed: raw ? normSeed(raw) : null, via: VIA_LINK };
   }
   return null;
 }
@@ -6260,8 +6303,9 @@ function parseHash(h) {
 function routeHash() {
   var r = parseHash(window.location.hash);
   if (!r) return false;
-  if (r.seed == null) openBrief(r.idx);
-  else startRun(r.idx, r.seed);
+  if (r.seed == null) { openBrief(r.idx); return true; }
+  pendingVia = r.via;
+  startRun(r.idx, r.seed);
   return true;
 }
 
@@ -6275,6 +6319,10 @@ function startRun(i, seed, trace) {
      standing before anything in the dish is placed. */
   S.seed = (seed == null || seed === '') ? freshSeed(i) : normSeed(seed);
   rndSeed(mix32(S.seed, 0x9E3779B9, 0x85EBCA6B));
+
+  /* consumed, not merely read: the next run is a schedule run unless its
+     caller says otherwise, so provenance cannot leak from one run to the next */
+  S.via = pendingVia; pendingVia = VIA_SCHEDULE;
 
   REPLAY.on = !!trace;
   REPLAY.i = 0;
@@ -6398,22 +6446,33 @@ function finish(won, reason) {
   if (!REPLAY.on) {
     if (TRACE) TRACE.cues = S.cues;
     if (won) {
-      var prev = save.best[e.code];
-      if (!prev || S.simT < prev) save.best[e.code] = S.simT;
-      save.done[e.code] = true;
-      /* The mark, and with it the ghost. They move together on purpose: the
-         stored recording is meant to be the run the stored mark refers to, so
-         a player replaying their best run watches the run that earned the
-         number beside it rather than whichever one happened to be last. */
       var sc = runScore(e);
-      if (sc.score > (save.score[e.code] || 0)) {
-        save.score[e.code] = sc.score;
-        var g = TRACE ? encodeGhost(TRACE) : null;
-        if (g && g.length <= GHOST_MAX) save.ghost[e.code] = g;
-        else delete save.ghost[e.code];
-      }
-      if (DAILY && DAILY.idx === S.idx && S.seed === DAILY.seed) {
+      if (S.via === VIA_DAILY) {
+        /* The daily marks the day and nothing else. It is documented as
+           advancing nothing, and it has to be: the daily ignores the unlock
+           gate, so a daily win that also logged the dish would let anybody
+           walk the whole schedule by playing one plate a day — or by opening
+           #daily on a dish twelve places past where they had got to. */
+        refreshDaily();
         save.daily = { day: DAILY.day, score: Math.max(sc.score, dailyScore()) };
+      } else if (isUnlocked(S.idx)) {
+        /* And a plate link is the same argument in the other direction: it
+           bypasses the gate too, so it logs progress only for a dish the gate
+           would have opened anyway. A link to a dish you have reached is just
+           a run of it; a link past the gate is a look ahead, not a pass. */
+        var prev = save.best[e.code];
+        if (!prev || S.simT < prev) save.best[e.code] = S.simT;
+        save.done[e.code] = true;
+        /* The mark, and with it the ghost. They move together on purpose: the
+           stored recording is meant to be the run the stored mark refers to,
+           so a player replaying their best run watches the run that earned the
+           number beside it rather than whichever one happened to be last. */
+        if (sc.score > (save.score[e.code] || 0)) {
+          save.score[e.code] = sc.score;
+          var g = TRACE ? encodeGhost(TRACE) : null;
+          if (g && g.length <= GHOST_MAX) save.ghost[e.code] = g;
+          else delete save.ghost[e.code];
+        }
       }
       writeSave();
     }
@@ -6482,7 +6541,13 @@ function buildResult(won) {
      beside it is worse than none. Every culture is the colour Physarum is. */
   rows.push(['Specimen line', seedLabel(S.seed)]);
 
-  var hasNext = won && S.idx < EXPERIMENTS.length - 1;
+  /* "Next experiment" is a schedule move, so it is offered only when there is
+     a schedule position to move to. A daily plate has none — it is not in the
+     schedule — and a run reached by either gate-bypassing route can sit twelve
+     dishes past the gate, where the next dish is locked and the brief would
+     open on something the player has not reached. Both fall back to Schedule. */
+  var hasNext = won && S.idx < EXPERIMENTS.length - 1 &&
+                S.via !== VIA_DAILY && isUnlocked(S.idx + 1);
   return {
     code: e.code + ' · ' + e.name,
     head: won ? 'Result logged' : 'Culture lost',
@@ -6544,20 +6609,56 @@ function paintResult(R) {
    the note had to do to it to fit on one line. */
 var SHARE_LINK = '';
 
-/* Clipboard access is permission-gated, absent on file:// in some browsers,
-   and rejects asynchronously — so the button says what happened rather than
-   assuming. Falling back to selecting the text gives a keyboard copy a target
-   on the browsers that refuse the API outright. */
+/* Clipboard access is permission-gated, rejects asynchronously, and is absent
+   outright on file:// in several browsers — which is not an exotic case here,
+   because opening index.html directly IS the documented way to run this thing.
+   So there are three rungs, and the button says which one it got to.
+
+   The last rung matters more than it looks. The share note shows the link with
+   its scheme trimmed off, because the full one is unreadable on a local file
+   path; selecting THAT would hand over a URL missing its first seven
+   characters. So the fallback writes the whole link back into the note before
+   selecting it, and what the player copies is the thing that works. */
 function copyShareLink() {
   var b = $('r-copy');
   if (!SHARE_LINK || !b) return;
   var ok = function () { b.textContent = 'Copied'; };
-  var no = function () { b.textContent = 'Copy failed'; };
+  var no = function () { b.textContent = selectShareLink() ? 'Selected — copy it' : 'Copy failed'; };
   try {
     if (window.navigator && navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(SHARE_LINK).then(ok, no);
-    } else { no(); }
-  } catch (err) { no(); }
+      navigator.clipboard.writeText(SHARE_LINK).then(ok, function () {
+        /* the async rejection lands here: try the legacy path before giving up */
+        if (legacyCopy()) ok(); else no();
+      });
+      return;
+    }
+  } catch (err) { /* fall through to the rungs below */ }
+  if (legacyCopy()) ok(); else no();
+}
+
+/* Put the whole link in the note and select it. Returns whether a selection
+   was actually made, so the caller knows which message to show. */
+function selectShareLink() {
+  var el = $('r-sharenote');
+  if (!el || !window.getSelection || !document.createRange) return false;
+  try {
+    el.textContent = SHARE_LINK;
+    var r = document.createRange();
+    r.selectNodeContents(el);
+    var sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(r);
+    return true;
+  } catch (err) { return false; }
+}
+
+/* execCommand('copy') is deprecated and still the only thing that works on a
+   file:// page in some browsers. It copies the current selection, so the
+   selection above is the setup for it rather than merely a consolation. */
+function legacyCopy() {
+  if (!selectShareLink()) return false;
+  try { return !!(document.execCommand && document.execCommand('copy')); }
+  catch (err) { return false; }
 }
 
 /* The panel lives under the dish and shows without switching screens: the
@@ -6941,7 +7042,11 @@ function bindButtons() {
   $('r-retry').addEventListener('click', function () { startRun(S.idx); });
   $('r-menu').addEventListener('click', goTitle);
   $('r-next').addEventListener('click', function () {
-    if (this.dataset.mode === 'next' && S.idx < EXPERIMENTS.length - 1) {
+    /* isUnlocked is re-tested rather than trusted from the dataset: the button
+       was labelled when the verdict was painted, and a replay leaving through
+       exitReplay repaints it from a result built earlier in the run's life. */
+    if (this.dataset.mode === 'next' && S.idx < EXPERIMENTS.length - 1 &&
+        isUnlocked(S.idx + 1)) {
       stopRun();
       closeResult();
       openBrief(S.idx + 1);
@@ -6959,7 +7064,9 @@ function bindButtons() {
   /* The daily bypasses the gate, so it starts a run rather than opening a
      brief: there is no schedule position to arrive at. */
   $('daily-go').addEventListener('click', function () {
-    if (DAILY) startRun(DAILY.idx, DAILY.seed);
+    if (!refreshDaily()) return;
+    pendingVia = VIA_DAILY;
+    startRun(DAILY.idx, DAILY.seed);
   });
   /* A link pasted into the bar of a page that is already open changes the
      fragment without reloading, so the fragment has to be watched and not only
@@ -7034,7 +7141,7 @@ function startGhost(i, sp) {
 
 function init() {
   loadSave();
-  DAILY = makeDaily(dayNumber());
+  refreshDaily();
   if (detectCoarse()) markTouch();
   initCanvas();
   bindInput();
