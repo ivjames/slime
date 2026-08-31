@@ -27,8 +27,11 @@
   --quin:#bf82e2;
   /* --line draws the furniture — slab edges, the grid between dishes — and is
      deliberately faint. A control's own edge is the thing that says "this is a
-     control", so it is held to 1.4.11's 3:1 against every ground in the sheet;
-     the faintest here is 3.24 against the result panel's top stop. */
+     control", so it is held to 1.4.11's 3:1 against every ground in the sheet.
+     The meter track's own edge is drawn in it too, for the same reason — see
+     .meter .bar — and the track is the tightest ground it takes, at 3.01. The
+     dish card under the pointer is next at 3.13, and the result panel's top
+     stop after that at 3.24. */
   --edge:#646b58;
   --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;
   /* The letterboxed plate width: the dish is 420x260, so capping its HEIGHT at
@@ -279,21 +282,34 @@ body.touch .keys-touch{display:grid}
    third meter's own display toggle. */
 .meter .lab span:first-child{flex:0 0 58px}
 .console.twometer .meter .lab span:first-child{flex:0 0 86px}
+/* The track's own edge is drawn in --edge, which is the token for exactly this
+   — a graphical object held to 3:1 — and it lands at 3.01 against the track it
+   outlines. It used to be a 16% wash of the ink, which lands at 1.51: visible
+   as a softness rather than as an edge, and at 0% there is no fill to see, so
+   the ring IS the meter. */
 .meter .bar{order:1;flex:1;height:4px;background:#1b1f18;border-radius:2px;overflow:hidden;
-  box-shadow:inset 0 0 0 1px rgba(216,220,200,.16)}
+  box-shadow:inset 0 0 0 1px var(--edge)}
 /* the figure gets a column rather than hugging the track, so the two meters
    of a dish carrying both end on the same edge whatever they are counting —
    "4,500" against "0%" against "p 12 · c 30" */
 .meter .lab span:last-child{order:2;color:var(--ink);flex:0 0 auto;
   min-width:64px;text-align:right}
+/* Each fill runs a gradient across its OWN width, so a meter barely off zero
+   shows nothing but the dark stop — which makes that stop, not the lit end,
+   the colour the reading actually depends on. Both of the darks here used to
+   be chosen to sit under their lit end rather than over the track: habituation
+   at 1.76 against #1b1f18 and the reserve at 2.40, so the two meters were at
+   their least readable exactly where they matter most, a reserve running out
+   and a habituation just beginning. Lifted to 3.35 and 3.27; biomass already
+   cleared at 3.88 and is left alone. */
 .meter .fill{height:100%;width:0%;background:var(--slime);transition:width .18s}
 .meter.mass .fill{background:linear-gradient(90deg,#977514,var(--slime))}
-.meter.hab .fill{background:linear-gradient(90deg,#5b3479,var(--quin))}
+.meter.hab .fill{background:linear-gradient(90deg,#8f55bd,var(--quin))}
 /* The reserve reads as cytoplasm, because that is what it is standing in for:
    the cost of telling the organism where to go. Declared above .crit so a
    reserve running out still turns red — the two selectors weigh the same and
    the later one wins. */
-.meter.cue .fill{background:linear-gradient(90deg,#2c6353,var(--cyto))}
+.meter.cue .fill{background:linear-gradient(90deg,#37796a,var(--cyto))}
 .meter.crit .fill{background:var(--bad)}
 .hud-br{color:var(--dim);font-size:11px;letter-spacing:.08em}
 /* the list reads across the panel, not down the side of a plate */

@@ -1869,8 +1869,7 @@ var LAMP       = [255, 240, 176];
    guard and would hand back a lightened tone if PLASMODIUM were ever edited
    to one that does not clear the floors. */
 var TINT = PLASMODIUM;
-var ACC_CUE = rgba(TINT, '.75');
-var ACC_ARC = rgba(TINT, '.85');
+var ACC_CUE = rgba(TINT, '1');
 buildLUT(TINT[0], TINT[1], TINT[2]);
 /* The vein bands want the same. tintVeins is a hoisted declaration so it is
    callable here, but VEIN_BANDS is a var initialised further down and is
@@ -1969,8 +1968,7 @@ function applyPalette() {
   TINT = vein;
   buildLUT(vein[0], vein[1], vein[2]);
   tintVeins(vein);
-  ACC_CUE = rgba(vein, '.75');
-  ACC_ARC = rgba(vein, '.85');
+  ACC_CUE = rgba(vein, '1');
 
   /* The UI accent is a separate solve: it is text on the page ground AND the
      background under dark button ink, so it has to clear both at 4.5:1. The
@@ -4988,6 +4986,193 @@ function strokeWhiskers(tc, sx, sy) {
   tc.restore();
 }
 
+/* ---------- the instrument marks, and the casing they need ----------
+
+   The objective rings, the progress arc and the cue ring are the only ink the
+   game draws ON the specimen, and they are the ink with the hardest ground.
+   The console solved its version of this by leaving the plate (see .console in
+   index.html); these cannot follow it, because a mark that says WHERE is not a
+   mark you can move.
+
+   The ground under them is not two colours, it is a ramp: the same pixel is
+   the stage at a relative luminance of 0.002 when the dish is empty and a lit
+   crest at 0.689 when the mold is standing on it, and it passes through every
+   value between the two as the specimen arrives. No single colour clears
+   1.4.11's 3:1 against a range that wide, and this is arithmetic rather than
+   taste. A mark at luminance m clears the floor only against grounds at or
+   below (m + .05) / 3 - .05, or at or above 3(m + .05) - .05; between those
+   two it fails, and the band is always non-empty. Wherever a mark is put, the
+   ramp sweeps through the band it cannot cover.
+
+   The old marks were all solved against bare agar and nothing else, so they
+   read at 8:1 and up on an empty dish and collapsed the moment the organism
+   arrived under them — which is exactly when a progress arc is worth reading.
+   Yellow arc on yellow slime, measured: 1.00.
+
+   Two marks cover what one cannot. Each is drawn as an opaque casing in the
+   stage's own ground with the mark itself inside it, and the pair covers the
+   ramp from both ends: over bare agar the mark carries it at 10:1 and up while
+   the casing disappears into the plate it is made of, and over lit tissue the
+   mark disappears and the casing carries it. What has to be checked is the
+   MIDDLE — a thin film of slime, too light for the casing and too dark for the
+   mark — because that is where the two coverages meet and where a gap would
+   be. They overlap instead. The worst pair anywhere on the ramp, both hazard
+   washes included, is 3.35:1 at about 40% coverage; the tightest mark is the
+   cytoplasm green, and the arc that started this is 3.43.
+
+   Two things follow from that and are not decoration:
+
+   - The marks are OPAQUE. The old alphas (.30 to .92) were a hierarchy painted
+     in transparency, and transparency over a variable ground is a colour you
+     cannot solve. Weight and tone carry the hierarchy now; the pulses that
+     used to breathe in alpha breathe in width instead, so the quiet end of a
+     pulse is still a mark and not a rumour.
+   - The casing is measured in DEVICE pixels, not in grid units. It is an
+     outline — a rendering device that says "this edge is a mark, not tissue" —
+     and an outline is a constant on the screen, not a quantity in the dish. As
+     a grid width it multiplied by the plate's scale, which is 0.76 on the
+     smallest canvas and 5.6 on a laptop's: 1.2 device pixels of casing at one
+     end and 9 at the other, which turned a 6.7px ring into a 15.7px slab and
+     made every objective look like a bullseye. Held at 2.4px it is the same
+     hairline everywhere, always visible and never a border.
+
+     What the ratios need is that the casing EXIST beside the mark, not that it
+     have any particular width — 1.4.11 sets no minimum size — so pinning it to
+     the screen costs the contrast argument nothing. */
+var MARK_CASE    = 'rgba(7,9,6,1)';  // the stage's ground, opaque
+var MARK_CASE_PX = 2.4;              // casing width, total, DEVICE pixels
+/* ...but never wider than this in grid units. The cap binds only below about
+   an sx of 1.5 — a 320px canvas, the floor resizeCanvas clamps to — and it is
+   the width the casing had when it was a grid quantity, so the tightest plate
+   keeps exactly the geometry that was checked for it and every larger one
+   gets the hairline instead. */
+var MARK_CASE_MAX = 1.6;
+/* Set once per frame from the plate's scale, and read by the cased helpers
+   below — they draw inside the grid transform, so a screen width has to be
+   divided back out of it. */
+var markCase = MARK_CASE_PX;
+
+/* The retract cue cannot be the pink the panel uses for a spent reserve:
+   #df6f8b is dark enough that the casing construction above never lifts it to
+   3:1 anywhere on the ramp — it peaks at 2.6. This is that hue at the
+   lightness where it does hold (3.39:1 at the crossover), which is a paler
+   rose than the panel's and reads as the same warning. */
+var MARK_RETRACT = '#eeb4c2';
+/* The objective's own colour, and it is one colour: the ring and the core disc
+   are orange whether the objective is met or not, and the met state is told by
+   the dial below rather than by a change of hue here.
+
+   Orange is the tightest mark on this plate to place, because it is the
+   slime's own neighbourhood, and the tone has to be picked to stand APART from
+   the specimen rather than merely to clear a number. The sheet's --warn
+   (#e0763c) cannot be used at all: it is dark enough that the casing never
+   lifts it past 2.56 anywhere on the ramp. Above that floor everything is a
+   trade — the marks want luminance, orange wants chroma, and past a point
+   buying one spends the other.
+
+   This is the most chromatic orange between hue 23° and 29° that holds a 3.10
+   floor. Chroma 191 is the specimen's own 189, so the ring is as saturated as
+   the thing it is drawn on, and 16° of hue separation is what makes it read as
+   orange against gold. The first attempt held 3.38 instead and came out at
+   chroma 140: a peach, which cleared the arithmetic and lost the argument. A
+   mark that passes a contrast check by going pale has blended into the
+   specimen in every way except the one that was measured.
+
+   Ring and dial are near-identical in luminance (1.04 between them), and no
+   orange avoids that: both are light marks, and 3:1 between two light marks
+   would need one of them dark enough to fail the ground. They are told apart
+   by radius and by the casing gap between them — which is the same thing that
+   tells them apart over tissue, where neither colour survives at all, so the
+   reading does not change with the ground or with the reader's colour
+   vision. */
+var MARK_OBJ = '#ff9c40';
+/* The dial as it fills.
+
+   It used to be painted in ACC_ARC, the specimen's own tint: a progress ring
+   the exact colour of the thing whose progress it reports, drawn on top of
+   that thing. Casing it made it legible and moving it to its own radius made
+   it unambiguous, and it was still yellow on yellow, which is what the
+   complaint was about in the first place. Neither of those changes was the fix
+   for it; they were the two things that had to be true before a colour change
+   could be more than a repaint.
+
+   Bone is the plate's neutral. It is near-achromatic, so it takes nothing from
+   the orange beside it and cannot be mistaken for tissue at any occupancy, and
+   it is the most comfortable mark on the plate at a 3.63 floor. ACC_ARC is
+   gone with it. The tint is still the CUE ring, which is the one mark that is
+   MEANT to be the specimen's colour: that ring is your own reach. */
+var MARK_DIAL = '#ced4b4';
+/* Cytoplasm, for the two marks that mean cytoplasm: the dial once it closes,
+   and the stranger's ring, which is a ring of the stuff that is not yours yet.
+   The dial fills in bone and turns green at the moment it completes, which is
+   the one hue change left on an objective and is what says "met" — that, the
+   complete circle itself, and a ring drawn heavier. */
+var MARK_CYTO = '#7fd1b9';
+
+/* The dial's radius, as a fraction of the objective's own.
+
+   The casing above makes each mark VISIBLE on any ground. It does not make two
+   marks TELL APART on any ground, and those are different problems. Over lit
+   tissue every core vanishes and what survives of a mark is its casing, so two
+   marks that differ only in the colour inside the casing are, there, the same
+   mark. The progress arc used to be drawn on the objective ring itself and
+   differ from it by hue: yellow swept, bone unswept, same circle. Over agar
+   that is legible at a glance; over tissue it is two dark bands at one radius
+   differing by 36% of their width, which is not a reading, and the thing being
+   read — how far round the arc has gone — is the whole point of drawing it.
+
+   So the dial moves off the ring and onto a circle of its own, inside it. Now
+   the ring says WHERE the objective is and is always a complete circle, and
+   the dial says HOW FAR and is a separate arc at a radius nothing else uses.
+   Over tissue that reads as a full dark circle with a partial dark arc inside
+   it, which is the same sentence the colours were saying and is one no ground
+   can take away. Colour still carries it on agar, where colour works.
+
+   The same reasoning finishes the met state. A met objective used to drop its
+   arc and go cyan, which over tissue left a ring 21% heavier than a pending
+   one and nothing else. It draws a COMPLETE dial instead: the dial fills as
+   the objective is met and stays filled, so pending-at-zero, part-met and met
+   are three different pictures rather than two colours and an absence. A dish
+   that reseals runs it backwards, which is what the number does too.
+
+   0.66 sits the dial clear of both its neighbours — the core disc plus casing
+   ends at 0.34r + markCase/2 and the ring's casing starts at
+   r - (1.2 + markCase)/2. The gaps are narrowest where the casing is widest
+   relative to the objective, which is the smallest plate: about a pixel each
+   there, opening to nine and thirteen on a laptop's. The three bands read as
+   three at every size the canvas will take, which is what MARK_CASE_MAX is
+   for. */
+var MARK_DIAL_R = 0.66;
+
+function casedArc(c, x, y, r, a0, a1, w, style) {
+  c.beginPath();
+  c.arc(x, y, r, a0, a1);
+  c.lineWidth = w + markCase;
+  c.strokeStyle = MARK_CASE;
+  c.stroke();
+  c.lineWidth = w;
+  c.strokeStyle = style;
+  c.stroke();
+}
+
+function casedRing(c, x, y, r, w, style) {
+  casedArc(c, x, y, r, 0, Math.PI * 2, w, style);
+}
+
+/* A filled mark gets the same casing as a ring: the disc is laid once at the
+   casing's radius and once at its own, so the dark edge is outside the mark
+   rather than eating into it. */
+function casedDisc(c, x, y, r, style) {
+  c.beginPath();
+  c.arc(x, y, r + markCase / 2, 0, Math.PI * 2);
+  c.fillStyle = MARK_CASE;
+  c.fill();
+  c.beginPath();
+  c.arc(x, y, r, 0, Math.PI * 2);
+  c.fillStyle = style;
+  c.fill();
+}
+
 /* mode 1 = cue, 2 = retract. On touch a one-finger drag is a cue and a second
    finger makes it a retract for the duration of that gesture; there is no
    stored verb any more, because the on-screen switch that set one is gone. */
@@ -5017,6 +5202,11 @@ function render() {
      The fold runs once per rebuild: clean frames between rebuilds re-composite
      the same accumulator, exactly as they re-stroked the same paths before. */
   var sx = cv.width / GW, sy = cv.height / GH;
+  /* the casing is a screen width, so divide the plate's scale back out of it —
+     capped, because on the smallest canvas the plate can size to, 2.4 device
+     pixels is 3.2 grid units, which is wider than the gaps between an
+     objective's three bands and would close them into one blob */
+  markCase = Math.min(MARK_CASE_PX / sx, MARK_CASE_MAX);
   if (veinFresh) {
     /* Fresh wins wherever fresh drew; the decayed old survives only where it
        did not. Stated that way rather than as a per-pixel max because canvas
@@ -5057,9 +5247,31 @@ function render() {
 
   var e = S.exp;
 
+  /* The hazard wash is the dish's own light, so it goes on the dish and not on
+     the instruments: laid here, under the marks, rather than over the finished
+     frame. Over them it was a 13% orange sitting on both the mark and the
+     ground beneath it, and equal addition always compresses a ratio — it cost
+     the crossover pair about a third of a point and took the tightest mark to
+     3.00, which is a floor met by rounding. Under them, the marks composite
+     onto the washed ground and the same pair holds 3.35. It still covers the
+     whole plate, which is all the effect ever claimed. */
+  if (S.shockActive) {
+    ctx.fillStyle = 'rgba(214,148,72,.13)';
+    ctx.fillRect(0, 0, GW, GH);
+  } else if (S.shockWarn) {
+    ctx.fillStyle = 'rgba(120,96,60,.06)';
+    ctx.fillRect(0, 0, GW, GH);
+  }
+
   /* The stranger. Drawn under the nodes so a flake sitting on it still reads,
      and pulsed off sim time rather than the wall clock so a time-lapse run and
-     a real-time one show the same frame at the same step. */
+     a real-time one show the same frame at the same step.
+
+     The pulse is in the ring's WIDTH now. It used to be in its alpha, from .30
+     to .64, and the quiet end of that was 2.0:1 on bare agar and 1.0 on
+     tissue — a mark that spent half of every cycle being nothing. The interior
+     wash still breathes in alpha because it is a wash and not the mark: the
+     ring is the edge that has to be found. */
   if (e.donor) {
     var dn = e.donor;
     var puls = 0.5 + 0.5 * Math.sin(S.simT * 1.7);
@@ -5067,53 +5279,31 @@ function render() {
     ctx.arc(dn.x, dn.y, dn.r * 0.72, 0, Math.PI * 2);
     ctx.fillStyle = 'rgba(127,209,185,' + (0.05 + 0.05 * puls).toFixed(3) + ')';
     ctx.fill();
-    ctx.beginPath();
-    ctx.arc(dn.x, dn.y, dn.r, 0, Math.PI * 2);
-    ctx.lineWidth = 1.4;
-    ctx.strokeStyle = 'rgba(127,209,185,' + (0.30 + 0.34 * puls).toFixed(3) + ')';
-    ctx.stroke();
+    casedRing(ctx, dn.x, dn.y, dn.r, 1.1 + 0.7 * puls, MARK_CYTO);
   }
 
   for (var i = 0; i < e.nodes.length; i++) {
     var nd = e.nodes[i];
     var done = S.nodeDone[i];
-    ctx.beginPath();
-    ctx.arc(nd.x, nd.y, nd.r, 0, Math.PI * 2);
-    ctx.lineWidth = done ? 1.8 : 1.2;
-    ctx.strokeStyle = done ? 'rgba(127,209,185,.92)' : 'rgba(206,212,180,.50)';
-    ctx.stroke();
+    var prog = done ? 1 : S.nodeProg[i];
+    casedRing(ctx, nd.x, nd.y, nd.r, done ? 1.8 : 1.2, MARK_OBJ);
 
-    if (!done && S.nodeProg[i] > 0.01) {
-      ctx.beginPath();
-      ctx.arc(nd.x, nd.y, nd.r, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * S.nodeProg[i]);
-      ctx.lineWidth = 2.2;
-      ctx.strokeStyle = ACC_ARC;
-      ctx.stroke();
+    if (prog >= 1) {
+      casedRing(ctx, nd.x, nd.y, nd.r * MARK_DIAL_R, 2.2, MARK_CYTO);
+    } else if (prog > 0.01) {
+      casedArc(ctx, nd.x, nd.y, nd.r * MARK_DIAL_R, -Math.PI / 2,
+               -Math.PI / 2 + Math.PI * 2 * prog, 2.2, MARK_DIAL);
     }
 
-    ctx.beginPath();
-    ctx.arc(nd.x, nd.y, nd.r * 0.34, 0, Math.PI * 2);
-    ctx.fillStyle = done ? 'rgba(127,209,185,.55)' : 'rgba(206,212,180,.42)';
-    ctx.fill();
+    casedDisc(ctx, nd.x, nd.y, nd.r * 0.34, MARK_OBJ);
   }
 
   if (ptr.down) {
-    ctx.beginPath();
-    ctx.arc(ptr.gx, ptr.gy, CUE_R, 0, Math.PI * 2);
-    ctx.lineWidth = 1.1;
-    ctx.strokeStyle = ptr.mode === 2 ? 'rgba(199,75,106,.75)' : ACC_CUE;
-    ctx.stroke();
+    casedRing(ctx, ptr.gx, ptr.gy, CUE_R, 1.3,
+              ptr.mode === 2 ? MARK_RETRACT : ACC_CUE);
   }
 
   ctx.restore();
-
-  if (S.shockActive) {
-    ctx.fillStyle = 'rgba(214,148,72,.13)';
-    ctx.fillRect(0, 0, cv.width, cv.height);
-  } else if (S.shockWarn) {
-    ctx.fillStyle = 'rgba(120,96,60,.06)';
-    ctx.fillRect(0, 0, cv.width, cv.height);
-  }
 }
 
 /* ------------------------------------------------------------
