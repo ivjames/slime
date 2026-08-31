@@ -5042,9 +5042,32 @@ var MARK_CASE_W = 1.6;              // width the casing adds, total, grid units
    lightness where it does hold (3.39:1 at the crossover), which is a paler
    rose than the panel's and reads as the same warning. */
 var MARK_RETRACT = '#eeb4c2';
-/* Bone, for an objective not yet met, and cytoplasm for one that is. */
-var MARK_PENDING = '#ced4b4';
-var MARK_MET     = '#7fd1b9';
+/* The objective's own colour, and it is one colour: the ring and the core disc
+   are orange whether the objective is met or not, and the met state is told by
+   the dial below rather than by a change of hue here.
+
+   Orange is the tightest of the plate's marks to place, because it is the
+   slime's own neighbourhood. The sheet's --warn (#e0763c) cannot be used: it
+   is dark enough that the casing never lifts it past 2.56 anywhere on the
+   ramp. Lightening --warn's own hue clears the floor from about L=0.69, and
+   the most chromatic tone that holds the 3.35 the rest of the plate already
+   keeps is this one — hue 28°, which is also 17° off the specimen's 45° and so
+   still reads as orange against it rather than as a warmer slime.
+
+   Ring and dial are near-identical in luminance (1.04 between them), and no
+   orange avoids that: both are light marks, and 3:1 between two light marks
+   would need one of them dark enough to fail the ground. They are told apart
+   by radius and by the casing gap between them — which is the same thing that
+   tells them apart over tissue, where neither colour survives at all, so the
+   reading does not change with the ground or with the reader's colour
+   vision. */
+var MARK_OBJ = '#feb372';
+/* Cytoplasm, for the two marks that mean cytoplasm: the dial once it closes,
+   and the stranger's ring, which is a ring of the stuff that is not yours yet.
+   The dial fills in the specimen's own tint and turns green at the moment it
+   completes, which is the one hue change left on an objective and is what now
+   says "met" — that, the complete circle itself, and a ring drawn heavier. */
+var MARK_CYTO = '#7fd1b9';
 
 /* The dial's radius, as a fraction of the objective's own.
 
@@ -5210,24 +5233,23 @@ function render() {
     ctx.arc(dn.x, dn.y, dn.r * 0.72, 0, Math.PI * 2);
     ctx.fillStyle = 'rgba(127,209,185,' + (0.05 + 0.05 * puls).toFixed(3) + ')';
     ctx.fill();
-    casedRing(ctx, dn.x, dn.y, dn.r, 1.1 + 0.7 * puls, MARK_MET);
+    casedRing(ctx, dn.x, dn.y, dn.r, 1.1 + 0.7 * puls, MARK_CYTO);
   }
 
   for (var i = 0; i < e.nodes.length; i++) {
     var nd = e.nodes[i];
     var done = S.nodeDone[i];
     var prog = done ? 1 : S.nodeProg[i];
-    casedRing(ctx, nd.x, nd.y, nd.r, done ? 1.8 : 1.2,
-              done ? MARK_MET : MARK_PENDING);
+    casedRing(ctx, nd.x, nd.y, nd.r, done ? 1.8 : 1.2, MARK_OBJ);
 
     if (prog >= 1) {
-      casedRing(ctx, nd.x, nd.y, nd.r * MARK_DIAL_R, 2.2, MARK_MET);
+      casedRing(ctx, nd.x, nd.y, nd.r * MARK_DIAL_R, 2.2, MARK_CYTO);
     } else if (prog > 0.01) {
       casedArc(ctx, nd.x, nd.y, nd.r * MARK_DIAL_R, -Math.PI / 2,
                -Math.PI / 2 + Math.PI * 2 * prog, 2.2, ACC_ARC);
     }
 
-    casedDisc(ctx, nd.x, nd.y, nd.r * 0.34, done ? MARK_MET : MARK_PENDING);
+    casedDisc(ctx, nd.x, nd.y, nd.r * 0.34, MARK_OBJ);
   }
 
   if (ptr.down) {
