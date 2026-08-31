@@ -206,12 +206,11 @@ opened, and logs nothing when it is not: a link to a dish you have reached is
 just a run of it, and a link past the gate is a look ahead rather than a pass.
 Otherwise the gate would be bypassable by anyone willing to edit a URL.
 
-On a touch screen the same verbs are a hold or drag for a growth cue, a second
-finger to flip that drag into a retract, and a Grow / Retract switch on the
-control row for retracting one-handed. Hold and the time-lapse sit beside it,
-and the time-lapse button steps round the whole ladder rather than only up it,
-since a thumb has no shift key to walk it back with. The rest — reset, abandon,
-and this table — are behind **Controls**.
+On a touch screen the same verbs are a hold or drag for a growth cue and a
+second finger to flip that drag into a retract. The control row is Hold and the
+time-lapse, and the time-lapse button steps round the whole ladder rather than
+only up it, since a thumb has no shift key to walk it back with. The rest —
+reset, abandon, and this table — are behind **Controls**.
 
 ## How the sim works
 

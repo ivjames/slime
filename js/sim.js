@@ -209,8 +209,8 @@ function markTouch() {
   if (TOUCH) return;
   TOUCH = true;
   document.body.classList.add('touch');
-  /* the control row just gained the gesture switch, so what it needs to fit on
-     one line has changed — see DOCK */
+  /* touch buttons are 44px and carry more padding, so the row needs more
+     width than it did a moment ago — see DOCK */
   dockActions();
 }
 
@@ -4988,10 +4988,10 @@ function strokeWhiskers(tc, sx, sy) {
   tc.restore();
 }
 
-/* mode 1 = cue, 2 = retract. touchMode is the verb the on-screen pads select;
-   a second finger overrides it to retract for the duration of that gesture. */
+/* mode 1 = cue, 2 = retract. On touch a one-finger drag is a cue and a second
+   finger makes it a retract for the duration of that gesture; there is no
+   stored verb any more, because the on-screen switch that set one is gone. */
 var ptr = { down: false, mode: 0, gx: 0, gy: 0 };
-var touchMode = 1;
 var downIds = [];      /* pointerIds currently on the stage */
 var primaryId = null;  /* the one the brush follows */
 
@@ -6133,8 +6133,7 @@ function hasGhost(i) { return !!save.ghost[EXPERIMENTS[i].code]; }
 
 /* Where the three dish-ending controls live. On a bench with room they are on
    the control row, as they always were; on a phone they move inside the
-   Controls disclosure, because that row also carries the gesture switch and
-   six controls at phone width wrap to three rows. Same buttons, same handlers,
+   Controls disclosure, because five controls at phone width wrap to two rows. Same buttons, same handlers,
    same ids either way — all that changes is the parent, so nothing else in the
    file has to know which of the two places they are in.
 
@@ -6143,16 +6142,24 @@ function hasGhost(i) { return !!save.ghost[EXPERIMENTS[i].code]; }
    agree or the row is compacted while still carrying six controls.
 
    TOUCH_W is the hole ROW_NARROW's pointer-gated terms cannot see. Those two
-   terms exist because a coarse pointer gets the gesture switch, and the switch
-   is what makes the undocked row too wide; but body.touch is also set by
-   markTouch() on a real touch event, on a device whose PRIMARY pointer is fine
-   and which therefore never matches (pointer:coarse). A touchscreen laptop in
-   a 700px window is that device, and it gets the switch too. So TOUCH_W is the
-   same two bounds with the pointer gate dropped, consulted only once TOUCH is
-   known. Docking alone keeps that row off a second line — with the three
-   actions in the panel it needs ~387px — so the script covers the case even
-   though the sheet's compaction does not. markTouch() re-runs this for the
-   same reason: learning the device is touch changes what the row needs. */
+   terms exist because a coarse pointer spends more width on the same controls;
+   but body.touch is also set by markTouch() on a real touch event, on a device
+   whose PRIMARY pointer is fine and which therefore never matches
+   (pointer:coarse). A touchscreen laptop in a 700px window is that device, and
+   it spends that width too. So TOUCH_W is the same two bounds with the pointer
+   gate dropped, consulted only once TOUCH is known. Docking alone keeps that
+   row off a second line — with the three actions in the panel it needs ~387px
+   — so the script covers the case even though the sheet's compaction does not.
+   markTouch() re-runs this for the same reason: learning the device is touch
+   changes what the row needs.
+
+   Both bounds are now wider than the row strictly needs. They were set when a
+   coarse row also carried the Grow/Retract switch, which was ~111px; with the
+   switch gone the coarse row wants about what the fine one does. They are left
+   where they are rather than retuned, because the only effect of the extra
+   margin is that a coarse device docks its two dish-ending actions into the
+   disclosure a little sooner than it has to, and the sweep that placed them
+   was more careful than a re-derivation would be. */
 var DOCK = window.matchMedia
   ? window.matchMedia('(max-width:640px),(max-height:707px),' +
       '(pointer:coarse) and (max-width:739px),(pointer:coarse) and (max-height:775px)')
@@ -7076,15 +7083,6 @@ function toGrid(ev) {
   return { x: snapQ(clamp(gx, 0, GW - 1)), y: snapQ(clamp(gy, 0, GH - 1)) };
 }
 
-function setTouchMode(m) {
-  touchMode = (m === 2) ? 2 : 1;
-  /* the two halves of the gesture switch — a pressed pair, not a pair of
-     toggles, so exactly one of them is aria-pressed at a time */
-  var g = $('t-grow'), r = $('t-ret');
-  if (g) { g.classList.toggle('on', touchMode === 1); g.setAttribute('aria-pressed', touchMode === 1 ? 'true' : 'false'); }
-  if (r) { r.classList.toggle('on', touchMode === 2); r.setAttribute('aria-pressed', touchMode === 2 ? 'true' : 'false'); }
-}
-
 function endGesture() {
   downIds.length = 0;
   primaryId = null;
@@ -7153,7 +7151,7 @@ function bindInput() {
     if (!g) return;
     ev.preventDefault();
     if (ev.pointerType === 'touch') {
-      ptr.mode = (downIds.length > 1) ? 2 : touchMode;
+      ptr.mode = (downIds.length > 1) ? 2 : 1;
     } else {
       ptr.mode = (ev.button === 2 || ev.shiftKey || ev.ctrlKey) ? 2 : 1;
     }
@@ -7264,8 +7262,6 @@ function bindButtons() {
      truthy object and walk the ladder backwards. */
   $('s-speed').addEventListener('click', function () { cycleSpeed(false); });
   $('s-exitrp').addEventListener('click', function () { closeKeys(); exitReplay(); });
-  $('t-grow').addEventListener('click', function () { setTouchMode(1); });
-  $('t-ret').addEventListener('click', function () { setTouchMode(2); });
   /* addListener is the pre-2021 Safari spelling; the modern one is preferred
      where it exists, and neither is worth a failed boot if the browser has
      matchMedia but neither hook. */
@@ -7395,7 +7391,6 @@ function init() {
   bindInput();
   bindButtons();
   dockActions();
-  setTouchMode(1);
   setSpeed(1);
   renderTitle();
   show('scr-title');
@@ -7407,7 +7402,6 @@ function init() {
   /* read-only handle for the harness; nothing in the game reads it back */
   window.SLIME = {
     S: S, ptr: ptr,
-    touchMode: function () { return touchMode; },
     isTouch: function () { return TOUCH; },
     agents: function () { return nAgents; },
     /* how many of them are at the front — the population forkTip draws from */

@@ -348,11 +348,12 @@ body.touch .keys-touch{display:grid}
 /* ---------- the control row ---------- */
 /* Under the log rather than over it — see the feed above. On a bench with room
    it is what it was: the play controls, then the key list behind a disclosure.
-   On a phone it is the gesture switch, the two controls you reach for mid-run, and that same disclosure — and the three that end the
-   dish (reset, abandon, exit replay) move INSIDE it, because a row carrying
-   six controls at phone width wraps to three rows, and three rows of buttons
-   under the dish is what this branch is getting rid of. dockActions() in
-   sim.js does the moving; the sheet only has to style them in both places. */
+   On a phone it is the two controls you reach for mid-run and that same
+   disclosure — and the three that end the dish (reset, abandon, exit replay)
+   move INSIDE it, because a row carrying five controls at phone width wraps to
+   two rows, and a second row of buttons under the dish is what this branch is
+   getting rid of. dockActions() in sim.js does the moving; the sheet only has
+   to style them in both places. */
 .simbar{display:flex;align-items:center;gap:8px;margin:8px auto 0;flex-wrap:wrap}
 .simbar .btn{display:inline-flex;align-items:center;justify-content:center;
   min-height:38px;padding:0 14px;letter-spacing:.13em}
@@ -400,34 +401,6 @@ body.touch .simbar .btn{min-height:44px;min-width:44px;padding:0 14px}
 .kact .btn{display:inline-flex;align-items:center;justify-content:center;
   min-height:38px;padding:0 14px;letter-spacing:.13em}
 body.touch .kact .btn{min-height:44px}
-
-/* ---------- the gesture switch ---------- */
-/* This was two full-width 48px pads with sub-labels, stacked in a row of their
-   own under the dish: something like a fifth of a phone screen spent on a
-   two-state toggle, in the loudest furniture on the page, for a state most
-   players never change — a second finger already retracts without touching it.
-
-   It is a segmented switch in the control row now. Same two states, same 44px
-   of touch target, one control's worth of room; the "or use two fingers" line
-   it used to carry moved to the key list, which is where the rest of the
-   gestures are explained. Touch only: a mouse retracts with the right button
-   and a keyboard with shift, so there is nothing here for them to switch. */
-.verb{display:none;flex:0 0 auto;border:1px solid var(--edge);border-radius:2px;
-  overflow:hidden}
-body.touch .verb{display:flex}
-/* The tape owns the brush during a replay, so the verb it would be switching
-   is not the player's to set. Stated here rather than up with the other
-   replay rules because it has to come AFTER the rule that shows the switch —
-   the two selectors weigh the same, so the later one wins. */
-body.replay .verb{display:none}
-.vb{display:inline-flex;align-items:center;justify-content:center;
-  min-height:44px;min-width:44px;padding:0 13px;background:#12160f;color:var(--dim);
-  font-size:10.5px;letter-spacing:.16em;text-transform:uppercase;transition:.14s;
-  touch-action:manipulation;-webkit-tap-highlight-color:transparent;
-  -webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
-.vb+.vb{border-left:1px solid var(--edge)}
-.vb.on{background:var(--slime);color:#14170d;font-weight:600}
-.vb.ret.on{background:var(--bad);color:#1a0a10}
 
 body.touch .btn{min-height:44px;padding:11px 18px}
 body.touch .dish{min-height:132px}
@@ -506,8 +479,9 @@ body.touch .dish{min-height:132px}
 
    the first term being the viewport less #app's padding, the second being the
    letterbox: --plate is 56vh x 1.6154, and 0.56 x 1.6154 = 0.9046. What the
-   undocked row NEEDS is a function of the pointer, because a coarse pointer
-   also gets the gesture switch — ~111px the row does not otherwise spend:
+   undocked row NEEDED was a function of the pointer, because a coarse pointer
+   also carried the Grow/Retract switch — ~111px the row does not otherwise
+   spend:
 
        coarse 684px    fine 533px
 
@@ -526,26 +500,30 @@ body.touch .dish{min-height:132px}
    The width bound alone was the first fix and was not enough: the letterbox
    makes the row narrow on a SHORT coarse window at any width at all, so a
    1400x720 tablet failed a rule capped on width. Verified by sweeping both
-   axes at 8px steps rather than the sparse height grid that missed it. */
+   axes at 8px steps rather than the sparse height grid that missed it.
+
+   The switch has since been removed, so a coarse row wants about what a fine
+   one does and both crossovers moved down by roughly that 111px. The bounds
+   stay where the sweep put them: the extra margin only means a coarse device
+   docks its dish-ending actions a little sooner than it now has to. */
 @media(max-width:640px),(max-height:707px),
       (pointer:coarse) and (max-width:739px),
       (pointer:coarse) and (max-height:775px){
   /* a header that is one word does not need 35px of a phone screen */
   .feed-h{padding:6px 12px}
   #log{padding:8px 12px}
-  /* Four controls across a phone, in ONE row: the row is the point, and a
-     wrap puts back the second row of buttons this branch exists to remove.
-     Everything below is spent buying it. The switch and the buttons keep their
-     44px of height throughout, which is the touch target that actually
-     matters; what gives is horizontal padding, the tracking the labels are set
-     with, and the space in front of the disclosure's sign. Below about 360px
-     of viewport it wraps anyway — four labelled controls will not fit — and
-     the wrap is the graceful end of this, not a failure of it. */
+  /* The controls across a phone, in ONE row: the row is the point, and a wrap
+     puts back the second row of buttons this branch exists to remove.
+     Everything below is spent buying it. The buttons keep their 44px of height
+     throughout, which is the touch target that actually matters; what gives is
+     horizontal padding, the tracking the labels are set with, and the space in
+     front of the disclosure's sign. Below about 360px of viewport it wraps
+     anyway — labelled controls will not fit — and the wrap is the graceful end
+     of this, not a failure of it. */
   .simbar{gap:6px}
-  .simbar .btn,.vb{font-size:10px}
+  .simbar .btn{font-size:10px}
   .simbar .btn,body.touch .simbar .btn{padding:0 8px}
   .simbar .btn{letter-spacing:.06em}
-  .vb{padding:0 8px;letter-spacing:.09em}
   .keypop>summary::after,.keypop[open]>summary::after{margin-left:.25em}
   /* Held to the width of its longer label, because it has two: a row this
      tight that reflows the moment you pause it is a row that moves the
@@ -699,7 +677,6 @@ body.touch .dish{min-height:132px}
           <b>hold / drag</b><span>emit a growth cue &mdash; the exploratory front flows toward your finger</span>
           <b>two fingers</b><span>retract &mdash; a second finger flips a live drag and pulls cytoplasm back out of a region</span>
           <b>the reserve</b><span>cueing spends it and lifting your finger rebuilds it, slower than it went; at zero the brush stops until you lift</span>
-          <b>Retract</b><span>the switch on the control row does the same one-handed, until you switch it back</span>
           <b>Hold / &times;N</b><span>the control row stops the dish clock, or steps it round the ladder from &times;1/16 to &times;16 &mdash; same dish, watched slower or faster. &times;1 is already about a hundred times real time</span>
           <b>Controls</b><span>resetting the plate and abandoning the dish are in there</span>
         </div>
@@ -790,10 +767,6 @@ body.touch .dish{min-height:132px}
 
     <div class="simbar" id="controls">
       <p class="hint" id="replaynote"><b>Replay</b> &mdash; the recorded run, played back. Your cues are the recording; <b>Hold</b> and the time-lapse still work.</p>
-      <div class="verb" role="group" aria-label="Dish gesture">
-        <button class="vb on" id="t-grow" type="button" aria-pressed="true">Grow</button>
-        <button class="vb ret" id="t-ret" type="button" aria-pressed="false">Retract</button>
-      </div>
       <button class="btn ghost" id="s-pause" type="button">Hold</button>
       <button class="btn ghost" id="s-speed" type="button"><span class="wd">Time-lapse&nbsp;</span><span id="s-speedn">&times;1</span></button>
       <details class="keypop" id="keypop">
@@ -814,7 +787,6 @@ body.touch .dish{min-height:132px}
           <div class="keys keys-touch">
             <b>hold / drag</b><span>emit a growth cue</span>
             <b>two fingers</b><span>retract &mdash; a second finger flips a live drag</span>
-            <b>Retract</b><span>the switch, for retracting one-handed</span>
             <b>Hold / &times;N</b><span>stop the clock, or step it &times;1/16 &hellip; &times;16</span>
           </div>
         </div>
