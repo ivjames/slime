@@ -7103,14 +7103,20 @@ function bindInput() {
      was also a pinch, and the player came out of it looking at a quarter of
      the plate with no way back except pinching out again by hand.
 
-     Blocked on the dish and on the control row directly under it, which is
-     where a second finger can land short of the plate; NOT on the page,
+     Blocked on the dish and on what lies directly under it — the dish log,
+     and the control row under that — which is where a second finger lands when
+     it falls short of the plate; NOT on the page,
      because a player who wants to zoom the schedule or read the brief closer
      is doing something reasonable and 1.4.4 says they get to. gesture* are WebKit-only — nothing else fires
      them, so the listeners cost those browsers nothing. */
   var GESTURES = ['gesturestart', 'gesturechange', 'gestureend'];
   var noZoom = function (ev) { ev.preventDefault(); };
-  var surfaces = [stage, $('controls')], si, gi;
+  /* The log is on this list because it is what a finger short of the plate
+     now meets: it sits between the bench and the row. Two fingers there is a
+     pinch to block, and blocking it costs the log nothing — the handler below
+     only preempts a multi-touch move, so a one-finger scroll through the older
+     lines still works. */
+  var surfaces = [stage, $('feed'), $('controls')], si, gi;
   for (si = 0; si < surfaces.length; si++) {
     if (!surfaces[si]) continue;
     for (gi = 0; gi < GESTURES.length; gi++) {

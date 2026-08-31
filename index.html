@@ -312,9 +312,16 @@ body.touch .keys-touch{display:grid}
 /* It used to float over the plate: 11px type on top of whatever the organism
    was doing underneath it, which is unreadable exactly when it has something
    to say, and unreadable enough on a small dish that the old sheet just hid it
-   below 640px. It is a strip under the controls now, on a ground of its own,
+   below 640px. It is a strip below the bench now, on a ground of its own,
    newest line at the top. Fixed height so a line arriving does not shove the
-   page; scrollable, and focusable so a keyboard can reach the older lines. */
+   page; scrollable, and focusable so a keyboard can reach the older lines.
+
+   Directly below the bench, above the control row rather than under it. The
+   log is the console's continuation — the readouts say what the dish is, the
+   log says what it just did — and a row of buttons wedged between the two put
+   the furniture where the reading is. The row lost nothing by moving down: it
+   is four controls you hit without looking and a key list folded away behind a
+   disclosure, and none of that is read the way a line of narration is. */
 .feed{width:100%;margin:10px auto 0;border:1px solid var(--line);border-radius:3px;
   background:linear-gradient(180deg,#14180f,#0f1210)}
 .feed-h{padding:8px 14px;border-bottom:1px solid var(--line);color:var(--dim);
@@ -339,9 +346,9 @@ body.touch .keys-touch{display:grid}
 #log:focus-visible{outline-offset:-2px;-webkit-mask-image:none;mask-image:none}
 
 /* ---------- the control row ---------- */
-/* On a bench with room it is what it was: the play controls, then the key list
-   behind a disclosure. On a phone it is the gesture switch, the two controls
-   you reach for mid-run, and that same disclosure — and the three that end the
+/* Under the log rather than over it — see the feed above. On a bench with room
+   it is what it was: the play controls, then the key list behind a disclosure.
+   On a phone it is the gesture switch, the two controls you reach for mid-run, and that same disclosure — and the three that end the
    dish (reset, abandon, exit replay) move INSIDE it, because a row carrying
    six controls at phone width wraps to three rows, and three rows of buttons
    under the dish is what this branch is getting rid of. dockActions() in
@@ -576,15 +583,62 @@ body.touch .dish{min-height:132px}
    Width still wins on a portrait phone — --plate is a min() against 100% — so
    this changes nothing there. */
 .bench,#controls,#feed{max-width:var(--plate)}
-/* On a short window the log still gives ground, but not the way it used to.
-   64px here was chosen to keep the WHOLE feed above the fold on a 1280x800
-   laptop, and it bought that by leaving under three lines of narration — which
-   on the commonest desktop size is exactly "the log scrolls away too quickly".
-   The newest line sits at the TOP of the well, so depth below the fold is only
-   ever old history reached on purpose; trading the feed's bottom edge for five
-   and a half readable lines is the right side of that bargain. */
-@media(max-height:760px){
+/* On a short window the log gives ground, and it gives it sooner now that the
+   control row sits BELOW it rather than above. What used to fall past the fold
+   was the feed's own bottom edge — old history, reached on purpose, since the
+   newest line sits at the top of the well — and that was a fine thing to spend.
+   Under the log, the same overflow spends Hold and the time-lapse instead, and
+   a control you have to scroll to reach mid-run is not a control. So the well
+   yields first, and where the well has nothing left to give, the dish yields
+   after it.
+
+   The aspect terms are doing real work rather than standing in for "phone".
+   The plate is min(100%, 56vh x 1.6154), so on anything squarer than about
+   9:10 it is the WIDTH that caps the dish and the column is far shorter than
+   the window — a 390x780 phone fits the whole 190px well and the row with room
+   over, and shrinking its log would buy nothing but blank screen. Only where
+   56vh is the binding cap does the height run out, which is the landscape half
+   of the test. The portrait half still runs out eventually, just later: a
+   375x667 phone is seven pixels short with a full well, hence its own term at
+   700px, which leaves the taller phones their eight lines.
+
+   Every number here was measured in a browser at the size it names, because
+   deriving them is what went wrong twice: the console under the plate wraps to
+   a second row below about 640px of column, which adds 70px exactly where the
+   arithmetic says there is room.
+
+       1280x800   the row ended 43px under the fold. 130px — five and a half
+                  readable lines, the height this rule already used — puts the
+                  whole page on screen with 17px to spare, on a size that
+                  scrolled even before the reorder.
+       1280x760   88px, and the dish is untouched: at that width the console
+                  has not wrapped and the plate is still worth its 56vh.
+       700x700    the dish alone is 561px of the window with its console, and
+                  an 88px well still leaves the row 51px under. The well could
+                  save it alone only by coming down to 37px — a line and a half
+                  of narration, which is not a log — so the dish yields
+                  instead: 46vh, the same trade 56vh already made against an
+                  uncapped canvas, made once more at the size where 56vh is
+                  what does not fit.
+       1024x640   46vh still leaves the row 13px under, so 40vh below 660.
+
+   The 400px floor under the shrunk plate is the control row's own width. Below
+   707px of height the row is docked — reset, abandon and exit replay move into
+   the disclosure, see DOCK in sim.js — and what is left needs about 387px to
+   stay on one line. The floor keeps the column wider than that, so shrinking
+   the dish to save the row cannot end up wrapping it. */
+@media(min-aspect-ratio:9/10) and (max-height:900px),
+      (max-aspect-ratio:9/10) and (max-height:700px){
   #log{height:130px}
+}
+@media(min-aspect-ratio:9/10) and (max-height:780px){
+  #log{height:88px}
+}
+@media(min-aspect-ratio:9/10) and (max-height:700px){
+  :root{--plate:min(100%,max(400px,calc(46vh * 1.6154)))}
+}
+@media(min-aspect-ratio:9/10) and (max-height:660px){
+  :root{--plate:min(100%,max(400px,calc(40vh * 1.6154)))}
 }
 </style>
 </head>
@@ -723,6 +777,17 @@ body.touch .dish{min-height:132px}
       </div>
     </div>
 
+    <!-- Narration: under the bench, not over the organism, and above the
+         control row rather than below it. The log is a readout — it belongs
+         with the console it continues, where a glance from the plate reaches
+         it — and the row under it is buttons and a folded-away key list you
+         read once. Putting the furniture between the dish and the account of
+         the dish was the wrong way round. -->
+    <div class="feed" id="feed">
+      <div class="feed-h" id="feed-h">Dish log</div>
+      <div id="log" role="log" aria-live="polite" tabindex="0" aria-labelledby="feed-h"></div>
+    </div>
+
     <div class="simbar" id="controls">
       <p class="hint" id="replaynote"><b>Replay</b> &mdash; the recorded run, played back. Your cues are the recording; <b>Hold</b> and the time-lapse still work.</p>
       <div class="verb" role="group" aria-label="Dish gesture">
@@ -754,12 +819,6 @@ body.touch .dish{min-height:132px}
           </div>
         </div>
       </details>
-    </div>
-
-    <!-- narration: under the bench, not over the organism -->
-    <div class="feed" id="feed">
-      <div class="feed-h" id="feed-h">Dish log</div>
-      <div id="log" role="log" aria-live="polite" tabindex="0" aria-labelledby="feed-h"></div>
     </div>
   </section>
 
