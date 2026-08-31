@@ -5860,9 +5860,11 @@ var REPLAY_SPEEDS = [1, 4, 16];
    a seed run to the same step count holds a bit-identical dish at any speed,
    with the box at any value or none — verified on EXP-04 at step 1500 across
    x1/x4/x12 and boxes of 6ms, 24ms and off, which agree to the last bit of
-   the trail field. Re-verified when the ladder grew its slow half, over all
-   nine stops from x1/16 to x16 at step 120 of EXP-04: one trail hash and one
-   front position between the lot of them. A stop below x1 spends most frames
+   the trail field. Re-verified when the ladder grew its slow half, all of it
+   on EXP-04 on one seed: step 120 across all nine stops, step 600 across
+   x1/16, x1/8 and x1 — the two stops the budget floor binds at, against the
+   reference — and step 1500 across x1/4, x1, x4 and x16. One trail hash and
+   one front position in each of the three. A stop below x1 spends most frames
    running no steps at all, and a frame that runs none is not a frame the dish
    can tell apart from one that was never scheduled. */
 var STEP_MS = 20;
