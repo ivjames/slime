@@ -5027,12 +5027,30 @@ function strokeWhiskers(tc, sx, sy) {
      cannot solve. Weight and tone carry the hierarchy now; the pulses that
      used to breathe in alpha breathe in width instead, so the quiet end of a
      pulse is still a mark and not a rumour.
-   - The casing is a floor, not a preference. MARK_CASE_W is a total width, so
-     a mark keeps its own weight and the casing is added around it; at the
-     narrowest plate the canvas will size to it is still about half a device
-     pixel each side, and at a laptop's plate a little over two. */
-var MARK_CASE   = 'rgba(7,9,6,1)';  // the stage's ground, opaque
-var MARK_CASE_W = 1.6;              // width the casing adds, total, grid units
+   - The casing is measured in DEVICE pixels, not in grid units. It is an
+     outline — a rendering device that says "this edge is a mark, not tissue" —
+     and an outline is a constant on the screen, not a quantity in the dish. As
+     a grid width it multiplied by the plate's scale, which is 0.76 on the
+     smallest canvas and 5.6 on a laptop's: 1.2 device pixels of casing at one
+     end and 9 at the other, which turned a 6.7px ring into a 15.7px slab and
+     made every objective look like a bullseye. Held at 2.4px it is the same
+     hairline everywhere, always visible and never a border.
+
+     What the ratios need is that the casing EXIST beside the mark, not that it
+     have any particular width — 1.4.11 sets no minimum size — so pinning it to
+     the screen costs the contrast argument nothing. */
+var MARK_CASE    = 'rgba(7,9,6,1)';  // the stage's ground, opaque
+var MARK_CASE_PX = 2.4;              // casing width, total, DEVICE pixels
+/* ...but never wider than this in grid units. The cap binds only below about
+   an sx of 1.5 — a 320px canvas, the floor resizeCanvas clamps to — and it is
+   the width the casing had when it was a grid quantity, so the tightest plate
+   keeps exactly the geometry that was checked for it and every larger one
+   gets the hairline instead. */
+var MARK_CASE_MAX = 1.6;
+/* Set once per frame from the plate's scale, and read by the cased helpers
+   below — they draw inside the grid transform, so a screen width has to be
+   divided back out of it. */
+var markCase = MARK_CASE_PX;
 
 /* The retract cue cannot be the pink the panel uses for a spent reserve:
    #df6f8b is dark enough that the casing construction above never lifts it to
@@ -5118,17 +5136,18 @@ var MARK_CYTO = '#7fd1b9';
    that reseals runs it backwards, which is what the number does too.
 
    0.66 sits the dial clear of both its neighbours — the core disc plus casing
-   ends at 0.34r + MARK_CASE_W/2 and the ring's casing starts at
-   r - (1.2 + MARK_CASE_W)/2, leaving gaps of 1.5 and 1.1 grid units on a
-   13-unit objective. That is about a pixel each at the narrowest plate the
-   canvas will size to, and three or four at a laptop's, so the three bands
-   read as three rather than as one thick smear at every size. */
+   ends at 0.34r + markCase/2 and the ring's casing starts at
+   r - (1.2 + markCase)/2. The gaps are narrowest where the casing is widest
+   relative to the objective, which is the smallest plate: about a pixel each
+   there, opening to nine and thirteen on a laptop's. The three bands read as
+   three at every size the canvas will take, which is what MARK_CASE_MAX is
+   for. */
 var MARK_DIAL_R = 0.66;
 
 function casedArc(c, x, y, r, a0, a1, w, style) {
   c.beginPath();
   c.arc(x, y, r, a0, a1);
-  c.lineWidth = w + MARK_CASE_W;
+  c.lineWidth = w + markCase;
   c.strokeStyle = MARK_CASE;
   c.stroke();
   c.lineWidth = w;
@@ -5145,7 +5164,7 @@ function casedRing(c, x, y, r, w, style) {
    rather than eating into it. */
 function casedDisc(c, x, y, r, style) {
   c.beginPath();
-  c.arc(x, y, r + MARK_CASE_W / 2, 0, Math.PI * 2);
+  c.arc(x, y, r + markCase / 2, 0, Math.PI * 2);
   c.fillStyle = MARK_CASE;
   c.fill();
   c.beginPath();
@@ -5183,6 +5202,11 @@ function render() {
      The fold runs once per rebuild: clean frames between rebuilds re-composite
      the same accumulator, exactly as they re-stroked the same paths before. */
   var sx = cv.width / GW, sy = cv.height / GH;
+  /* the casing is a screen width, so divide the plate's scale back out of it —
+     capped, because on the smallest canvas the plate can size to, 2.4 device
+     pixels is 3.2 grid units, which is wider than the gaps between an
+     objective's three bands and would close them into one blob */
+  markCase = Math.min(MARK_CASE_PX / sx, MARK_CASE_MAX);
   if (veinFresh) {
     /* Fresh wins wherever fresh drew; the decayed old survives only where it
        did not. Stated that way rather than as a per-pixel max because canvas
