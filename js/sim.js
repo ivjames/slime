@@ -1870,7 +1870,6 @@ var LAMP       = [255, 240, 176];
    to one that does not clear the floors. */
 var TINT = PLASMODIUM;
 var ACC_CUE = rgba(TINT, '1');
-var ACC_ARC = rgba(TINT, '1');
 buildLUT(TINT[0], TINT[1], TINT[2]);
 /* The vein bands want the same. tintVeins is a hoisted declaration so it is
    callable here, but VEIN_BANDS is a var initialised further down and is
@@ -1970,7 +1969,6 @@ function applyPalette() {
   buildLUT(vein[0], vein[1], vein[2]);
   tintVeins(vein);
   ACC_CUE = rgba(vein, '1');
-  ACC_ARC = rgba(vein, '1');
 
   /* The UI accent is a separate solve: it is text on the page ground AND the
      background under dark button ink, so it has to clear both at 4.5:1. The
@@ -5046,13 +5044,21 @@ var MARK_RETRACT = '#eeb4c2';
    are orange whether the objective is met or not, and the met state is told by
    the dial below rather than by a change of hue here.
 
-   Orange is the tightest of the plate's marks to place, because it is the
-   slime's own neighbourhood. The sheet's --warn (#e0763c) cannot be used: it
-   is dark enough that the casing never lifts it past 2.56 anywhere on the
-   ramp. Lightening --warn's own hue clears the floor from about L=0.69, and
-   the most chromatic tone that holds the 3.35 the rest of the plate already
-   keeps is this one — hue 28°, which is also 17° off the specimen's 45° and so
-   still reads as orange against it rather than as a warmer slime.
+   Orange is the tightest mark on this plate to place, because it is the
+   slime's own neighbourhood, and the tone has to be picked to stand APART from
+   the specimen rather than merely to clear a number. The sheet's --warn
+   (#e0763c) cannot be used at all: it is dark enough that the casing never
+   lifts it past 2.56 anywhere on the ramp. Above that floor everything is a
+   trade — the marks want luminance, orange wants chroma, and past a point
+   buying one spends the other.
+
+   This is the most chromatic orange between hue 23° and 29° that holds a 3.10
+   floor. Chroma 191 is the specimen's own 189, so the ring is as saturated as
+   the thing it is drawn on, and 16° of hue separation is what makes it read as
+   orange against gold. The first attempt held 3.38 instead and came out at
+   chroma 140: a peach, which cleared the arithmetic and lost the argument. A
+   mark that passes a contrast check by going pale has blended into the
+   specimen in every way except the one that was measured.
 
    Ring and dial are near-identical in luminance (1.04 between them), and no
    orange avoids that: both are light marks, and 3:1 between two light marks
@@ -5061,12 +5067,28 @@ var MARK_RETRACT = '#eeb4c2';
    tells them apart over tissue, where neither colour survives at all, so the
    reading does not change with the ground or with the reader's colour
    vision. */
-var MARK_OBJ = '#feb372';
+var MARK_OBJ = '#ff9c40';
+/* The dial as it fills.
+
+   It used to be painted in ACC_ARC, the specimen's own tint: a progress ring
+   the exact colour of the thing whose progress it reports, drawn on top of
+   that thing. Casing it made it legible and moving it to its own radius made
+   it unambiguous, and it was still yellow on yellow, which is what the
+   complaint was about in the first place. Neither of those changes was the fix
+   for it; they were the two things that had to be true before a colour change
+   could be more than a repaint.
+
+   Bone is the plate's neutral. It is near-achromatic, so it takes nothing from
+   the orange beside it and cannot be mistaken for tissue at any occupancy, and
+   it is the most comfortable mark on the plate at a 3.63 floor. ACC_ARC is
+   gone with it. The tint is still the CUE ring, which is the one mark that is
+   MEANT to be the specimen's colour: that ring is your own reach. */
+var MARK_DIAL = '#ced4b4';
 /* Cytoplasm, for the two marks that mean cytoplasm: the dial once it closes,
    and the stranger's ring, which is a ring of the stuff that is not yours yet.
-   The dial fills in the specimen's own tint and turns green at the moment it
-   completes, which is the one hue change left on an objective and is what now
-   says "met" — that, the complete circle itself, and a ring drawn heavier. */
+   The dial fills in bone and turns green at the moment it completes, which is
+   the one hue change left on an objective and is what says "met" — that, the
+   complete circle itself, and a ring drawn heavier. */
 var MARK_CYTO = '#7fd1b9';
 
 /* The dial's radius, as a fraction of the objective's own.
@@ -5246,7 +5268,7 @@ function render() {
       casedRing(ctx, nd.x, nd.y, nd.r * MARK_DIAL_R, 2.2, MARK_CYTO);
     } else if (prog > 0.01) {
       casedArc(ctx, nd.x, nd.y, nd.r * MARK_DIAL_R, -Math.PI / 2,
-               -Math.PI / 2 + Math.PI * 2 * prog, 2.2, ACC_ARC);
+               -Math.PI / 2 + Math.PI * 2 * prog, 2.2, MARK_DIAL);
     }
 
     casedDisc(ctx, nd.x, nd.y, nd.r * 0.34, MARK_OBJ);
