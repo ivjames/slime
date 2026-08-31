@@ -126,7 +126,9 @@ h1,h2,h3{font-weight:600;margin:0}
    makes it findable as a button at all */
 .btn.ghost{color:var(--dim)}
 .btn.ghost:hover{color:var(--ink);border-color:var(--ink)}
-/* time-lapse, lit while the shutter is open longer than real time */
+/* Time-lapse, lit at every stop except ×1. It is not "faster than real time"
+   — ×1 is already about a hundred times that — it is "not the dish's own
+   clock", which a quarter speed is as much as a quadruple one. */
 .btn.lapse-on{border-color:var(--slime);color:var(--slime)}
 
 /* ---------- brief / result cards ---------- */
@@ -310,9 +312,16 @@ body.touch .keys-touch{display:grid}
 /* It used to float over the plate: 11px type on top of whatever the organism
    was doing underneath it, which is unreadable exactly when it has something
    to say, and unreadable enough on a small dish that the old sheet just hid it
-   below 640px. It is a strip under the controls now, on a ground of its own,
+   below 640px. It is a strip below the bench now, on a ground of its own,
    newest line at the top. Fixed height so a line arriving does not shove the
-   page; scrollable, and focusable so a keyboard can reach the older lines. */
+   page; scrollable, and focusable so a keyboard can reach the older lines.
+
+   Directly below the bench, above the control row rather than under it. The
+   log is the console's continuation — the readouts say what the dish is, the
+   log says what it just did — and a row of buttons wedged between the two put
+   the furniture where the reading is. The row lost nothing by moving down: it
+   is four controls you hit without looking and a key list folded away behind a
+   disclosure, and none of that is read the way a line of narration is. */
 .feed{width:100%;margin:10px auto 0;border:1px solid var(--line);border-radius:3px;
   background:linear-gradient(180deg,#14180f,#0f1210)}
 .feed-h{padding:8px 14px;border-bottom:1px solid var(--line);color:var(--dim);
@@ -337,19 +346,27 @@ body.touch .keys-touch{display:grid}
 #log:focus-visible{outline-offset:-2px;-webkit-mask-image:none;mask-image:none}
 
 /* ---------- the control row ---------- */
-/* On a bench with room it is what it was: the play controls, then the key list
-   behind a disclosure. On a phone it is the gesture switch, the two controls
-   you reach for mid-run, and that same disclosure — and the three that end the
-   dish (reset, abandon, exit replay) move INSIDE it, because a row carrying
-   six controls at phone width wraps to three rows, and three rows of buttons
-   under the dish is what this branch is getting rid of. dockActions() in
-   sim.js does the moving; the sheet only has to style them in both places. */
+/* Under the log rather than over it — see the feed above. On a bench with room
+   it is what it was: the play controls, then the key list behind a disclosure.
+   On a phone it is the two controls you reach for mid-run and that same
+   disclosure — and the three that end the dish (reset, abandon, exit replay)
+   move INSIDE it, because a row carrying five controls at phone width wraps to
+   two rows, and a second row of buttons under the dish is what this branch is
+   getting rid of. dockActions() in sim.js does the moving; the sheet only has
+   to style them in both places. */
 .simbar{display:flex;align-items:center;gap:8px;margin:8px auto 0;flex-wrap:wrap}
 .simbar .btn{display:inline-flex;align-items:center;justify-content:center;
   min-height:38px;padding:0 14px;letter-spacing:.13em}
 /* out-specifies body.touch .btn, whose 18px of horizontal padding is right
    for a standalone button and is most of a phone's control row */
 body.touch .simbar .btn{min-height:44px;min-width:44px;padding:0 14px}
+/* The figure is held to the width of its widest label. The ladder runs from
+   ×1/16 to ×16, so the slot's content changes width as it is cycled, and a
+   button that grows and shrinks under a thumb that is pressing it repeatedly
+   walks out from under the thumb — the same reason #s-pause is pinned below,
+   arrived at from the other direction. Left-aligned, so the figure stays put
+   against the word rather than sliding about inside its own slot. */
+#s-speedn{display:inline-block;min-width:3.8em;text-align:left}
 /* Dropped where the row has to be narrow — the button still reads "×4", and
    its aria-label says the whole thing at every width. The word comes back only
    where the row stops being cramped, which is the negation of ROW_NARROW
@@ -384,34 +401,6 @@ body.touch .simbar .btn{min-height:44px;min-width:44px;padding:0 14px}
 .kact .btn{display:inline-flex;align-items:center;justify-content:center;
   min-height:38px;padding:0 14px;letter-spacing:.13em}
 body.touch .kact .btn{min-height:44px}
-
-/* ---------- the gesture switch ---------- */
-/* This was two full-width 48px pads with sub-labels, stacked in a row of their
-   own under the dish: something like a fifth of a phone screen spent on a
-   two-state toggle, in the loudest furniture on the page, for a state most
-   players never change — a second finger already retracts without touching it.
-
-   It is a segmented switch in the control row now. Same two states, same 44px
-   of touch target, one control's worth of room; the "or use two fingers" line
-   it used to carry moved to the key list, which is where the rest of the
-   gestures are explained. Touch only: a mouse retracts with the right button
-   and a keyboard with shift, so there is nothing here for them to switch. */
-.verb{display:none;flex:0 0 auto;border:1px solid var(--edge);border-radius:2px;
-  overflow:hidden}
-body.touch .verb{display:flex}
-/* The tape owns the brush during a replay, so the verb it would be switching
-   is not the player's to set. Stated here rather than up with the other
-   replay rules because it has to come AFTER the rule that shows the switch —
-   the two selectors weigh the same, so the later one wins. */
-body.replay .verb{display:none}
-.vb{display:inline-flex;align-items:center;justify-content:center;
-  min-height:44px;min-width:44px;padding:0 13px;background:#12160f;color:var(--dim);
-  font-size:10.5px;letter-spacing:.16em;text-transform:uppercase;transition:.14s;
-  touch-action:manipulation;-webkit-tap-highlight-color:transparent;
-  -webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
-.vb+.vb{border-left:1px solid var(--edge)}
-.vb.on{background:var(--slime);color:#14170d;font-weight:600}
-.vb.ret.on{background:var(--bad);color:#1a0a10}
 
 body.touch .btn{min-height:44px;padding:11px 18px}
 body.touch .dish{min-height:132px}
@@ -490,8 +479,9 @@ body.touch .dish{min-height:132px}
 
    the first term being the viewport less #app's padding, the second being the
    letterbox: --plate is 56vh x 1.6154, and 0.56 x 1.6154 = 0.9046. What the
-   undocked row NEEDS is a function of the pointer, because a coarse pointer
-   also gets the gesture switch — ~111px the row does not otherwise spend:
+   undocked row NEEDED was a function of the pointer, because a coarse pointer
+   also carried the Grow/Retract switch — ~111px the row does not otherwise
+   spend:
 
        coarse 684px    fine 533px
 
@@ -510,26 +500,30 @@ body.touch .dish{min-height:132px}
    The width bound alone was the first fix and was not enough: the letterbox
    makes the row narrow on a SHORT coarse window at any width at all, so a
    1400x720 tablet failed a rule capped on width. Verified by sweeping both
-   axes at 8px steps rather than the sparse height grid that missed it. */
+   axes at 8px steps rather than the sparse height grid that missed it.
+
+   The switch has since been removed, so a coarse row wants about what a fine
+   one does and both crossovers moved down by roughly that 111px. The bounds
+   stay where the sweep put them: the extra margin only means a coarse device
+   docks its dish-ending actions a little sooner than it now has to. */
 @media(max-width:640px),(max-height:707px),
       (pointer:coarse) and (max-width:739px),
       (pointer:coarse) and (max-height:775px){
   /* a header that is one word does not need 35px of a phone screen */
   .feed-h{padding:6px 12px}
   #log{padding:8px 12px}
-  /* Four controls across a phone, in ONE row: the row is the point, and a
-     wrap puts back the second row of buttons this branch exists to remove.
-     Everything below is spent buying it. The switch and the buttons keep their
-     44px of height throughout, which is the touch target that actually
-     matters; what gives is horizontal padding, the tracking the labels are set
-     with, and the space in front of the disclosure's sign. Below about 360px
-     of viewport it wraps anyway — four labelled controls will not fit — and
-     the wrap is the graceful end of this, not a failure of it. */
+  /* The controls across a phone, in ONE row: the row is the point, and a wrap
+     puts back the second row of buttons this branch exists to remove.
+     Everything below is spent buying it. The buttons keep their 44px of height
+     throughout, which is the touch target that actually matters; what gives is
+     horizontal padding, the tracking the labels are set with, and the space in
+     front of the disclosure's sign. Below about 360px of viewport it wraps
+     anyway — labelled controls will not fit — and the wrap is the graceful end
+     of this, not a failure of it. */
   .simbar{gap:6px}
-  .simbar .btn,.vb{font-size:10px}
+  .simbar .btn{font-size:10px}
   .simbar .btn,body.touch .simbar .btn{padding:0 8px}
   .simbar .btn{letter-spacing:.06em}
-  .vb{padding:0 8px;letter-spacing:.09em}
   .keypop>summary::after,.keypop[open]>summary::after{margin-left:.25em}
   /* Held to the width of its longer label, because it has two: a row this
      tight that reflows the moment you pause it is a row that moves the
@@ -567,15 +561,62 @@ body.touch .dish{min-height:132px}
    Width still wins on a portrait phone — --plate is a min() against 100% — so
    this changes nothing there. */
 .bench,#controls,#feed{max-width:var(--plate)}
-/* On a short window the log still gives ground, but not the way it used to.
-   64px here was chosen to keep the WHOLE feed above the fold on a 1280x800
-   laptop, and it bought that by leaving under three lines of narration — which
-   on the commonest desktop size is exactly "the log scrolls away too quickly".
-   The newest line sits at the TOP of the well, so depth below the fold is only
-   ever old history reached on purpose; trading the feed's bottom edge for five
-   and a half readable lines is the right side of that bargain. */
-@media(max-height:760px){
+/* On a short window the log gives ground, and it gives it sooner now that the
+   control row sits BELOW it rather than above. What used to fall past the fold
+   was the feed's own bottom edge — old history, reached on purpose, since the
+   newest line sits at the top of the well — and that was a fine thing to spend.
+   Under the log, the same overflow spends Hold and the time-lapse instead, and
+   a control you have to scroll to reach mid-run is not a control. So the well
+   yields first, and where the well has nothing left to give, the dish yields
+   after it.
+
+   The aspect terms are doing real work rather than standing in for "phone".
+   The plate is min(100%, 56vh x 1.6154), so on anything squarer than about
+   9:10 it is the WIDTH that caps the dish and the column is far shorter than
+   the window — a 390x780 phone fits the whole 190px well and the row with room
+   over, and shrinking its log would buy nothing but blank screen. Only where
+   56vh is the binding cap does the height run out, which is the landscape half
+   of the test. The portrait half still runs out eventually, just later: a
+   375x667 phone is seven pixels short with a full well, hence its own term at
+   700px, which leaves the taller phones their eight lines.
+
+   Every number here was measured in a browser at the size it names, because
+   deriving them is what went wrong twice: the console under the plate wraps to
+   a second row below about 640px of column, which adds 70px exactly where the
+   arithmetic says there is room.
+
+       1280x800   the row ended 43px under the fold. 130px — five and a half
+                  readable lines, the height this rule already used — puts the
+                  whole page on screen with 17px to spare, on a size that
+                  scrolled even before the reorder.
+       1280x760   88px, and the dish is untouched: at that width the console
+                  has not wrapped and the plate is still worth its 56vh.
+       700x700    the dish alone is 561px of the window with its console, and
+                  an 88px well still leaves the row 51px under. The well could
+                  save it alone only by coming down to 37px — a line and a half
+                  of narration, which is not a log — so the dish yields
+                  instead: 46vh, the same trade 56vh already made against an
+                  uncapped canvas, made once more at the size where 56vh is
+                  what does not fit.
+       1024x640   46vh still leaves the row 13px under, so 40vh below 660.
+
+   The 400px floor under the shrunk plate is the control row's own width. Below
+   707px of height the row is docked — reset, abandon and exit replay move into
+   the disclosure, see DOCK in sim.js — and what is left needs about 387px to
+   stay on one line. The floor keeps the column wider than that, so shrinking
+   the dish to save the row cannot end up wrapping it. */
+@media(min-aspect-ratio:9/10) and (max-height:900px),
+      (max-aspect-ratio:9/10) and (max-height:700px){
   #log{height:130px}
+}
+@media(min-aspect-ratio:9/10) and (max-height:780px){
+  #log{height:88px}
+}
+@media(min-aspect-ratio:9/10) and (max-height:700px){
+  :root{--plate:min(100%,max(400px,calc(46vh * 1.6154)))}
+}
+@media(min-aspect-ratio:9/10) and (max-height:660px){
+  :root{--plate:min(100%,max(400px,calc(40vh * 1.6154)))}
 }
 </style>
 </head>
@@ -629,15 +670,14 @@ body.touch .dish{min-height:132px}
           <b>hold right / shift</b><span>retract &mdash; pull cytoplasm back out of a region</span>
           <b>the reserve</b><span>cueing spends it and letting go rebuilds it, slower than it went; at zero the brush stops until you release. Nudge, let the chemotaxis run, nudge again</span>
           <b>space</b><span>hold the clock</span>
-          <b>F</b><span>time-lapse &mdash; cycle the dish clock &times;1 / &times;4 / &times;12</span>
+          <b>F</b><span>time-lapse &mdash; step the dish clock round the ladder, &times;1/16 up to &times;16; <b>shift+F</b> steps back down. &times;1 is the dish's own clock, which is already about a hundred times real time &mdash; so even &times;1/16 is a time-lapse</span>
           <b>R</b><span>reset the dish</span>
         </div>
         <div class="keys keys-touch">
           <b>hold / drag</b><span>emit a growth cue &mdash; the exploratory front flows toward your finger</span>
           <b>two fingers</b><span>retract &mdash; a second finger flips a live drag and pulls cytoplasm back out of a region</span>
           <b>the reserve</b><span>cueing spends it and lifting your finger rebuilds it, slower than it went; at zero the brush stops until you lift</span>
-          <b>Retract</b><span>the switch on the control row does the same one-handed, until you switch it back</span>
-          <b>Hold / &times;N</b><span>the control row stops the dish clock, or winds it to &times;4 or &times;12 &mdash; same dish, watched faster</span>
+          <b>Hold / &times;N</b><span>the control row stops the dish clock, or steps it round the ladder from &times;1/16 to &times;16 &mdash; same dish, watched slower or faster. &times;1 is already about a hundred times real time</span>
           <b>Controls</b><span>resetting the plate and abandoning the dish are in there</span>
         </div>
       </div>
@@ -714,12 +754,19 @@ body.touch .dish{min-height:132px}
       </div>
     </div>
 
+    <!-- Narration: under the bench, not over the organism, and above the
+         control row rather than below it. The log is a readout — it belongs
+         with the console it continues, where a glance from the plate reaches
+         it — and the row under it is buttons and a folded-away key list you
+         read once. Putting the furniture between the dish and the account of
+         the dish was the wrong way round. -->
+    <div class="feed" id="feed">
+      <div class="feed-h" id="feed-h">Dish log</div>
+      <div id="log" role="log" aria-live="polite" tabindex="0" aria-labelledby="feed-h"></div>
+    </div>
+
     <div class="simbar" id="controls">
       <p class="hint" id="replaynote"><b>Replay</b> &mdash; the recorded run, played back. Your cues are the recording; <b>Hold</b> and the time-lapse still work.</p>
-      <div class="verb" role="group" aria-label="Dish gesture">
-        <button class="vb on" id="t-grow" type="button" aria-pressed="true">Grow</button>
-        <button class="vb ret" id="t-ret" type="button" aria-pressed="false">Retract</button>
-      </div>
       <button class="btn ghost" id="s-pause" type="button">Hold</button>
       <button class="btn ghost" id="s-speed" type="button"><span class="wd">Time-lapse&nbsp;</span><span id="s-speedn">&times;1</span></button>
       <details class="keypop" id="keypop">
@@ -734,23 +781,16 @@ body.touch .dish{min-height:132px}
             <b>hold left / drag</b><span>emit a growth cue</span>
             <b>right / shift</b><span>retract &mdash; pull cytoplasm back</span>
             <b>space</b><span>hold the clock</span>
-            <b>F</b><span>time-lapse &times;1 / &times;4 / &times;12</span>
+            <b>F</b><span>time-lapse &mdash; &times;1/16 to &times;16 (<b>shift+F</b> back down)</span>
             <b>R</b><span>reset the dish</span>
           </div>
           <div class="keys keys-touch">
             <b>hold / drag</b><span>emit a growth cue</span>
             <b>two fingers</b><span>retract &mdash; a second finger flips a live drag</span>
-            <b>Retract</b><span>the switch, for retracting one-handed</span>
-            <b>Hold / &times;N</b><span>stop the clock, or wind it &times;4 / &times;12</span>
+            <b>Hold / &times;N</b><span>stop the clock, or step it &times;1/16 &hellip; &times;16</span>
           </div>
         </div>
       </details>
-    </div>
-
-    <!-- narration: under the bench, not over the organism -->
-    <div class="feed" id="feed">
-      <div class="feed-h" id="feed-h">Dish log</div>
-      <div id="log" role="log" aria-live="polite" tabindex="0" aria-labelledby="feed-h"></div>
     </div>
   </section>
 

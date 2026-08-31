@@ -82,9 +82,26 @@ seed might name is still there, now as a guard on that one palette.
 | hold left / drag | growth cue — the exploratory front flows toward it |
 | hold right / shift | retract — pull cytoplasm back out of a region |
 | space | pause (hold the clock) |
-| F | time-lapse — cycle the dish clock ×1 / ×4 / ×12 |
+| F | time-lapse — step the dish clock up the ladder, ×1/16 to ×16 (shift+F steps back down) |
 | R | reset the dish |
 | Escape | close the key list, leave a replay, abandon the dish — in that order |
+
+### The dish clock
+
+The time-lapse ladder is nine stops — ×1/16, ×1/8, ×1/4, ×1/2, ×1, ×2, ×4, ×8,
+×16 — and ×1 is the dish's own clock rather than real time. A *Physarum*
+network that takes the better part of a day in a real plate is built here in a
+couple of sim minutes, so ×1 is already something like a hundred times life;
+the figure is an estimate and the interface says "about". What that buys the
+bottom half of the ladder is worth stating plainly: ×1/16 is slow motion of the
+*model*, not of the organism, and still runs at roughly six times life. Nothing
+this control can reach is slower than the mould.
+
+The multiplier scales sim time, not playback: the dish clock, the shock
+schedule and every rate in the model move together, so a run watched at ×1/4 is
+the same run, not a slowed recording of one. Two runs of a seed that have
+executed the same number of steps hold the same dish whatever stop they were
+watched at.
 
 ### The cue reserve
 
@@ -155,7 +172,7 @@ wins scored .999 or better. It was weight handed over for nothing.
 
 Every run records the cues that produced it, and the dish is a pure function
 of its seed and those cues — so the verdict screen can replay the run you just
-finished, at ×1, ×4 or ×12.
+finished, at ×1, ×4 or ×16.
 
 - **Ghosts.** The run that earned your best mark on a dish is kept, and
   **Best run** on the verdict screen plays it back. It replays cell for cell,
@@ -189,10 +206,11 @@ opened, and logs nothing when it is not: a link to a dish you have reached is
 just a run of it, and a link past the gate is a look ahead rather than a pass.
 Otherwise the gate would be bypassable by anyone willing to edit a URL.
 
-On a touch screen the same verbs are a hold or drag for a growth cue, a second
-finger to flip that drag into a retract, and a Grow / Retract switch on the
-control row for retracting one-handed. Hold and the time-lapse sit beside it;
-the rest — reset, abandon, and this table — are behind **Controls**.
+On a touch screen the same verbs are a hold or drag for a growth cue and a
+second finger to flip that drag into a retract. The control row is Hold and the
+time-lapse, and the time-lapse button steps round the whole ladder rather than
+only up it, since a thumb has no shift key to walk it back with. The rest —
+reset, abandon, and this table — are behind **Controls**.
 
 ## How the sim works
 
