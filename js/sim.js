@@ -5188,7 +5188,13 @@ function logLine(text, hi) {
   if (hi) d.className = 'hi';
   d.textContent = text;
   box.insertBefore(d, box.firstChild);
-  while (box.children.length > 6) box.removeChild(box.lastChild);
+  /* The cap is the SCROLLBACK, not the visible depth — the well shows the
+     newest eight or so and scrolls for the rest. It was 6, which meant the
+     log destroyed its own history faster than the well could show it: the
+     lines below the fold that scrolling promised were already gone. Sixty
+     covers the narration of a long dish end to end; it exists at all only so
+     a run left at x12 overnight cannot grow the DOM without bound. */
+  while (box.children.length > 60) box.removeChild(box.lastChild);
 }
 
 function dirWord(fx, fy, tx, ty) {
