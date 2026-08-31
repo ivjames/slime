@@ -18,6 +18,20 @@ function fmtTime(s) {
   s = Math.floor(s);
   return pad2(s / 60 | 0) + ':' + pad2(s % 60);
 }
+/* A rate off the time-lapse ladder, as a label. Below ×1 the stops are
+   inverse powers of two, and "1/8" is what those are called — 0.125 is the
+   same number answering a different question, and reads as a measurement
+   rather than as a stop on a dial. Anything off the ladder (a harness may set
+   any rate in range) prints as a trimmed decimal rather than as a fraction it
+   is not. */
+function fmtSpeed(t) {
+  if (!isFinite(t) || t <= 0) t = 1;
+  if (t < 1) {
+    var d = Math.round(1 / t);
+    if (d > 0 && Math.abs(1 / d - t) < 1e-9) return '1/' + d;
+  }
+  return String(Math.round(t * 1000) / 1000);
+}
 function fmtNum(n) {
   n = Math.round(n);
   var s = String(n), out = '', c = 0;
@@ -3387,10 +3401,13 @@ var shpT = new Float32Array(NCELL);   // scratch for the separable pass
    coefficient comes from SIM time elapsed since the last rebuild, not from the
    wall clock. Sim time is the right clock for it twice over. The noise being
    averaged out arrives per STEP, so a fixed number of steps of memory removes
-   a fixed amount of it whatever the frame rate; and a time-lapse run at x12
-   genuinely moves twelve times as far per frame, so a wall-clock constant
+   a fixed amount of it whatever the frame rate; and a time-lapse run at x16
+   genuinely moves sixteen times as far per frame, so a wall-clock constant
    would smear real motion into a comet tail at speed while barely touching the
-   jitter at x1. In sim time the lag is the same ~15 steps at every speed.
+   jitter at x1 — and would fail the new bottom of the dial from the other
+   side, since a quarter-second of wall clock at x1/16 is not quite one step
+   of sim time, so the jitter it is there to remove would come straight back.
+   In sim time the lag is the same ~15 steps at every speed on the dial.
 
    This is render-only, like everything else in this section — the simulation
    never reads it back — so no part of a run's outcome depends on it. What it
@@ -5316,9 +5333,13 @@ function updateHUD(force) {
   if (!S.exp) return;
   if (force) hudTick = 0;
   /* The time-lapse slot doubles as the replay badge: a run being replayed is
-     always at some rate, so the rate is stated whether or not it is 1. */
+     always at some rate, so the rate is stated whether or not it is 1. Outside
+     a replay the slot is empty only AT the reference — a run being watched at
+     ×1/4 has to say so as plainly as one at ×4, or a dish crawling because the
+     dial is down reads as a dish crawling because it is dying. */
   $('h-time').textContent = fmtTime(S.simT) +
-    (REPLAY.on ? ' · REPLAY ×' + TURBO : (TURBO > 1 ? ' ×' + TURBO : ''));
+    (REPLAY.on ? ' · REPLAY ×' + fmtSpeed(TURBO)
+               : (TURBO !== 1 ? ' ×' + fmtSpeed(TURBO) : ''));
 
   if ((hudTick++ % 4) !== 0) return;
 
@@ -5756,9 +5777,41 @@ var raf = 0, lastTs = 0, acc = 0;
 /* Sim-time multiplier: sim seconds per real second. It scales the step budget
    with it, so the clock, the shock schedule and every rate stay in sim time —
    the dish is not "sped up", it is watched with the shutter open longer. The
-   player cycles it through SPEEDS; the harness can set any value up to 24. */
+   player cycles it through SPEEDS; the harness can set any rate in range.
+
+   ×1 is the DISH clock, and the dish clock was never real time. A Physarum
+   network that takes the better part of a day in a real plate is built here in
+   a couple of sim minutes, so the reference this ladder hangs off already runs
+   at something like a hundred times life — REAL_X below, an estimate, and
+   labelled as one wherever it is shown.
+
+   That is what the bottom half of the ladder is for. Stops below ×1 are not
+   slow motion of an organism; they are slow motion of the MODEL, and at ×1/16
+   the dish is still moving at roughly six times life. Nothing this control can
+   reach runs slower than the mould does, which is the honest thing to say
+   about a dial whose lowest stop is still a time-lapse.
+
+   Powers of two either side of the reference: every stop is exactly
+   representable, indexOf on the array is therefore exact, and a stop and its
+   inverse are the same distance from ×1 in the direction that matters. */
 var TURBO = 1;
-var SPEEDS = [1, 4, 12];
+var SPEEDS = [1 / 16, 1 / 8, 1 / 4, 1 / 2, 1, 2, 4, 8, 16];
+var TURBO_MIN = SPEEDS[0];
+var TURBO_MAX = 24;
+
+/* Estimated real-time factor of the dish clock: ×1 is about REAL_X times life.
+   It is stated in the controls so a multiplier means something outside the
+   dish, and it is read NOWHERE in the simulation — no step, rate, schedule or
+   score has ever heard of it. Changing it changes captions and nothing else. */
+var REAL_X = 100;
+function realX(t) { return fmtNum(t * REAL_X); }
+
+/* The verdict screen offers three stops rather than all nine. It is a row of
+   one button each, not a cycle, and a recap has no use for the slow half of
+   the ladder: you are choosing how long to spend watching a run you have
+   already played, and the fastest useful answer to that is a stop the dial
+   also has. ×4 stays the suggested one. */
+var REPLAY_SPEEDS = [1, 4, 16];
 
 /* Ceiling on the stepping work ONE frame may do, in milliseconds of wall
    clock. The step budget below it is a COUNT, and a count is the wrong unit
@@ -5791,11 +5844,27 @@ var SPEEDS = [1, 4, 12];
    speeds: x12 wants twelve steps in a 60Hz frame, which is 20ms only if a
    step costs 1.7ms. Below that the box never closes and x12 runs at x12.
 
+   The ladder's top stop is x16 now, which is the same statement with a
+   shorter budget: sixteen steps inside 20ms wants a step under 1.25ms, and a
+   machine slower than that runs x16 at whatever the box affords — around x12
+   where a step is 1.7ms — rather than at sixteen. That is the ceiling doing
+   its job and not a stop that does not work; the alternative at the top of the
+   dial is a frame rate that collapses to make a number true. The box was left
+   at 20 rather than widened for the new stop, because widening it spends the
+   frame rate of every OTHER speed to buy the top one its figure. The stops
+   below x1 never come near it: at x1/16 a frame is due a step every sixteenth
+   frame, so the box closes on nothing, and the budget floor in the loop is
+   what keeps that from rounding to no steps at all.
+
    None of it touches what a step does. Steps run in order at a fixed DT, and
    a seed run to the same step count holds a bit-identical dish at any speed,
    with the box at any value or none — verified on EXP-04 at step 1500 across
    x1/x4/x12 and boxes of 6ms, 24ms and off, which agree to the last bit of
-   the trail field. */
+   the trail field. Re-verified when the ladder grew its slow half, over all
+   nine stops from x1/16 to x16 at step 120 of EXP-04: one trail hash and one
+   front position between the lot of them. A stop below x1 spends most frames
+   running no steps at all, and a frame that runs none is not a frame the dish
+   can tell apart from one that was never scheduled. */
 var STEP_MS = 20;
 
 /* Steps executed this run, and an optional harness stop. stepsRun is the
@@ -6188,23 +6257,56 @@ function exitReplay() {
   updateHUD(true);
 }
 
+/* No rounding to whole numbers any more — half the ladder is below 1 and
+   Math.round would have flattened all of it onto ×1. A rate that is not a
+   number at all still lands on the reference rather than on NaN, which would
+   otherwise stop the accumulator dead. */
 function setSpeed(n) {
-  TURBO = clamp(Math.round(n) || 1, 1, 24);
+  n = +n;
+  if (!isFinite(n) || n <= 0) n = 1;
+  TURBO = clamp(n, TURBO_MIN, TURBO_MAX);
   var b = $('s-speed'), fig = $('s-speedn');
   /* Only the figure is rewritten: the word in front of it is markup the sheet
      drops where the row has to be narrow, and the aria-label — which wins over
      the button's text outright — states the whole thing at every width. */
-  if (fig) fig.textContent = '×' + TURBO;
+  if (fig) fig.textContent = '×' + fmtSpeed(TURBO);
   if (b) {
-    b.classList.toggle('lapse-on', TURBO > 1);
-    b.setAttribute('aria-label', 'Time-lapse, currently ' + TURBO + ' times real time');
+    /* Lit at every stop but the reference. It used to mean "faster than this
+       dish normally runs"; it means "not the dish's own clock" now, and a run
+       being watched at ×1/8 is exactly as much not-the-clock as one at ×8. */
+    b.classList.toggle('lapse-on', TURBO !== 1);
+    b.setAttribute('aria-label', 'Time-lapse, currently ' + fmtSpeed(TURBO) +
+      ' times the dish clock — about ' + realX(TURBO) + ' times real time');
   }
   return TURBO;
 }
 
-function cycleSpeed() {
-  var k = SPEEDS.indexOf(TURBO);
-  setSpeed(SPEEDS[(k + 1) % SPEEDS.length]);
+/* The stop nearest a rate, measured in RATIO rather than in difference: the
+   ladder is geometric, so ×3 is nearer ×4 than it is ×2 even though the
+   arithmetic gap says otherwise. Only reachable with a rate a harness set —
+   every rate the buttons produce is already a stop. */
+function nearestSpeed(t) {
+  var best = 0, bd = Infinity;
+  for (var i = 0; i < SPEEDS.length; i++) {
+    var d = Math.abs(Math.log(SPEEDS[i] / t));
+    if (d < bd) { bd = d; best = i; }
+  }
+  return best;
+}
+
+/* Nine stops through one button, so the cycle wraps. A touch player has no
+   modifier to hold and reaches the whole ladder through this control alone,
+   which means ×1/16 has to be reachable from ×16 the same way ×2 is from ×1;
+   on a keyboard F walks up and Shift+F walks down, which is the shorter way
+   round for anyone who has the keys.
+
+   An off-ladder rate snaps ONTO the ladder before it steps, rather than
+   stepping past the stop it is nearest — otherwise the first press after a
+   harness set ×3 is a jump of two stops for no reason the player can see. */
+function cycleSpeed(back) {
+  var n = SPEEDS.length, k = nearestSpeed(TURBO);
+  if (Math.abs(SPEEDS[k] - TURBO) > 1e-9) setSpeed(SPEEDS[k]);
+  else setSpeed(SPEEDS[((k + (back ? -1 : 1)) % n + n) % n]);
 }
 
 /* Seed derivation. A run's seed is 24 bits and is the ONLY thing (besides
@@ -6861,8 +6963,15 @@ function frame(ts) {
     /* Four frames' worth of headroom at whatever the multiplier is, so a
        dropped frame is caught up rather than lost. A held brush is painted
        once per STEP, not once per frame — that is what keeps a cued run
-       identical between speeds. */
-    var steps = 0, budget = 4 * TURBO;
+       identical between speeds.
+
+       Never less than one step, because below ×1/4 four frames' worth is a
+       FRACTION of a step: at ×1/16 the count comes out at 0.25, the loop's
+       `steps < budget` is false before it has run anything, and the dish never
+       advances at all. The floor binds at exactly two stops — ×1/8 and ×1/16 —
+       and costs nothing at either, since down there a step falls due every
+       eighth or sixteenth frame and a frame has at most one to spend. */
+    var steps = 0, budget = Math.max(1, Math.ceil(4 * TURBO));
     var boxT0 = performance.now(), boxed = false;
     while (acc >= DT && steps < budget && S.running &&
            (!stepTarget || stepsRun < stepTarget)) {
@@ -7093,7 +7202,9 @@ function bindInput() {
       setPaused(!S.paused);
     } else if (ev.code === 'KeyF') {
       ev.preventDefault();
-      cycleSpeed();
+      /* Shift walks the ladder back down. It is the retract modifier on the
+         plate and nothing here, so the two never meet. */
+      cycleSpeed(ev.shiftKey);
     } else if (ev.code === 'KeyR') {
       /* R is always a fresh dish — a new seed, a new recording — whether it is
          pressed mid-run, mid-replay, or over the verdict */
@@ -7140,7 +7251,10 @@ function bindButtons() {
   $('s-abort').addEventListener('click', function () { closeKeys(); goTitle(); });
   $('s-pause').addEventListener('click', function () { setPaused(!S.paused); });
   $('s-reset').addEventListener('click', function () { closeKeys(); restartRun(); });
-  $('s-speed').addEventListener('click', cycleSpeed);
+  /* Wrapped rather than passed straight through: cycleSpeed takes a
+     direction, and a click handler called with the event would hand it a
+     truthy object and walk the ladder backwards. */
+  $('s-speed').addEventListener('click', function () { cycleSpeed(false); });
   $('s-exitrp').addEventListener('click', function () { closeKeys(); exitReplay(); });
   $('t-grow').addEventListener('click', function () { setTouchMode(1); });
   $('t-ret').addEventListener('click', function () { setTouchMode(2); });
@@ -7196,10 +7310,12 @@ function bindButtons() {
   buildReplayRow(null);
 }
 
-/* The replay control: the same rates the time-lapse button cycles, offered as
-   one button each because from the verdict you are choosing how long to spend
-   watching, not stepping through a cycle. ×4 is the suggested rate — fast
-   enough to be a recap, slow enough to see the front move.
+/* The replay control: three of the rates the time-lapse button cycles (see
+   REPLAY_SPEEDS), offered as one button each because from the verdict you are
+   choosing how long to spend watching, not stepping through a cycle. ×4 is the
+   suggested rate — fast enough to be a recap, slow enough to see the front
+   move. The dial's slow stops are still there once the replay is running; they
+   are just not what the question "how long is this recap" is asking.
 
    Rebuilt per verdict rather than once at boot, because the row now ends in a
    button that only some dishes have: the best run on record, where one is
@@ -7211,16 +7327,17 @@ function buildReplayRow(idx) {
   var box = $('r-replay');
   if (!box) return;
   box.innerHTML = '';
-  for (var i = 0; i < SPEEDS.length; i++) {
+  for (var i = 0; i < REPLAY_SPEEDS.length; i++) {
     (function (sp) {
       var b = document.createElement('button');
       b.type = 'button';
       b.className = 'btn ghost rsp' + (sp === 4 ? ' def' : '');
-      b.textContent = '×' + sp;
-      b.setAttribute('aria-label', 'Replay this run at ' + sp + ' times real time');
+      b.textContent = '×' + fmtSpeed(sp);
+      b.setAttribute('aria-label', 'Replay this run at ' + fmtSpeed(sp) +
+        ' times the dish clock — about ' + realX(sp) + ' times real time');
       b.addEventListener('click', function () { startReplay(sp); });
       box.appendChild(b);
-    })(SPEEDS[i]);
+    })(REPLAY_SPEEDS[i]);
   }
   if (idx == null || !hasGhost(idx)) return;
   var g = document.createElement('button');
@@ -7367,10 +7484,15 @@ function init() {
     /* a copy of the trail field, for measuring the network from outside */
     trail: function () { return Float32Array.prototype.slice.call(trail); },
     trailMax: function () { return TRAIL_MAX; },
-    /* sim seconds per real second. Same path the on-screen control uses, so
-       the button label and HUD follow a harness that sets it directly. */
+    /* sim seconds per real second — the DISH clock, which is itself about
+       REAL_X times life. Same path the on-screen control uses, so the button
+       label and HUD follow a harness that sets it directly, and fractional
+       rates are taken as given rather than rounded onto a whole number. */
     turbo: function (n) { if (n != null) setSpeed(n); return TURBO; },
     speeds: function () { return SPEEDS.slice(); },
+    /* the estimated real-time factor of ×1, for a caption that has to agree
+       with the one the buttons print */
+    realX: function () { return REAL_X; },
     /* the seed of the current run, raw and as the notebook prints it */
     seed: function () { return S.seed; },
     seedLabel: function () { return seedLabel(S.seed); },

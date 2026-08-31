@@ -126,7 +126,9 @@ h1,h2,h3{font-weight:600;margin:0}
    makes it findable as a button at all */
 .btn.ghost{color:var(--dim)}
 .btn.ghost:hover{color:var(--ink);border-color:var(--ink)}
-/* time-lapse, lit while the shutter is open longer than real time */
+/* Time-lapse, lit at every stop except ×1. It is not "faster than real time"
+   — ×1 is already about a hundred times that — it is "not the dish's own
+   clock", which a quarter speed is as much as a quadruple one. */
 .btn.lapse-on{border-color:var(--slime);color:var(--slime)}
 
 /* ---------- brief / result cards ---------- */
@@ -350,6 +352,13 @@ body.touch .keys-touch{display:grid}
 /* out-specifies body.touch .btn, whose 18px of horizontal padding is right
    for a standalone button and is most of a phone's control row */
 body.touch .simbar .btn{min-height:44px;min-width:44px;padding:0 14px}
+/* The figure is held to the width of its widest label. The ladder runs from
+   ×1/16 to ×16, so the slot's content changes width as it is cycled, and a
+   button that grows and shrinks under a thumb that is pressing it repeatedly
+   walks out from under the thumb — the same reason #s-pause is pinned below,
+   arrived at from the other direction. Left-aligned, so the figure stays put
+   against the word rather than sliding about inside its own slot. */
+#s-speedn{display:inline-block;min-width:3.8em;text-align:left}
 /* Dropped where the row has to be narrow — the button still reads "×4", and
    its aria-label says the whole thing at every width. The word comes back only
    where the row stops being cramped, which is the negation of ROW_NARROW
@@ -629,7 +638,7 @@ body.touch .dish{min-height:132px}
           <b>hold right / shift</b><span>retract &mdash; pull cytoplasm back out of a region</span>
           <b>the reserve</b><span>cueing spends it and letting go rebuilds it, slower than it went; at zero the brush stops until you release. Nudge, let the chemotaxis run, nudge again</span>
           <b>space</b><span>hold the clock</span>
-          <b>F</b><span>time-lapse &mdash; cycle the dish clock &times;1 / &times;4 / &times;12</span>
+          <b>F</b><span>time-lapse &mdash; step the dish clock round the ladder, &times;1/16 up to &times;16; <b>shift+F</b> steps back down. &times;1 is the dish's own clock, which is already about a hundred times real time &mdash; so even &times;1/16 is a time-lapse</span>
           <b>R</b><span>reset the dish</span>
         </div>
         <div class="keys keys-touch">
@@ -637,7 +646,7 @@ body.touch .dish{min-height:132px}
           <b>two fingers</b><span>retract &mdash; a second finger flips a live drag and pulls cytoplasm back out of a region</span>
           <b>the reserve</b><span>cueing spends it and lifting your finger rebuilds it, slower than it went; at zero the brush stops until you lift</span>
           <b>Retract</b><span>the switch on the control row does the same one-handed, until you switch it back</span>
-          <b>Hold / &times;N</b><span>the control row stops the dish clock, or winds it to &times;4 or &times;12 &mdash; same dish, watched faster</span>
+          <b>Hold / &times;N</b><span>the control row stops the dish clock, or steps it round the ladder from &times;1/16 to &times;16 &mdash; same dish, watched slower or faster. &times;1 is already about a hundred times real time</span>
           <b>Controls</b><span>resetting the plate and abandoning the dish are in there</span>
         </div>
       </div>
@@ -734,14 +743,14 @@ body.touch .dish{min-height:132px}
             <b>hold left / drag</b><span>emit a growth cue</span>
             <b>right / shift</b><span>retract &mdash; pull cytoplasm back</span>
             <b>space</b><span>hold the clock</span>
-            <b>F</b><span>time-lapse &times;1 / &times;4 / &times;12</span>
+            <b>F</b><span>time-lapse &mdash; &times;1/16 to &times;16 (<b>shift+F</b> back down)</span>
             <b>R</b><span>reset the dish</span>
           </div>
           <div class="keys keys-touch">
             <b>hold / drag</b><span>emit a growth cue</span>
             <b>two fingers</b><span>retract &mdash; a second finger flips a live drag</span>
             <b>Retract</b><span>the switch, for retracting one-handed</span>
-            <b>Hold / &times;N</b><span>stop the clock, or wind it &times;4 / &times;12</span>
+            <b>Hold / &times;N</b><span>stop the clock, or step it &times;1/16 &hellip; &times;16</span>
           </div>
         </div>
       </details>
