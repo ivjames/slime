@@ -602,9 +602,17 @@ body.touch .dish{min-height:132px}
     <div class="slab card">
       <div class="code" id="b-code"></div>
       <h2 id="b-name"></h2>
-      <p id="b-brief"></p>
       <div class="fld"><div class="k">Objective</div><div class="v" id="b-obj"></div></div>
       <div class="fld"><div class="k">Dish conditions</div><div id="b-hz"></div></div>
+      <!-- The actions sit ABOVE the motor-control reference, so they are on
+           screen the moment the brief opens whatever the viewport. The screen
+           used to open with a paragraph of scene-setting as well; launching a
+           dish is a decision, not a reading assignment, and everything the
+           decision needs is the objective and the conditions. -->
+      <div class="row" style="margin-top:22px;margin-bottom:22px">
+        <button class="btn pri" id="b-go">Inoculate</button>
+        <button class="btn ghost" id="b-back">Back to schedule</button>
+      </div>
       <div class="fld"><div class="k">Motor control</div>
         <div class="keys keys-fine">
           <b>hold left / drag</b><span>emit a growth cue &mdash; the exploratory front flows toward it</span>
@@ -622,10 +630,6 @@ body.touch .dish{min-height:132px}
           <b>Hold / &times;N</b><span>the control row stops the dish clock, or winds it to &times;4 or &times;12 &mdash; same dish, watched faster</span>
           <b>Controls</b><span>resetting the plate and abandoning the dish are in there</span>
         </div>
-      </div>
-      <div class="row" style="margin-top:22px">
-        <button class="btn pri" id="b-go">Inoculate</button>
-        <button class="btn ghost" id="b-back">Back to schedule</button>
       </div>
     </div>
   </section>
