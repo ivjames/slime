@@ -5042,13 +5042,43 @@ var MARK_CASE_W = 1.6;              // width the casing adds, total, grid units
    lightness where it does hold (3.39:1 at the crossover), which is a paler
    rose than the panel's and reads as the same warning. */
 var MARK_RETRACT = '#eeb4c2';
-/* Bone, for an objective not yet met, and cytoplasm for one that is. The met
-   ring is also drawn heavier than the pending one, so the two states differ in
-   weight as well as in hue and neither reading rests on colour alone — the
-   node's row in the console says the same thing a third way, as a percentage
-   that becomes a bullet. */
+/* Bone, for an objective not yet met, and cytoplasm for one that is. */
 var MARK_PENDING = '#ced4b4';
 var MARK_MET     = '#7fd1b9';
+
+/* The dial's radius, as a fraction of the objective's own.
+
+   The casing above makes each mark VISIBLE on any ground. It does not make two
+   marks TELL APART on any ground, and those are different problems. Over lit
+   tissue every core vanishes and what survives of a mark is its casing, so two
+   marks that differ only in the colour inside the casing are, there, the same
+   mark. The progress arc used to be drawn on the objective ring itself and
+   differ from it by hue: yellow swept, bone unswept, same circle. Over agar
+   that is legible at a glance; over tissue it is two dark bands at one radius
+   differing by 36% of their width, which is not a reading, and the thing being
+   read — how far round the arc has gone — is the whole point of drawing it.
+
+   So the dial moves off the ring and onto a circle of its own, inside it. Now
+   the ring says WHERE the objective is and is always a complete circle, and
+   the dial says HOW FAR and is a separate arc at a radius nothing else uses.
+   Over tissue that reads as a full dark circle with a partial dark arc inside
+   it, which is the same sentence the colours were saying and is one no ground
+   can take away. Colour still carries it on agar, where colour works.
+
+   The same reasoning finishes the met state. A met objective used to drop its
+   arc and go cyan, which over tissue left a ring 21% heavier than a pending
+   one and nothing else. It draws a COMPLETE dial instead: the dial fills as
+   the objective is met and stays filled, so pending-at-zero, part-met and met
+   are three different pictures rather than two colours and an absence. A dish
+   that reseals runs it backwards, which is what the number does too.
+
+   0.66 sits the dial clear of both its neighbours — the core disc plus casing
+   ends at 0.34r + MARK_CASE_W/2 and the ring's casing starts at
+   r - (1.2 + MARK_CASE_W)/2, leaving gaps of 1.5 and 1.1 grid units on a
+   13-unit objective. That is about a pixel each at the narrowest plate the
+   canvas will size to, and three or four at a laptop's, so the three bands
+   read as three rather than as one thick smear at every size. */
+var MARK_DIAL_R = 0.66;
 
 function casedArc(c, x, y, r, a0, a1, w, style) {
   c.beginPath();
@@ -5186,12 +5216,15 @@ function render() {
   for (var i = 0; i < e.nodes.length; i++) {
     var nd = e.nodes[i];
     var done = S.nodeDone[i];
+    var prog = done ? 1 : S.nodeProg[i];
     casedRing(ctx, nd.x, nd.y, nd.r, done ? 1.8 : 1.2,
               done ? MARK_MET : MARK_PENDING);
 
-    if (!done && S.nodeProg[i] > 0.01) {
-      casedArc(ctx, nd.x, nd.y, nd.r, -Math.PI / 2,
-               -Math.PI / 2 + Math.PI * 2 * S.nodeProg[i], 2.2, ACC_ARC);
+    if (prog >= 1) {
+      casedRing(ctx, nd.x, nd.y, nd.r * MARK_DIAL_R, 2.2, MARK_MET);
+    } else if (prog > 0.01) {
+      casedArc(ctx, nd.x, nd.y, nd.r * MARK_DIAL_R, -Math.PI / 2,
+               -Math.PI / 2 + Math.PI * 2 * prog, 2.2, ACC_ARC);
     }
 
     casedDisc(ctx, nd.x, nd.y, nd.r * 0.34, done ? MARK_MET : MARK_PENDING);
