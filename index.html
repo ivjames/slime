@@ -317,13 +317,16 @@ body.touch .keys-touch{display:grid}
   background:linear-gradient(180deg,#14180f,#0f1210)}
 .feed-h{padding:8px 14px;border-bottom:1px solid var(--line);color:var(--dim);
   font-size:10px;letter-spacing:.22em;text-transform:uppercase}
-/* The well is a fixed height so an arriving line does not shove the page, and
-   a fixed height cuts whatever line happens to straddle the bottom edge —
+/* The well is a fixed height so an arriving line does not shove the page.
+   190px is eight lines and change — it was 96, which held barely four, so a
+   busy stretch (an engulf, its ambient line, a shock warning) pushed the thing
+   you were reading off the bottom in seconds. A fixed height also cuts
+   whatever line happens to straddle the bottom edge —
    mid-glyph, which reads as a rendering fault rather than as more text below.
    Faded out over the last few pixels instead, which works whatever the lines
    wrap to; and since the newest line is at the TOP, the fade only ever touches
    the oldest line on screen. */
-#log{height:96px;overflow-y:auto;padding:10px 14px;color:#aab092;font-size:12px;line-height:1.55;
+#log{height:190px;overflow-y:auto;padding:10px 14px;color:#aab092;font-size:12px;line-height:1.55;
   -webkit-mask-image:linear-gradient(180deg,#000 calc(100% - 13px),transparent);
   mask-image:linear-gradient(180deg,#000 calc(100% - 13px),transparent)}
 #log div{margin-bottom:5px;animation:fade .5s ease-out}
@@ -564,8 +567,15 @@ body.touch .dish{min-height:132px}
    Width still wins on a portrait phone — --plate is a min() against 100% — so
    this changes nothing there. */
 .bench,#controls,#feed{max-width:var(--plate)}
+/* On a short window the log still gives ground, but not the way it used to.
+   64px here was chosen to keep the WHOLE feed above the fold on a 1280x800
+   laptop, and it bought that by leaving under three lines of narration — which
+   on the commonest desktop size is exactly "the log scrolls away too quickly".
+   The newest line sits at the TOP of the well, so depth below the fold is only
+   ever old history reached on purpose; trading the feed's bottom edge for five
+   and a half readable lines is the right side of that bargain. */
 @media(max-height:760px){
-  #log{height:64px}
+  #log{height:130px}
 }
 </style>
 </head>
@@ -602,9 +612,17 @@ body.touch .dish{min-height:132px}
     <div class="slab card">
       <div class="code" id="b-code"></div>
       <h2 id="b-name"></h2>
-      <p id="b-brief"></p>
       <div class="fld"><div class="k">Objective</div><div class="v" id="b-obj"></div></div>
       <div class="fld"><div class="k">Dish conditions</div><div id="b-hz"></div></div>
+      <!-- The actions sit ABOVE the motor-control reference, so they are on
+           screen the moment the brief opens whatever the viewport. The screen
+           used to open with a paragraph of scene-setting as well; launching a
+           dish is a decision, not a reading assignment, and everything the
+           decision needs is the objective and the conditions. -->
+      <div class="row" style="margin-top:22px;margin-bottom:22px">
+        <button class="btn pri" id="b-go">Inoculate</button>
+        <button class="btn ghost" id="b-back">Back to schedule</button>
+      </div>
       <div class="fld"><div class="k">Motor control</div>
         <div class="keys keys-fine">
           <b>hold left / drag</b><span>emit a growth cue &mdash; the exploratory front flows toward it</span>
@@ -622,10 +640,6 @@ body.touch .dish{min-height:132px}
           <b>Hold / &times;N</b><span>the control row stops the dish clock, or winds it to &times;4 or &times;12 &mdash; same dish, watched faster</span>
           <b>Controls</b><span>resetting the plate and abandoning the dish are in there</span>
         </div>
-      </div>
-      <div class="row" style="margin-top:22px">
-        <button class="btn pri" id="b-go">Inoculate</button>
-        <button class="btn ghost" id="b-back">Back to schedule</button>
       </div>
     </div>
   </section>

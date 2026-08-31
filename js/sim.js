@@ -577,7 +577,6 @@ var EXPERIMENTS = [
   {
     code: 'EXP-01', name: 'FIRST CONTACT',
     blurb: 'Open agar, four oat flakes, no complications. Find out which way is out.',
-    brief: 'The dish is fresh, the agar is clean, and someone has arranged four oat flakes around you with the care of a person laying a table. You have no mouth and no plan — only a growing front that moves toward whatever smells like sugar. Spread until you have all four.',
     obj: 'Engulf all four oat flakes.',
     objShort: 'FLAKES',
     chips: [['ok', 'open agar'], ['ok', '4 oat flakes'], ['ok', 'no toxins']],
@@ -613,7 +612,6 @@ var EXPERIMENTS = [
   {
     code: 'EXP-02', name: 'THE LABYRINTH',
     blurb: 'A labyrinth cut into the agar, food at two ends. Shortest path, no brain.',
-    brief: 'Nakagaki, 2000. They cut a maze into the agar, put food at two ends, and waited to see whether a thing with no nervous system would find the shortest path between them. You did. They published. Do it again — the dish drains faster this time, so wandering has a price.',
     obj: 'Engulf both agar blocks before the culture starves.',
     objShort: 'BLOCKS',
     chips: [['', 'cut labyrinth'], ['', 'accelerated starvation'], ['ok', 'two agar blocks']],
@@ -646,7 +644,6 @@ var EXPERIMENTS = [
   {
     code: 'EXP-03', name: 'THE COMMUTER MAP',
     blurb: 'Nine depots laid out in a rough map of Tokyo. Build the network.',
-    brief: 'Tero, 2010. Oat flakes placed where Tokyo keeps its stations, one inoculation dropped where the city keeps its centre. Within a day the network you grew was, by the paper’s own measure, about as efficient as the rail system it was compared against. Nobody has told the trains.',
     obj: 'Engulf all nine depots before the dish times out.',
     objShort: 'DEPOTS',
     chips: [['ok', 'nine agar depots'], ['ok', 'open dish'], ['', 'clock is running']],
@@ -682,7 +679,6 @@ var EXPERIMENTS = [
   {
     code: 'EXP-04', name: 'THE BITTER BRIDGE',
     blurb: 'Bitter strips between you and dinner. Learn that bitter is not poison.',
-    brief: 'Boisseau, 2016. Between you and the food they have poured two strips of quinine — bitter, deeply unpleasant, and entirely harmless. You do not know that yet, and the first crossings will cost you cytoplasm. The meter tracks how long it takes you to stop caring.',
     obj: 'Cross the quinine and engulf the far agar.',
     objShort: 'FAR AGAR',
     chips: [['q', 'quinine barrier × 2'], ['q', 'bitter, not toxic'], ['ok', 'agar beyond']],
@@ -717,7 +713,6 @@ var EXPERIMENTS = [
   {
     code: 'EXP-05', name: 'THE FORECAST',
     blurb: 'The dish dries on a schedule. The interesting part is noticing the schedule.',
-    brief: 'Saigusa, 2008. Every twenty-five seconds the air is pulled dry and you shrink. Do it enough times and something in you begins to slow down just before the next one arrives, which is either anticipation or an extremely good coincidence. Engulfed agar holds moisture — sit on it.',
     obj: 'Engulf every flake and outlast at least three dry cycles.',
     objShort: 'FLAKES',
     chips: [['', 'dry shock every ~25 s'], ['', 'desiccation damage'], ['ok', 'engulfed agar = refuge']],
@@ -754,7 +749,6 @@ var EXPERIMENTS = [
   {
     code: 'EXP-06', name: 'THE U-TRAP',
     blurb: 'A U-shaped trap between you and food. Escaping means moving away from the food first.',
-    brief: 'Reid, 2012. Behind a U-shaped wall, the food is close enough to smell and impossible to reach in a straight line — the only way out is backward, through the mouth you came in by. A plasmodium that avoids its own abandoned ground escapes efficiently; one bathed first in its own slime, with nothing left to tell searched from unsearched, wanders the trap until it starves. You are the first culture. Push at the back wall once, then leave it alone and go the long way.',
     obj: 'Retreat out of the trap\'s dead end and engulf both flakes on the far side of the wall.',
     objShort: 'FLAKES',
     chips: [['', 'u-shaped trap wall'], ['', 'old ground repels'], ['ok', '2 flakes beyond it']],
@@ -791,7 +785,6 @@ var EXPERIMENTS = [
   {
     code: 'EXP-07', name: 'THE LIT MAZE',
     blurb: 'A lit shortcut and a dark detour. Physarum minimises risk, not distance.',
-    brief: 'Nakagaki, 2007. A maze under uneven light: physarum is photophobic, and the network that survives balances path length against light exposure rather than minimising either alone. This dish offers two ways to the far blocks — a short corridor washed in light, and a long one left dark. The light does not stop you; it only costs you, steadily, for as long as you sit in it. Decide what a shortest path is actually worth.',
     obj: 'Engulf both agar blocks across the maze.',
     objShort: 'BLOCKS',
     chips: [['', 'two-route maze'], ['l', 'lit shortcut'], ['ok', 'dark route clear']],
@@ -833,7 +826,6 @@ var EXPERIMENTS = [
   {
     code: 'EXP-08', name: 'THE DIET',
     blurb: 'Eight lopsided blends. Eat the ones that balance, not all eight.',
-    brief: 'Dussutour, 2010. Offered many protein:carbohydrate blends across a dish, the plasmodium in the paper composed its own diet — straddling several imperfect foods to land close to a two-to-one protein-to-carbohydrate intake, no matter which blends were on offer. Eight blends ring this dish, from nearly pure protein to nearly pure sugar. Eating all eight misses the target by a wide margin. Choose a handful in the right proportions, and retract from whatever the ratio does not want.',
     obj: 'Compose a mix near two parts protein to one from at least four blends, and leave the rest.',
     objShort: 'BLENDS',
     chips: [['ok', '8 blend nodes'], ['ok', 'open dish'], ['', 'target ratio 2:1']],
@@ -872,7 +864,6 @@ var EXPERIMENTS = [
   {
     code: 'EXP-09', name: 'THE DECOY',
     blurb: 'Two good meals far apart, one bad one close by. Preference is not supposed to flip.',
-    brief: 'Latty & Beekman, 2011. Give the plasmodium two good meals and it splits its attention evenly. Add a third, worse option nearby and the preference between the first two flips, a small violation of independence of irrelevant alternatives that human economists were not expecting from an organism with no brain. Today\'s dish repeats the trick from the inside: two real meals sit far apart on opposite ends of the agar, and one small, close, mostly-cellulose scrap waits between you and neither of them. It is nearer. It is not the assignment.',
     obj: 'Engulf the two far meals; the near one is not required.',
     objShort: 'BASINS',
     chips: [['ok', 'two required meals'], ['', 'one decoy, close'], ['', 'engulf costs mass']],
@@ -905,7 +896,6 @@ var EXPERIMENTS = [
   {
     code: 'EXP-10', name: 'THE GRAFT',
     blurb: 'A habituated donor waits in the corner. Fuse before you learn the quinine alone.',
-    brief: 'Vogel & Dussutour, 2016. A plasmodium trained to ignore quinine was fused to a naive one, and the naive half crossed bitter agar as if it had learned the lesson itself — transferred down the shared vein, with no nervous system anywhere to carry it. There is a habituated culture sitting unconnected in the corner of this dish. Learning the strips first-hand, alone, will not finish inside the clock. Find the donor, fuse with it, and let the vein carry what your own crossings cannot.',
     obj: 'Fuse with the donor culture, then cross the quinine and engulf the far agar.',
     objShort: 'GRAFT',
     chips: [['q', 'two quinine strips'], ['', 'alone, too slow to learn'], ['ok', 'donor culture waits']],
@@ -942,7 +932,6 @@ var EXPERIMENTS = [
   {
     code: 'EXP-11', name: 'THE WARM ROOM',
     blurb: 'No walls at all — the dish is partitioned by heat, and heat can be crossed.',
-    brief: 'No citation on this one; the lab has started running its own. Somebody wanted to know what happens when the walls are made of heat instead of agar: five rooms, no partition you cannot cross, only bands of warm agar joining them at odd offsets. You can shove straight through a strip and pay for it in biomass, or find the cool seam between two rooms and cross for nothing. Both work. Only one of them works twice.',
     obj: 'Engulf all five flakes scattered across the warm rooms.',
     objShort: 'FLAKES',
     chips: [['', 'heat, not walls'], ['', 'crossable, at a cost'], ['ok', '5 flakes, 5 rooms']],
@@ -980,7 +969,6 @@ var EXPERIMENTS = [
   {
     code: 'EXP-12', name: 'THE SWEEP',
     blurb: 'A wall of warmth sweeps the dish end to end. Grow where it isn\'t, not where it was.',
-    brief: 'Still nothing to cite. A full-height bar of heat crosses the dish left to right on a fixed clock, and when it reaches the far wall it resets to the near one and starts again. Food sits on both flanks, and no ground stays cool for long. You cannot out-argue the schedule, only leave ground before the bar arrives and take it back once it has passed. The dish rewards timing. It does not reward loyalty to a patch of agar.',
     obj: 'Engulf all six oat flakes before the dish times out.',
     objShort: 'FLAKES',
     chips: [['', 'heat bar sweeps'], ['', 'no ground stays cool'], ['ok', 'six oat flakes']],
@@ -1076,7 +1064,6 @@ var EXPERIMENTS = [
   {
     code: 'EXP-13', name: 'THE MISSED BEAT',
     blurb: 'The dry shocks keep a fixed beat. On schedule, the fourth one doesn\'t land.',
-    brief: 'The lab is checking its own work now. It already knows a dry shock on a fixed period teaches you to slow down before it lands — you did that yourself, once. This dish keeps the beat, then breaks it: the fourth scheduled shock is announced by the same warning window, the same held breath, and then nothing crosses the agar at all. Hold ground on what you have already taken, and wait to find out whether you can tell the difference.',
     obj: 'Engulf every flake and outlast six dry cycles, including the one that never lands.',
     objShort: 'FLAKES',
     chips: [['', 'dry shock every ~22s'], ['', 'one shock withheld'], ['ok', 'engulfed agar holds water']],
@@ -1113,7 +1100,6 @@ var EXPERIMENTS = [
   {
     code: 'EXP-14', name: 'THE SYNCOPATION',
     blurb: 'Dry shocks on a shrinking clock. Build your refuges before the rhythm outruns you.',
-    brief: 'Another of the lab\'s own, with the interval itself as the variable this time. The dry cycles start slow, practically generous, and each one arrives sooner than the last. Anticipation still gets its warning window; only the gap it has to work with keeps shrinking. Get your engulfed flakes doing double duty as refuges now, while there is still room between beats — the schedule you can out-think early is the one that outpaces you late.',
     obj: 'Engulf every flake and outlast seven accelerating dry cycles.',
     objShort: 'FLAKES',
     chips: [['', 'dry shock, shrinking gap'], ['', '7 cycles required'], ['ok', 'engulfed agar = refuge']],
@@ -1150,7 +1136,6 @@ var EXPERIMENTS = [
   {
     code: 'EXP-15', name: 'THE TIDE',
     blurb: 'Six stations in a ring, and ground that reverts the moment you look away.',
-    brief: 'Nobody has run this one before; the lab wrote it for you. Six agar stations ring the dish, and an engulfed flake left untended for sixteen seconds is not spoils — it is agar, and agar reverts. There is no route that lets you finish and leave. The whole ring has to stand fed at once, tube touching all six stations simultaneously, or the tide takes back whatever you turned away from.',
     obj: 'Hold all six stations engulfed at the same time.',
     objShort: 'HELD',
     chips: [['', 'ground reseals'], ['ok', 'six stations'], ['', 'hold, don\'t tour']],
@@ -1186,7 +1171,6 @@ var EXPERIMENTS = [
   {
     code: 'EXP-16', name: 'THE TRIAGE',
     blurb: 'Eight flakes, and enough of you for six. Choose which two you were never going to keep.',
-    brief: 'Eight patches of agar, and only six of you to go around once idle ground starts sealing over. The lab is curious what a plasmodium does when holding everything is flatly impossible. Spread wide if you like, and watch what happens to the far corners while you are elsewhere. Then choose your six, and stop pretending the other two were ever coming with you.',
     obj: 'Hold six of the eight stations at once.',
     objShort: 'FLAKES',
     chips: [['', 'hold 6 of 8'], ['', 'idle ground reseals'], ['ok', 'no hazards']],
@@ -1224,7 +1208,6 @@ var EXPERIMENTS = [
   {
     code: 'EXP-17', name: 'THE REVISION',
     blurb: 'A labyrinth re-cut twice mid-run. Trust nothing you have already built.',
-    brief: 'The lab\'s own follow-up to the labyrinth dish, run because someone wondered what your network remembers when the maze itself starts lying to it. Two agar blocks, cut corridors, the usual crawl. Then, twice, the walls change: a route you thickened into dissolves and a route you never tried opens somewhere else. The notebook\'s real question is whether the shortest path lives in your tubes or gets rebuilt from nothing each time the agar is repoured. Regrow. Do not sulk about it.',
     obj: 'Engulf both agar blocks; the maze will be re-cut twice along the way.',
     objShort: 'BLOCKS',
     chips: [['', 'cut labyrinth'], ['', 'walls recut mid-run'], ['ok', 'two agar blocks']],
@@ -1287,7 +1270,6 @@ var EXPERIMENTS = [
   {
     code: 'EXP-18', name: 'THE DRAWBRIDGE',
     blurb: 'A wall down the middle, two doors, one open at a time. Time the crossing.',
-    brief: 'No paper, no precedent. The lab poured a wall down the centre of the dish and left two doors in it, and rigged the doors to trade places — north open while south seals, then south open while north seals, on a half-minute switch nobody consulted you about. Food waits on both sides of that wall, plus a little kept close so you are not starving while you learn the rhythm. Crossing is not a question of route. It is a question of timing, and the door does not check who is still standing in the frame when it shuts.',
     obj: 'Engulf all three agar patches, timing each crossing to an open gate.',
     objShort: 'AGAR',
     chips: [['', 'gated centre wall'], ['', '~30s door cycle'], ['ok', '3 agar patches']],
@@ -1464,7 +1446,6 @@ var EXPERIMENTS = [
   {
     code: 'EXP-19', name: 'THE FIRE DRILL',
     blurb: 'Dry shocks flood the centre with heat too. Anticipate, contract, re-expand.',
-    brief: 'The lab\'s own again, and this time it runs two drills on one clock: the dry-air shock you have met before, and underneath it, on the same beat, the floor across the centre of the plate floods with heat. Five flakes sit in the corners, outside the flood line. The rhythm asks two things at once — pull in before the warning ends, and push back out the instant it lifts. The crossing does not stay open, and it does not stay cool either.',
     obj: 'Engulf all five flakes and survive at least four heat drills.',
     objShort: 'FLAKES',
     chips: [['', 'dry shock every ~25 s'], ['', 'centre floods with heat'], ['ok', 'corners hold cool']],
@@ -1559,7 +1540,6 @@ var EXPERIMENTS = [
   {
     code: 'EXP-20', name: 'THE LONG NIGHT',
     blurb: 'Hold five stations, survive the shocks, and lose a wall along the way.',
-    brief: 'No paper for this one — this is the lab\'s own, run after everything else on the schedule. Five stations, and holding one is not the same as holding it at four in the morning: unattended ground skins over and has to be retaken. The air will still turn dry and dry faster each time. One wall you have leaned on since the start will be poured shut without notice, and something colder waits behind it. Nobody expects you to keep all five. Do.',
     obj: 'Hold all five stations at once and outlast six dry cycles before the clock runs out.',
     objShort: 'HELD',
     chips: [['', 'hold all five'], ['', 'shocks accelerate'], ['', 'heat + one revision']],
@@ -5208,7 +5188,13 @@ function logLine(text, hi) {
   if (hi) d.className = 'hi';
   d.textContent = text;
   box.insertBefore(d, box.firstChild);
-  while (box.children.length > 6) box.removeChild(box.lastChild);
+  /* The cap is the SCROLLBACK, not the visible depth — the well shows the
+     newest eight or so and scrolls for the rest. It was 6, which meant the
+     log destroyed its own history faster than the well could show it: the
+     lines below the fold that scrolling promised were already gone. Sixty
+     covers the narration of a long dish end to end; it exists at all only so
+     a run left at x12 overnight cannot grow the DOM without bound. */
+  while (box.children.length > 60) box.removeChild(box.lastChild);
 }
 
 function dirWord(fx, fy, tx, ty) {
@@ -5751,7 +5737,6 @@ function openBrief(i) {
   var e = EXPERIMENTS[i];
   $('b-code').textContent = e.code + ' · dish ' + (i + 1) + ' of ' + EXPERIMENTS.length;
   $('b-name').textContent = e.name;
-  $('b-brief').textContent = e.brief;
   $('b-obj').textContent = e.obj;
   var hz = $('b-hz');
   hz.innerHTML = '';
