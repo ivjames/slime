@@ -463,6 +463,148 @@ var TRACE_SIDE = 0.50;  // ...and this fraction of it into the four neighbours
 var TRACE_W    = 7.0;   // sensed weight of a full-strength trace
 var TRACE_HOLD = 0.995; // per-step decay: half-life ~2.3s at 60 steps/s
 
+/* ---- conductivity: the tube that carries is the tube that keeps ----
+   The Tero/Kobayashi/Nakagaki result, which the Jones rule on its own does
+   not contain: a tube THICKENS with the flux through it and a tube carrying
+   nothing is withdrawn, and because the feedback is nonlinear the two
+   outcomes separate rather than settling into an average. That is the whole
+   difference between a network and a scribble. Without it the trail field is
+   a footprint — every cell decays on the same clock whether it is a trunk
+   carrying the culture's whole traffic or a dead end nothing has visited
+   since it was laid — so two parallel routes to the same flake both survive
+   at the same weight, and neither the reinforcement of the good one nor the
+   pruning of the bad one ever happens. Measured on EXP-01 that is exactly
+   what the dish did: the tissue mask turned over by a third every twenty
+   seconds, which is a body with no skeleton, redrawing itself.
+
+   The flux is not modelled separately. What a cell's traffic delivers is
+   already computed once per agent per step as its deposit, so the flow
+   accumulator sums that, and the conductivity is a slow low-pass of it
+   through a saturating nonlinearity. Slow because a tube commits over
+   seconds rather than frames — the point is a memory the trail field does
+   not have — and saturating with a square because q^2/(1+q^2) is the cheapest
+   form of the feedback with an exponent above one, which is what makes it
+   winner-take-all rather than proportional.
+
+   And it is spent as a FLOOR under the trail rather than as a slower decay.
+   Slower decay was the first form and it is the wrong shape twice over. It is
+   too weak where it matters — the whole point is a network that is still the
+   same network half a minute later, and stretching a tube's half-life from
+   three quarters of a second to one and a half is nothing on that scale
+   (measured: the tissue mask still turned over by 71% between samples thirty
+   seconds apart, against 76% before the change). And it cannot be made strong
+   enough, because a cell's resting level is its deposit over one minus its
+   decay, so buying a ten-second memory that way multiplies every busy tube by
+   thirteen, pins the dish at TRAIL_MAX and flattens the vein bands, the tier
+   histogram and the junction test, all of which read the trail for contrast
+   rather than for presence.
+
+   A floor states the thing itself. COND_LEVEL x conductivity is the calibre
+   this cell's traffic maintains, and the cell does not fall below it while
+   the traffic lasts; above it, deposit and decay do exactly what they did.
+   Persistence is then bounded by construction — a fully committed tube holds
+   at COND_LEVEL and no higher, so nothing saturates that was not already
+   saturating — and the length of the memory is set by COND_RATE alone rather
+   than by an exponent on a decay. That is also the honest reading of the
+   source: in Tero's model the conductivity relaxes toward a function of the
+   flux and the tube's calibre follows the conductivity, which is a floor
+   under the tube, not a discount on its evaporation.
+
+   COND_RATE is therefore the constant that decides how long the organism
+   remembers a route. At 0.02 a sweep the time constant is about seven
+   seconds: a tube has to carry traffic for that long before it is held, and
+   a tube abandoned for that long stops being. Both halves matter — the first
+   is why a single filament sweeping past does not leave a permanent tube
+   behind it, the second is the pruning. */
+var COND_Q     = 1 / 6;    // deposit per cell per sweep that counts as unit flux
+var COND_RATE  = 0.02;     // share of the way to the drive taken per sweep
+/* What a fully conductive cell holds. Comfortably over ADRIFT_T, so cytoplasm
+   standing in a held tube is never mistaken for a scrap, and comfortably
+   under TRAIL_MAX, so a maintained tube is still a tube rather than the
+   ceiling — the vein bands, the tier histogram and the junction test all read
+   the trail for contrast, and a floor set near the top would flatten all
+   three. It was 46 first, which is high enough that the core outbid the food
+   gradient for the agents that should have been following it. */
+var COND_LEVEL = 34.0;     // the tube a fully conductive cell maintains
+/* ---- the vein scar: where a tube HAS been ----
+   The residual the dish has been missing. Three fields already say something
+   about a cell and all three are short: trail is the tube now, the trace is
+   the front seconds ago, the mat is ground that has been searched. None of
+   them is the organism's own skeleton, so when a tube is withdrawn the ground
+   under it goes back to being indistinguishable from agar the culture has
+   never seen, and regrowth into that quarter starts from nothing and lands
+   somewhere else. That is why the network never looks like the same network
+   twice.
+
+   A real plasmodium does not lose a vein that cleanly. The tube wall is gel
+   the organism built and left, and cytoplasm returning to that quarter runs
+   back down the channel it already has rather than cutting a new one — which
+   is why a timelapse of a plate shows the same lattice in the same places for
+   minutes on end, thickening and thinning, and not a new lattice every pass.
+
+   What scars is a cell the network was MAINTAINING — conductivity over
+   SCAR_COND — and not merely one that carried a lot of trail. The difference
+   is the whole value of the field and it was measured rather than reasoned:
+   with the mark keyed to trail instead, at a threshold well above what a
+   stray can manufacture, a fifth of the dish was fully scarred by the first
+   half minute and rather more than the whole standing tissue area by the
+   second. That is not a skeleton, it is a map of everywhere the organism has
+   ever put a foot, and a uniform attractant over half the plate guides
+   nothing. Conductivity already asks the right question — is this cell a
+   tube the culture is keeping — so the scar is its slow record and covers
+   what the veins cover.
+
+   It is laid slowly (some seconds of held tube for a full mark, so a
+   filament withdrawn as soon as it was cut leaves nothing) and lifted far
+   more slowly still, on a half-life of minutes, which over one dish is close
+   enough to never. And it is weighted like the trace and the mat, scaled
+   DOWN by the trail already present: a live tube is its own signal and does
+   not need its history repeated, so the scar speaks only where the tube has
+   gone. */
+var SCAR_COND = 0.45;      // conductivity at which this cell is a tube worth remembering
+var SCAR_DEP  = 0.02;      // scar laid per sweep while it is
+var SCAR_FADE = 0.99975;   // per-sweep decay: half-life ~6 min of dish time
+var SCAR_W    = 3.0;       // sensed weight of a full scar on bare ground
+var SCAR_REF  = 25.0;      // trail at which a live tube silences its own scar
+
+/* ---- coming adrift ----
+   A plasmodium is one cell. It has no way to leave a piece of itself behind,
+   and a dish that grows detached islands of tissue is not drawing physarum
+   however good the veins are. The supply test in the tip block is the only
+   thing in the file that knows about connection, and all it does is DEMOTE:
+   a filament that loses its tube stops being a front and becomes ordinary
+   cytoplasm, which then wanders on bare agar at VOID_SPEED for the rest of
+   the run, laying just enough trail under itself to stay visible. Measured,
+   a lone wanderer settles at a trail of about eight — DEPOSIT x VOID_SPEED
+   over one minus DECAY — which is the level the renderer starts drawing
+   tissue at. Every scrap that ever came adrift is still on the plate.
+
+   So the demotion is finished. An agent that is not a tip, is not feeding,
+   and has been standing on less trail than a tube carries for a sustained
+   time is reabsorbed. The threshold sits above what a scrap can manufacture
+   for itself and far below what a tube holds, and the delay is what keeps it
+   honest — a fresh daughter, an agent crossing a gap, a front that has
+   outrun its own deposit for a moment all recover well inside it, and only
+   something that has spent seconds attached to nothing does not.
+
+   Reabsorbed, and the word is meant literally: the scrap is MOVED back into
+   the body rather than deleted. Deleting it was the first version and it is
+   both the wrong biology and, measured, a real cost to the dish. Wrong
+   biology because cytoplasm withdrawn from a dead end is not lost — it is
+   the material the organism reinvests in the tubes that are working, which
+   is the same sentence as the pruning this whole change is about. And a cost
+   because before the first flake goes in a dish has no growth budget at all:
+   engulfed is zero, the biomass target is zero, and every agent deleted is
+   gone for the rest of the search. That version culled about one agent in
+   eight over the first minute and paid for it exactly where you would
+   expect — EXP-01 took 27% longer to solve, across three seeds, because the
+   population doing the searching was smaller. Moving the scrap home costs
+   the dish nothing and puts the cytoplasm where it is useful. */
+var ADRIFT_T     = 18.0;  // trail below which an agent is not standing on tube
+var ADRIFT_TIME  = 2.5;   // seconds of that before the scrap is drawn home
+var ADRIFT_DRAWS = 8;     // draws taken looking for somewhere to put it
+var ADRIFT_R     = 3.0;   // ...and how far from that cell it may land, cells
+
 var SPENT_FOOD = 0.30; // an engulfed node's remaining pull (a refuge, not a beacon)
 var SPENT_FALL = 34;   // and only over this reach, so spent food cannot outbid fresh
 var MAX_ENGULF_RATE = 1 / 200; // a node takes >= 3.3s to consume however big the front
@@ -1622,6 +1764,16 @@ var knotF = new Float32Array(NCELL);
 /* Where the front has just been: laid by supplied tips, followed by the
    cytoplasm behind them, gone in seconds. See the trace block in section 1. */
 var traceF = new Float32Array(NCELL);
+/* Flux, and what the network has made of it. flowF is the deposit this cell
+   has taken since the last slow sweep and is zeroed by it; condF is the slow
+   low-pass of that, and is what buys a tube its longer memory. Neither is
+   sensed: the organism senses the tube, and conductivity is the reason the
+   tube is still there. See the conductivity block in section 1. */
+var flowF = new Float32Array(NCELL);
+var condF = new Float32Array(NCELL);
+/* Where a tube has been, long after it has gone — the one field in the dish
+   with a memory measured in minutes. Sensed. See the scar block. */
+var scarF = new Float32Array(NCELL);
 var nodeAt = new Int16Array(NCELL);    // cell -> node index, -1 for none
 /* And the same map at the fan's radius: which flake an agent standing here is
    feeding on, which is a wider disc than the flake itself because a pad
@@ -1641,7 +1793,7 @@ var feedAt = new Int16Array(NCELL);
    densest, which is where it does the work. Counts also mean every path that
    removes an agent has to decrement: the death branch below does, and the
    whole grid is restamped from real positions at the top of every step, so
-   spawnAgent/killRandom (which run after the agent loop) cannot leave it
+   spawnAgent/killWeakest (which run after the agent loop) cannot leave it
    drifted for more than the rest of the frame. */
 var occ = new Uint16Array(NCELL);
 
@@ -1655,6 +1807,13 @@ var ah = new Float32Array(MAXA);
    dish into the trunk band and the front stops being drawn. Written where it
    is decided, read where it is needed. */
 var atip = new Uint8Array(MAXA);
+/* How long this agent has been standing on nothing, in seconds. The one piece
+   of per-agent state the adrift rule needs, and it has to be per-agent: the
+   question is not whether a cell is thin — plenty of legitimate cells are —
+   but whether this piece of cytoplasm has been attached to anything for the
+   last few seconds. Cleared wherever an agent is placed and carried by every
+   swap that removes one, exactly like atip. */
+var astv = new Float32Array(MAXA);
 var nAgents = 0;
 
 /* ------------------------------------------------------------
@@ -2028,6 +2187,11 @@ var S = {
 /* Hoisted out of S for the inner loop: sense() runs three times per agent per
    step and reads this on every call, so it is a plain number, not a lookup. */
 var SLIME_W = 0;
+/* The scar's weight for the agent currently being sensed, set once by the
+   loop before its three calls: SCAR_W for cytoplasm, zero for a tip. Carried
+   here rather than passed as a fourth argument for the same reason SLIME_W
+   is — three calls an agent a step is the hottest path in the file. */
+var scarW = 0;
 
 /* ------------------------------------------------------------
    5. building the dish
@@ -2081,6 +2245,7 @@ function buildDish(e) {
   resetVeinTemporal();
   trail.fill(0); tmpF.fill(0); foodF.fill(0);
   cueF.fill(0); retF.fill(0); slimeF.fill(0); knotF.fill(0); traceF.fill(0);
+  flowF.fill(0); condF.fill(0); scarF.fill(0);
   nodeAt.fill(-1);
   feedAt.fill(-1);
 
@@ -2146,8 +2311,15 @@ function applyEvent(e, ev) {
            moved down into this slot inherited the flag of the one the wall
            just killed — a stray tip in the middle of the body for the fork
            pool to spend growth on, and a whisker drawn where there is no
-           front, until the next step's frontier test corrected it. */
-        ax[k] = ax[nAgents]; ay[k] = ay[nAgents]; ah[k] = ah[nAgents]; atip[k] = atip[nAgents];
+           front, until the next step's frontier test corrected it.
+
+           And astv with it, for the same reason and with no frontier test to
+           correct it afterwards: the adrift clock is the only per-agent state
+           nothing recomputes, so a survivor that inherits a dead agent's
+           clock is reabsorbed early or late by up to ADRIFT_TIME on the
+           strength of a wall appearing somewhere else in the dish. */
+        ax[k] = ax[nAgents]; ay[k] = ay[nAgents]; ah[k] = ah[nAgents];
+        atip[k] = atip[nAgents]; astv[k] = astv[nAgents];
         continue;
       }
       k++;
@@ -2301,6 +2473,7 @@ function inoculate(e) {
       occ[si] = 1;
       ah[nAgents] = rnd() * Math.PI * 2;
       atip[nAgents] = 0;
+      astv[nAgents] = 0;
       nAgents++;
     }
     var w = ci - 1, ee = ci + 1, nn = ci - GW, ss2 = ci + GW;
@@ -2332,6 +2505,7 @@ function emit(nx, ny, nh, tip) {
   if (wallM[ci] || occ[ci]) return false;
   ax[nAgents] = Math.fround(nx); ay[nAgents] = Math.fround(ny); ah[nAgents] = nh;
   atip[nAgents] = tip ? 1 : 0;
+  astv[nAgents] = 0;
   occ[ci]++;
   nAgents++;
   return true;
@@ -2390,11 +2564,30 @@ function forkTip() {
 /* Thicken instead: new cytoplasm appears where the food is and where the
    player is asking for it, so holding a cue fattens that part of the network
    rather than only steering the tips that happen to be inside the brush. */
+/* Draws are up from three, because the candidate now has to pass a test as
+   well as win a comparison and a draw that fails it is not a candidate at
+   all. Eight keeps the chance of finding no supported agent negligible on a
+   dish where most of the population is inside the body, which is every dish. */
+var THICK_DRAWS = 8;
+
 function thicken() {
   var best = -1, bestV = -1e9;
-  for (var t = 0; t < 3; t++) {
+  for (var t = 0; t < THICK_DRAWS; t++) {
     var k = (rnd() * nAgents) | 0;
     var ci = ((ay[k] | 0) * GW + (ax[k] | 0));
+    /* Thicken the ORGANISM, not whatever the draw happened to land on. The
+       parent is only a position: the daughter is placed up to four cells away
+       in a random direction, so a parent adrift on bare agar spends the
+       growth budget putting a second scrap next to the first one, and a
+       clump of them is self-sustaining — each new arrival is another
+       eligible parent. Requiring the parent to be standing on tube is what
+       makes new cytoplasm arrive INTO the body, which is where a plasmodium
+       makes it and the only place it has to put it.
+
+       fork selection already has this for free: a fork parent must be a tip,
+       and a tip must have passed the supply test. This is the same condition
+       stated for the other half of the budget. */
+    if (trail[ci] < ADRIFT_T) continue;
     var v = foodF[ci] + cueF[ci] * 0.8;
     if (v > bestV) { bestV = v; best = k; }
   }
@@ -2411,13 +2604,90 @@ function spawnAgent() {
   thicken();
 }
 
-function killRandom() {
+/* Draw a scrap home. Best-of-K over the population for a cell that is
+   actually tube, then a free cell near it — the same shape as thicken(),
+   because it is the same act: cytoplasm arriving into the body. Returns
+   false if nowhere would take it, in which case the caller reabsorbs it the
+   only other way there is.
+
+   The occupancy grid is fixed up here rather than by the caller, because
+   this runs inside the agent loop and the loop's own bookkeeping has already
+   accounted for the cell the scrap is leaving. */
+function drawHome(k, from) {
+  var best = -1, bestV = ADRIFT_T;
+  for (var t = 0; t < ADRIFT_DRAWS; t++) {
+    var c = (rnd() * nAgents) | 0;
+    if (c === k) continue;
+    var v = trail[(ay[c] | 0) * GW + (ax[c] | 0)];
+    if (v > bestV) { bestV = v; best = c; }
+  }
+  if (best < 0) return false;
+  for (var tries = 0; tries < 6; tries++) {
+    var nx = ax[best] + (rnd() - 0.5) * 2 * ADRIFT_R;
+    var ny = ay[best] + (rnd() - 0.5) * 2 * ADRIFT_R;
+    if (nx < 1 || ny < 1 || nx >= GW - 1 || ny >= GH - 1) continue;
+    var ci = (ny | 0) * GW + (nx | 0);
+    if (wallM[ci] || occ[ci]) continue;
+    if (occ[from]) occ[from]--;
+    occ[ci]++;
+    ax[k] = Math.fround(nx); ay[k] = Math.fround(ny);
+    ah[k] = rnd() * Math.PI * 2;
+    atip[k] = 0; astv[k] = 0;
+    return true;
+  }
+  return false;
+}
+
+/* Starvation, and WHERE it takes the cytoplasm from. Uniformly at random is
+   the obvious reading of "the culture is losing biomass" and it is the wrong
+   shape: a trunk carrying the culture's traffic holds most of the agents in
+   the dish, so a uniform draw takes most of its losses out of exactly the
+   tubes the organism is depending on, and the thin dead ends — which are all
+   of the biomass the organism has no use for — are culled in proportion to
+   how little of it they are. Starving that way thins the whole network
+   evenly, which is not what withdrawal looks like on a plate: a plasmodium
+   under-fed pulls its cytoplasm OUT of the branches that lead nowhere and
+   back into the ones that carry, and the network gets coarser rather than
+   fainter.
+
+   Best-of-K says that in four lines, and what it reads is the CONDUCTIVITY
+   under the candidate rather than the trail. The trail is how much tube is
+   here; conductivity is whether the tube is carrying anything, which is the
+   question a withdrawal has to answer — a fat vein that has stopped
+   streaming is exactly the cytoplasm a starving plasmodium recovers first,
+   and a thin one that is working is the last. Reading the trail instead gets
+   that backwards on both counts.
+
+   The draws stay uniform, so this is a bias rather than a rule and a trunk
+   agent is not immune; what changes is that the losses land, on average,
+   where nothing is moving. K is small on purpose — at six draws the weakest
+   candidate is well below the median without the cull becoming a
+   deterministic sweep, which would strip one part of the dish bare. */
+var KILL_DRAWS = 6;
+
+function killWeakest() {
   if (nAgents <= 0) return;
-  var k = (rnd() * nAgents) | 0;
+  var k = -1, worst = 1e9;
+  for (var t = 0; t < KILL_DRAWS; t++) {
+    var c = (rnd() * nAgents) | 0;
+    var ci2 = (ay[c] | 0) * GW + (ax[c] | 0);
+    var v = condF[ci2];
+    /* The front is where cytoplasm is being spent on purpose, and it stands
+       on ground with no history at all, so it reads at the bottom of this
+       scale for a reason that is not slack. Both halves of the front are
+       priced up rather than excluded — a tip, and the trace a tip leaves for
+       the cytoplasm following it in — so the search is protected while there
+       is anything genuinely idle to take instead. */
+    if (atip[c]) v += 1;
+    if (traceF[ci2] > 0) v += 0.5;
+    if (v < worst) { worst = v; k = c; }
+  }
+  if (k < 0) return;
   var ci = (ay[k] | 0) * GW + (ax[k] | 0);
   if (occ[ci]) occ[ci]--;          /* every removal path decrements */
   nAgents--;
-  ax[k] = ax[nAgents]; ay[k] = ay[nAgents]; ah[k] = ah[nAgents]; atip[k] = atip[nAgents];
+  ax[k] = ax[nAgents]; ay[k] = ay[nAgents]; ah[k] = ah[nAgents];
+  atip[k] = atip[nAgents]; astv[k] = astv[nAgents];
 }
 
 /* sample the combined desirability field (nearest cell) */
@@ -2448,6 +2718,34 @@ function sense(x, y) {
     if (est > 1) est = 1;
     v += TRACE_W * tf * (1 - est);
   }
+  /* And the oldest thing the ground remembers, on the same scaling again: a
+     channel the organism cut and later withdrew from is still the cheapest
+     way back into that quarter of the dish. Weighted well under the trail in
+     a live tube — the scar is a lean, not an instruction — but over
+     SENS_NOISE, so on bare agar it is a bias an agent can actually follow
+     rather than a rounding error. Where a dish runs the mat as well the two
+     read against each other, which is the right argument: searched ground
+     repels, but searched ground the culture built a tube through does not.
+
+     Read by the cytoplasm and NOT by the front, which is what scarW carries
+     in from the loop. A scar is a route home; a tip's whole job is to be
+     somewhere the organism has not been, and an old vein is the one thing
+     that cannot help it do that. Sensed by everything, the field is a
+     standing pull back toward the body that competes with the food gradient
+     for exactly the agents that should be following it — measured, that cost
+     EXP-01 17% of its time to solve, with no flake reached by the minute
+     mark on any of three seeds where the plate had reached one or two
+     before. Silent for tips, the search is unaffected and the followers
+     still run home down the channels that are already cut, which was the
+     whole point of the field. */
+  if (scarW > 0) {
+    var sc = scarF[i];
+    if (sc > 0) {
+      var liv = trail[i] / SCAR_REF;
+      if (liv > 1) liv = 1;
+      v += scarW * sc * (1 - liv);
+    }
+  }
   return v;
 }
 
@@ -2467,7 +2765,14 @@ function diffuseTrail() {
       tmpF[i] = sw * l + cw * trail[i] + sw * r;
     }
   }
-  /* vertical blur back into trail, with decay, and player fields decayed too */
+  /* vertical blur back into trail, with decay, and player fields decayed too.
+
+     The floor under the decay is the reinforcement rule, and it is two lines
+     because that is all it is: a cell that has been carrying traffic does not
+     fall below the tube its traffic maintains. Applied after the decay and
+     before the wall test, so a baffle that appeared this step still zeroes
+     the cell under it — conductivity is cleared on walls by the slow sweep,
+     but the sweep runs one step in eight and the wall test runs every one. */
   for (y = 0; y < GH; y++) {
     row = y * GW;
     var up = y > 0 ? row - GW : row;
@@ -2475,6 +2780,8 @@ function diffuseTrail() {
     for (x = 0; x < GW; x++) {
       i = row + x;
       var v = (sw * tmpF[up + x] + cw * tmpF[i] + sw * tmpF[dn + x]) * DECAY;
+      var cd = condF[i];
+      if (cd > 0) { var hold = COND_LEVEL * cd; if (v < hold) v = hold; }
       trail[i] = wallM[i] ? 0 : (v < 0.0016 ? 0 : v);
       if (cueF[i] > 0) { var c = cueF[i] * CUE_DECAY; cueF[i] = c < 0.002 ? 0 : c; }
       if (retF[i] > 0) { var q = retF[i] * CUE_DECAY; retF[i] = q < 0.002 ? 0 : q; }
@@ -2504,17 +2811,49 @@ var KNOT_FADE = Math.pow(KNOT_HOLD, KNOT_EVERY);
    half-life is seconds does not need sixty samples of its own curve a second,
    and this way the two slow fields cost one sweep between them. */
 var TRACE_FADE = Math.pow(TRACE_HOLD, KNOT_EVERY);
-function decayKnots() {
+/* The conductivity and the scar ride it too, and for them it is not merely an
+   economy: both are deliberately slow — a tube commits over seconds, a scar
+   over minutes — so sampling their curves sixty times a second would be
+   measuring a quantity nothing reads for an edge, sixty times more often than
+   it changes. All four fields, one pass. */
+function slowFields() {
   for (var i = 0; i < NCELL; i++) {
+    var wall = wallM[i];
     var kf = knotF[i];
     if (kf > 0) {
-      kf = wallM[i] ? 0 : kf * KNOT_FADE;
+      kf = wall ? 0 : kf * KNOT_FADE;
       knotF[i] = kf < 0.004 ? 0 : kf;
     }
     var tf = traceF[i];
     if (tf > 0) {
-      tf = wallM[i] ? 0 : tf * TRACE_FADE;
+      tf = wall ? 0 : tf * TRACE_FADE;
       traceF[i] = tf < 0.01 ? 0 : tf;
+    }
+    /* Flux this sweep, through the saturating feedback, low-passed. The early
+       out is what makes this affordable: the organism occupies a small share
+       of a hundred thousand cells, so on most of the dish this is two loads
+       and a test and nothing else happens. */
+    var fl = flowF[i], cd = condF[i];
+    if (fl > 0 || cd > 0) {
+      var q = fl * COND_Q, drive = 0;
+      if (q > 0) { var q2 = q * q; drive = q2 / (1 + q2); }
+      cd += COND_RATE * (drive - cd);
+      cd = wall ? 0 : (cd < 0.002 ? 0 : cd);
+      condF[i] = cd;
+      flowF[i] = 0;
+    }
+    /* And the scar: laid only under a tube the network is MAINTAINING, off
+       the conductivity computed just above rather than off the trail, so the
+       two are one statement — which tubes the culture is keeping, and where
+       it has kept them. Lifted on a clock long enough that a dish keeps its
+       skeleton for the length of a run. */
+    var sc = scarF[i];
+    if (cd >= SCAR_COND) {
+      sc += SCAR_DEP;
+      scarF[i] = wall ? 0 : (sc > 1 ? 1 : sc);
+    } else if (sc > 0) {
+      sc = wall ? 0 : sc * SCAR_FADE;
+      scarF[i] = sc < 0.004 ? 0 : sc;
     }
   }
 }
@@ -2666,7 +3005,7 @@ function step() {
   }
 
   diffuseTrail();
-  if (stepsRun % KNOT_EVERY === 0) decayKnots();
+  if (stepsRun % KNOT_EVERY === 0) slowFields();
 
   var i, k;
   /* Last step's contact counts, kept before this step's are zeroed: the fan
@@ -2797,6 +3136,9 @@ function step() {
     if (feeding) tip = false;
     atip[k] = tip ? 1 : 0;
     var sd = tip ? TIP_SENS : SENS_D;
+    /* A route home is not information a pioneer can use — see the scar term
+       in sense(), which this switches off for the three calls below. */
+    scarW = tip ? 0 : SCAR_W;
 
     var F = sense(x + cf * sd, y + sf * sd);
     var hl = h - SENS_A, hr = h + SENS_A;
@@ -2958,6 +3300,14 @@ function step() {
     if (dep > 0) {
       var tv = trail[cell];
       if (tv < TRAIL_MAX) trail[cell] = tv + dep > TRAIL_MAX ? TRAIL_MAX : tv + dep;
+      /* The same number is the flux. What a cell's traffic delivers IS its
+         deposit — that is what the constant is defined as — so the flow
+         accumulator is one add here rather than a second measurement of the
+         same thing somewhere else. Charged before the ceiling, deliberately:
+         a saturated trunk is still carrying the culture's traffic, and
+         reading the clamped increment would tell the conductivity rule that
+         the busiest tube in the dish had gone quiet. */
+      flowF[cell] += dep;
     }
 
     /* And the lobes: an interior agent, now and then, asks whether it is
@@ -3015,8 +3365,43 @@ function step() {
     if (dead) {
       if (occ[cell]) occ[cell]--;
       nAgents--;
-      ax[k] = ax[nAgents]; ay[k] = ay[nAgents]; ah[k] = ah[nAgents]; atip[k] = atip[nAgents];
+      ax[k] = ax[nAgents]; ay[k] = ay[nAgents]; ah[k] = ah[nAgents];
+      atip[k] = atip[nAgents]; astv[k] = astv[nAgents];
       continue;
+    }
+
+    /* Adrift, and for how long. Last in the body on purpose: it can MOVE the
+       agent, and everything above is accounting for the cell it actually
+       spent this step in — the flake it touched, the mat it laid, the
+       quinine it was standing in. Running it here means nothing downstream
+       has to know whether the agent is still where it was.
+
+       A tip is by definition supplied — the feed test at the top has already
+       thrown out the ones that are not — and a feeding agent is inside a pad,
+       so neither can be a scrap. The trace counts as tube even though it is
+       not one: it means a supplied filament came through here in the last
+       couple of seconds, so what the agent is standing on is a tube being
+       BUILT, which has not reached ADRIFT_T yet and must not be reabsorbed
+       for it. Without that the rule has a cascade in it — the followers a
+       young filament recruits are killed for arriving before the tube
+       thickened, which thins it, which starves the next ones.
+
+       The clock resets on any step that finds any of those, so this only
+       fires on cytoplasm that has been attached to nothing for seconds
+       together, which is the one thing a single-celled organism cannot have.
+       See the adrift block in section 1. */
+    if (tip || feeding || trail[cell] >= ADRIFT_T || traceF[cell] > 0) {
+      astv[k] = 0;
+    } else {
+      astv[k] += DT;
+      if (astv[k] >= ADRIFT_TIME && !drawHome(k, cell)) {
+        /* nowhere to put it — there is no body left to put it in */
+        if (occ[cell]) occ[cell]--;
+        nAgents--;
+        ax[k] = ax[nAgents]; ay[k] = ay[nAgents]; ah[k] = ah[nAgents];
+        atip[k] = atip[nAgents]; astv[k] = astv[nAgents];
+        continue;
+      }
     }
     k++;
   }
@@ -3111,7 +3496,7 @@ function step() {
     while (S.growAcc >= 1 && nAgents < target && nAgents < MAXA) { spawnAgent(); S.growAcc -= 1; }
   } else if (S.simT > e.grace && nAgents > target) {
     S.starveAcc += (e.starve * DT);
-    while (S.starveAcc >= 1 && nAgents > 0) { killRandom(); S.starveAcc -= 1; }
+    while (S.starveAcc >= 1 && nAgents > 0) { killWeakest(); S.starveAcc -= 1; }
   } else {
     S.growAcc = 0; S.starveAcc = 0;
   }
@@ -5435,7 +5820,7 @@ function onEngulf(i) {
      the organism did engulf it; it simply was not worth engulfing. */
   if (nd.trap) {
     var toll = Math.floor(nAgents * (e.trapCost || 0.22));
-    for (var t = 0; t < toll; t++) killRandom();
+    for (var t = 0; t < toll; t++) killWeakest();
     logLine('mostly cellulose. the tube that reached ' + nd.label + ' is being reabsorbed, and a good deal of you with it.', true);
   }
   if (left === 0) logLine('all of it. every last flake.', true);
@@ -6185,7 +6570,12 @@ var GHOST_ENT = 9;
    seed and tape produce. The constants below are folded in underneath it as a
    backstop for the case the bump is forgotten, which is not the same as a
    guarantee and is not written here as one. */
-var SIM_V = 1;
+/* 2: conductivity, the vein scar, adrift reabsorption, and starvation drawing
+   from the weakest rather than at random. Each of those changes what a step
+   does to the dish, and the last two change how many draws a step takes from
+   the generator as well, so every tape recorded under 1 replays into a
+   different run. */
+var SIM_V = 2;
 
 function ghostSig() {
   var h = mix32(SIM_V, Math.round(CUE_CAP * 1000), Math.round(CUE_REGEN * 1000));
@@ -6431,6 +6821,8 @@ function exitReplay() {
     if (FINAL_STATE.slimeF) slimeF.set(FINAL_STATE.slimeF);
     if (FINAL_STATE.knotF) knotF.set(FINAL_STATE.knotF);
     if (FINAL_STATE.traceF) traceF.set(FINAL_STATE.traceF);
+    if (FINAL_STATE.condF) condF.set(FINAL_STATE.condF);
+    if (FINAL_STATE.scarF) scarF.set(FINAL_STATE.scarF);
     nAgents = FINAL_STATE.n;
     fieldDirty = true;
     ax.set(FINAL_STATE.ax); ay.set(FINAL_STATE.ay);
@@ -7132,6 +7524,19 @@ function showResult(won) {
        belonging to the abandoned replay */
     knotF: new Float32Array(knotF),
     traceF: new Float32Array(traceF),
+    /* and the two slow fields, which are part of what the plate IS rather
+       than merely of how it looks: the conductivity is a floor under the
+       trail on every step of diffuseTrail, and the scar is sensed. Restoring
+       the finished dish's trail on top of an abandoned replay's conductivity
+       leaves the exhibit's own field disagreeing with the field that would
+       maintain it — harmless while the verdict is up, since a finished run
+       does not step, and wrong the moment anything reads the plate, which
+       the harness accessors do.
+       flowF is deliberately not here. It is scratch the slow sweep zeroes
+       every eight steps and nothing outside that sweep reads, so it has no
+       more state worth restoring than tmpF does. */
+    condF: new Float32Array(condF),
+    scarF: new Float32Array(scarF),
     n: nAgents,
     ax: ax.slice(0, nAgents), ay: ay.slice(0, nAgents),
     ah: ah.slice(0, nAgents), atip: atip.slice(0, nAgents),
@@ -7676,6 +8081,12 @@ function init() {
     /* a copy of the trail field, for measuring the network from outside */
     trail: function () { return Float32Array.prototype.slice.call(trail); },
     trailMax: function () { return TRAIL_MAX; },
+    /* The two slow fields, for a harness measuring whether the network has a
+       skeleton: conductivity is which tubes are being maintained right now,
+       the scar is where tubes have been. Copies, like trail() — nothing in
+       the game reads either of them back. */
+    cond: function () { return Float32Array.prototype.slice.call(condF); },
+    scar: function () { return Float32Array.prototype.slice.call(scarF); },
     /* sim seconds per real second — the DISH clock, which is itself about
        REAL_X times life. Same path the on-screen control uses, so the button
        label and HUD follow a harness that sets it directly, and fractional
