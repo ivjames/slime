@@ -2311,8 +2311,15 @@ function applyEvent(e, ev) {
            moved down into this slot inherited the flag of the one the wall
            just killed — a stray tip in the middle of the body for the fork
            pool to spend growth on, and a whisker drawn where there is no
-           front, until the next step's frontier test corrected it. */
-        ax[k] = ax[nAgents]; ay[k] = ay[nAgents]; ah[k] = ah[nAgents]; atip[k] = atip[nAgents];
+           front, until the next step's frontier test corrected it.
+
+           And astv with it, for the same reason and with no frontier test to
+           correct it afterwards: the adrift clock is the only per-agent state
+           nothing recomputes, so a survivor that inherits a dead agent's
+           clock is reabsorbed early or late by up to ADRIFT_TIME on the
+           strength of a wall appearing somewhere else in the dish. */
+        ax[k] = ax[nAgents]; ay[k] = ay[nAgents]; ah[k] = ah[nAgents];
+        atip[k] = atip[nAgents]; astv[k] = astv[nAgents];
         continue;
       }
       k++;
@@ -6814,6 +6821,8 @@ function exitReplay() {
     if (FINAL_STATE.slimeF) slimeF.set(FINAL_STATE.slimeF);
     if (FINAL_STATE.knotF) knotF.set(FINAL_STATE.knotF);
     if (FINAL_STATE.traceF) traceF.set(FINAL_STATE.traceF);
+    if (FINAL_STATE.condF) condF.set(FINAL_STATE.condF);
+    if (FINAL_STATE.scarF) scarF.set(FINAL_STATE.scarF);
     nAgents = FINAL_STATE.n;
     fieldDirty = true;
     ax.set(FINAL_STATE.ax); ay.set(FINAL_STATE.ay);
@@ -7515,6 +7524,19 @@ function showResult(won) {
        belonging to the abandoned replay */
     knotF: new Float32Array(knotF),
     traceF: new Float32Array(traceF),
+    /* and the two slow fields, which are part of what the plate IS rather
+       than merely of how it looks: the conductivity is a floor under the
+       trail on every step of diffuseTrail, and the scar is sensed. Restoring
+       the finished dish's trail on top of an abandoned replay's conductivity
+       leaves the exhibit's own field disagreeing with the field that would
+       maintain it — harmless while the verdict is up, since a finished run
+       does not step, and wrong the moment anything reads the plate, which
+       the harness accessors do.
+       flowF is deliberately not here. It is scratch the slow sweep zeroes
+       every eight steps and nothing outside that sweep reads, so it has no
+       more state worth restoring than tmpF does. */
+    condF: new Float32Array(condF),
+    scarF: new Float32Array(scarF),
     n: nAgents,
     ax: ax.slice(0, nAgents), ay: ay.slice(0, nAgents),
     ah: ah.slice(0, nAgents), atip: atip.slice(0, nAgents),
