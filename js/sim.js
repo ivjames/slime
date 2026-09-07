@@ -2245,6 +2245,9 @@ function buildDish(e) {
   resetVeinTemporal();
   trail.fill(0); tmpF.fill(0); foodF.fill(0);
   cueF.fill(0); retF.fill(0); slimeF.fill(0); knotF.fill(0); traceF.fill(0);
+  /* full presence, so a fresh plate draws its inoculum at once rather
+     than fading it in from nothing — see section 9c */
+  attF.fill(1);
   flowF.fill(0); condF.fill(0); scarF.fill(0);
   nodeAt.fill(-1);
   feedAt.fill(-1);
@@ -4304,6 +4307,99 @@ function bridgeSettle() {
   }
 }
 
+/* ------------------------------------------------------------
+   9c. the body gate: what on this plate is still the organism
+   ------------------------------------------------------------
+   A plasmodium is one cell, and the plate has been drawing several. Not
+   because the agents come apart — they mostly do not — but because the trail
+   field does: a tube whose traffic has moved on decays from the middle out,
+   and for the seconds that takes, the far end is a piece of tissue the
+   painter has no reason to doubt. Counted on EXP-01, the field carries sixty
+   to eighty-six disconnected components at any moment, and the conspicuous
+   ones are large. A representative blob of 1119 cells at peak trail 46 held
+   thirty-three agents. It is not a colony. It is the wake of one.
+
+   That is why this is a RENDERER pass and not a simulation rule. The whole
+   of the previous attempt went into the step function — reabsorbing scraps,
+   flooding the body, withdrawing severed trail — and every version of it
+   pulled cytoplasm inward, which on plates with no growth budget before the
+   first flake is paid for directly in search: EXP-01 lost between 6 and 27
+   per cent of its time to solve depending on how hard the rule pulled, and
+   the detached-piece count did not move, because the pieces were never
+   agents to begin with. Nothing here touches a step. The dish is simulated
+   exactly as it was, and the plate stops drawing the parts of the field that
+   are no longer attached to the organism.
+
+   Connectivity is asked of what is DRAWN, after bridging, which is the only
+   question that matches the complaint: a piece the bridge layer has just
+   routed a corridor to is one the player sees joined, and hiding it would be
+   the same bug pointed the other way. And it is settled by MASS rather than
+   by area — a culture that has spread thin over a flake can own more cells
+   than the trunk it came from, and which of them is the organism is a
+   question about how much cytoplasm is there.
+
+   It fades rather than cutting. A neck sitting on the draw threshold flickers
+   across it, and a hard gate would strobe whole limbs; the envelope below
+   borrows the bridge layer's own time constants, so a piece that comes adrift
+   sinks into the agar over about the time its trail takes to go anyway, and
+   one that reattaches comes back at the speed a corridor does. */
+var attF = new Float32Array(NCELL);   // 1 drawn, 0 faded out
+var attQ = new Int32Array(NCELL);
+var attL = new Int32Array(NCELL);
+
+function markDrawn() {
+  var i, k, c, q, x, y, dx, dy, nx, ny;
+  /* what the painter is about to put ink on: body, or a corridor into it */
+  var nl = 0, best = -1, bestMass = -1;
+  attL.fill(-1);
+  var qt = 0;
+  for (i = 0; i < NCELL; i++) {
+    if (attL[i] >= 0 || wallM[i]) continue;
+    var a0 = shpV[i];
+    var drawn = bridge[i] || (a0 + SHARP * (a0 - shpVB[i])) >= BODY_DRAW;
+    if (!drawn) continue;
+    var id = nl++, head = 0, mass = 0;
+    qt = 0; attQ[qt++] = i; attL[i] = id;
+    while (head < qt) {
+      c = attQ[head++];
+      var ac = shpV[c];
+      var tc = ac + SHARP * (ac - shpVB[c]);
+      mass += tc > 0 ? tc : 0;
+      x = c % GW; y = (c / GW) | 0;
+      for (dy = -1; dy <= 1; dy++) {
+        ny = y + dy;
+        if (ny < 0 || ny >= GH) continue;
+        for (dx = -1; dx <= 1; dx++) {
+          if (!dx && !dy) continue;
+          nx = x + dx;
+          if (nx < 0 || nx >= GW) continue;
+          q = ny * GW + nx;
+          if (attL[q] >= 0 || wallM[q]) continue;
+          var aq = shpV[q];
+          if (!(bridge[q] || (aq + SHARP * (aq - shpVB[q])) >= BODY_DRAW)) continue;
+          attL[q] = id; attQ[qt++] = q;
+        }
+      }
+    }
+    if (mass > bestMass) { bestMass = mass; best = id; }
+  }
+  /* Ease every cell toward where it belongs. Agar and the attached body both
+     target full presence, so a cell that has never been anything is already
+     at 1 when tissue arrives on it and draws without a fade-in; only a drawn
+     cell outside the organism is pulled down. A plate with nothing on it yet
+     gates nothing, which is the first second of every run. */
+  var gate = best >= 0;
+  for (i = 0; i < NCELL; i++) {
+    var e = attF[i];
+    if (gate && attL[i] >= 0 && attL[i] !== best) {
+      if (e > 0.004) { e *= brDn; attF[i] = e > 0.004 ? e : 0; }
+      else if (e !== 0) attF[i] = 0;
+    } else if (e < 1) {
+      attF[i] = e + (1 - e) * brUp;
+    }
+  }
+}
+
 function paintField() {
   var d = imgData;
   buildRidge();
@@ -4317,6 +4413,9 @@ function paintField() {
      shpV always has. buildVeins' own call right after finds dt 0 and holds. */
   smoothRidgeField();
   buildBridges();
+  /* ...and then decide which of what the bridge pass just finished
+     joining up is actually the organism. See section 9c. */
+  markDrawn();
   for (var i = 0, p = 0; i < NCELL; i++, p += 4) {
     var r, g, b;
     if (wallM[i]) {
@@ -4347,8 +4446,14 @@ function paintField() {
       /* 0 none, 1 routed, 2 fading — see buildBridges; presence is read only
          inside the branches that need it */
       var br = bridge[i];
-      if (a > 0.004 || br) {
-        var t = a + SHARP * (a - shpVB[i]);
+      /* How much of this cell is still the organism. Applied to the composed
+         ridge value rather than to the finished pixel, so the coverage, the
+         gamma and the inner shadow all derive from one faded surface and a
+         detaching piece thins the way a real one does instead of dimming
+         like a light. See section 9c. */
+      var att = attF[i];
+      if ((a > 0.004 || br) && att > 0.004) {
+        var t = (a + SHARP * (a - shpVB[i])) * att;
         if (t > BODY_T * 0.5 || br) {
           var gi = (t * GAM_SCALE) | 0;
           if (gi < 0) gi = 0; else if (gi >= GAMN) gi = GAMN - 1;
@@ -4973,7 +5078,12 @@ function buildVeins() {
     var row = y * GW;
     for (x = 2; x < GW - 2; x++) {
       i = row + x;
-      var v = shpV[i];
+      /* Faded by the body gate on the same envelope the sheet uses, and for
+         the same reason it has to be here as well as there: the crest lines
+         are drawn from this field independently, so gating only the sheet
+         leaves a detached piece's veins hanging on bare agar — the one thing
+         that would look worse than the blob did. See section 9c. */
+      var v = shpV[i] * attF[i];
       /* Every floor here is two floors: the one a cell must clear to BECOME a
          crest, and the lower one it must fall through to stop being one. In
          between, last rebuild's answer stands.
@@ -8081,6 +8191,10 @@ function init() {
     /* a copy of the trail field, for measuring the network from outside */
     trail: function () { return Float32Array.prototype.slice.call(trail); },
     trailMax: function () { return TRAIL_MAX; },
+    /* the body gate's envelope: 1 where the plate is drawing this cell
+       as the organism, 0 where it has faded a detached piece out. The
+       only honest way to count what a player can SEE. */
+    att: function () { return Float32Array.prototype.slice.call(attF); },
     /* The two slow fields, for a harness measuring whether the network has a
        skeleton: conductivity is which tubes are being maintained right now,
        the scar is where tubes have been. Copies, like trail() — nothing in
