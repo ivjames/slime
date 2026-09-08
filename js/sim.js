@@ -227,7 +227,7 @@ var DT = 1 / 60;                           // fixed sim timestep
    speed a lone thread can be laid, and that is slower by about this factor.
    Every dish was tuned to the fast organism: its grace period, time limit,
    shock schedule and wall events are in dish-seconds, and so are the rates
-   it grows, starves, eats, habituates and takes damage at. Stretching the
+   it starves, eats, habituates and takes damage at. Stretching the
    schedules by PACE and dividing the rates by it puts every dish back where
    it was, measured in the organism's own progress rather than in seconds.
    paceDish() applies it to the dish definitions once at load; the handful
@@ -235,7 +235,13 @@ var DT = 1 / 60;                           // fixed sim timestep
    used. What is NOT scaled is anything per step tied to the organism's own
    motion — trail decay, the trace, conductivity, the adrift clock — since an
    agent still moves the same cells per step; it is the front that is slower,
-   not the cytoplasm. */
+   not the cytoplasm. Growth is not scaled either, and that one is measured
+   rather than argued: a sheet's reach is set by its biomass, not by time, so
+   a dish whose far food is reached by eating the near food first and growing
+   is reached at the speed the culture grows. Dividing growth by PACE doubled
+   the time to win EXP-03 at PACE 2 and left it unwon at 18000 steps at PACE
+   3. The clocks that punish the organism are stretched; the one that feeds
+   it is left alone. */
 var PACE = 1;
 
 /* Motion + trail are the Jones (2010) lattice-forming regime, in grid cells:
@@ -1788,16 +1794,16 @@ var EXPERIMENTS = [
    in section 1. Idempotent by construction only because it runs once, here,
    over the literal above. Times: grace, time limit, reseal, the shock
    schedule, every scripted line and every wall or hazard event. Rates per
-   dish-second: growth and starvation. Per-step probabilities: a dish's own
-   heat damage and the shock's damage, so a shock that lasts PACE times as
-   many steps kills the same share of the culture. */
+   dish-second: starvation, and not growth — see the pace block for why.
+   Per-step probabilities: a dish's own heat damage and the shock's damage,
+   so a shock that lasts PACE times as many steps kills the same share of
+   the culture. */
 function paceDish(e) {
   var k = PACE, i;
   if (k === 1) return;
   if (e.grace) e.grace *= k;
   if (e.timeLimit) e.timeLimit *= k;
   if (e.reseal) e.reseal *= k;
-  if (e.grow) e.grow /= k;
   if (e.starve) e.starve /= k;
   if (e.heatDmg != null) e.heatDmg /= k;
   if (e.shock) {
