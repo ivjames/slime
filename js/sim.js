@@ -242,7 +242,7 @@ var DT = 1 / 60;                           // fixed sim timestep
    the time to win EXP-03 at PACE 2 and left it unwon at 18000 steps at PACE
    3. The clocks that punish the organism are stretched; the one that feeds
    it is left alone. */
-var PACE = 1;
+var PACE = 2;
 
 /* Motion + trail are the Jones (2010) lattice-forming regime, in grid cells:
    a 45 deg rotation toward the better sensor, one cell of travel per step, a
