@@ -2765,7 +2765,17 @@ var KILL_DRAWS = 6;
    first. The cull rate was tuned per dish and is stretched by PACE with the
    rest, so the fraction, not the rate, is what this adds. */
 var RECRUIT_P     = 0.8;   // share of starvation ticks that move an agent to the front
-var RECRUIT_DRAWS = 12;    // draws taken looking for a tip to join
+/* The tips, listed once per step on the first tick that needs them. Tips are
+   one or two per cent of the population, so drawing at random over the whole
+   of it found one about one time in six (measured: 3157 of 5279 attempts
+   came back empty) and the mechanism ran at a third of its stated strength.
+   A list costs one pass over the agents on a step that recruits at all. */
+var recTips = new Int32Array(MAXA);
+var recN = -1;             // -1: not built this step
+function listTips() {
+  recN = 0;
+  for (var i = 0; i < nAgents; i++) if (atip[i]) recTips[recN++] = i;
+}
 
 /* The idlest agent: best-of-K on conductivity, front priced up — the same
    choice killWeakest made, lifted out so retraction and culling pick the
@@ -2788,11 +2798,13 @@ function weakest() {
    could be found or nothing near one would take it, in which case the
    caller culls instead — a body with no front has nothing to feed. */
 function drawFront(k) {
+  if (recN < 0) listTips();
+  if (recN === 0) return false;
   var from = (ay[k] | 0) * GW + (ax[k] | 0);
-  for (var t = 0; t < RECRUIT_DRAWS; t++) {
-    var c = (rnd() * nAgents) | 0;
-    if (c === k || !atip[c]) continue;
-    for (var tries = 0; tries < ADRIFT_TRIES; tries++) {
+  for (var t = 0; t < 4; t++) {
+    var c = recTips[(rnd() * recN) | 0];
+    if (c === k) continue;
+    for (var tries = 0; tries < ADRIFT_DRAWS; tries++) {
       var nx = ax[c] + (rnd() - 0.5) * 2 * ADRIFT_R;
       var ny = ay[c] + (rnd() - 0.5) * 2 * ADRIFT_R;
       if (nx < 1 || ny < 1 || nx >= GW - 1 || ny >= GH - 1) continue;
@@ -3635,6 +3647,7 @@ function step() {
 
   /* --- biomass: fed by engulfed nodes, drained otherwise --- */
   var target = Math.min(S.engulfed * e.sustain, e.cap);
+  recN = -1;   /* the tip list, if any tick below wants it, is this step's */
   if (nAgents < target) {
     S.growAcc += (e.grow * DT);
     while (S.growAcc >= 1 && nAgents < target && nAgents < MAXA) { spawnAgent(); S.growAcc -= 1; }
