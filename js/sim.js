@@ -220,6 +220,23 @@ function markTouch() {
 var GW = 420, GH = 260, NCELL = GW * GH;   // internal grid resolution
 var MAXA = 14000;                          // hard agent ceiling (typed array size)
 var DT = 1 / 60;                           // fixed sim timestep
+/* ---- pace ----
+   How many dish-seconds the organism now takes to do what it used to do in
+   one. The supply test (see TIP_FEED) stops a tip outrunning the network, so
+   the front advances at the speed cytoplasm follows it rather than at the
+   speed a lone thread can be laid, and that is slower by about this factor.
+   Every dish was tuned to the fast organism: its grace period, time limit,
+   shock schedule and wall events are in dish-seconds, and so are the rates
+   it grows, starves, eats, habituates and takes damage at. Stretching the
+   schedules by PACE and dividing the rates by it puts every dish back where
+   it was, measured in the organism's own progress rather than in seconds.
+   paceDish() applies it to the dish definitions once at load; the handful
+   of rates that live outside them are scaled where they are declared or
+   used. What is NOT scaled is anything per step tied to the organism's own
+   motion — trail decay, the trace, conductivity, the adrift clock — since an
+   agent still moves the same cells per step; it is the front that is slower,
+   not the cytoplasm. */
+var PACE = 1;
 
 /* Motion + trail are the Jones (2010) lattice-forming regime, in grid cells:
    a 45 deg rotation toward the better sensor, one cell of travel per step, a
@@ -428,7 +445,7 @@ var CUE_R = 52;
    REGEN is below 1: a full reserve costs more real time to rebuild than it
    does to spend, which is what stops "hold, release, hold" from being the same
    free brush at a stutter. */
-var CUE_CAP   = 26;   // seconds of continuous cueing a full reserve buys
+var CUE_CAP   = 26 * PACE;   // seconds of continuous cueing a full reserve buys (paced)
 var CUE_REGEN = 0.55; // reserve-seconds recovered per second released
 var CUE_RET   = 0.5;  // retract's share of the drain rate
 var CUE_LOW   = 0.22; // fraction below which the meter reads critical
@@ -628,7 +645,7 @@ var ADRIFT_R     = 3.0;   // ...and how far from that cell it may land, cells
 
 var SPENT_FOOD = 0.30; // an engulfed node's remaining pull (a refuge, not a beacon)
 var SPENT_FALL = 34;   // and only over this reach, so spent food cannot outbid fresh
-var MAX_ENGULF_RATE = 1 / 200; // a node takes >= 3.3s to consume however big the front
+var MAX_ENGULF_RATE = 1 / (200 * PACE); // a node takes >= 3.3s x PACE to consume however big the front
 /* Half-rate front, as a fraction of the node's own area. Blocked agents count
    as contact, which roughly doubled the hits a jammed front reports — but
    simply doubling this to compensate is wrong, and measurably so. A cued front
@@ -639,7 +656,7 @@ var MAX_ENGULF_RATE = 1 / 200; // a node takes >= 3.3s to consume however big th
    came out genuinely too quick are corrected by their own `engulf` multiplier
    instead, which is the knob meant for per-dish pacing. */
 var ENGULF_SOFT = 0.42;
-var ENGULF_DECAY = 0.0022; // an abandoned node re-forms: commit, or lose the ground
+var ENGULF_DECAY = 0.0022 / PACE; // an abandoned node re-forms: commit, or lose the ground (paced)
 
 /* ---- the fan on a flake ----
    A plasmodium that reaches food does not file past it. It stops advancing
@@ -1760,6 +1777,36 @@ var EXPERIMENTS = [
     lose: 'One station skinned over while the culture held the other four, and the sixth cycle never came. The dish is logged, the lamp switched off, and the notebook left open to a page that was not quite finished.'
   }
 ];
+
+/* Stretch a dish's schedule and slow its rates by PACE — see the pace block
+   in section 1. Idempotent by construction only because it runs once, here,
+   over the literal above. Times: grace, time limit, reseal, the shock
+   schedule, every scripted line and every wall or hazard event. Rates per
+   dish-second: growth and starvation. Per-step probabilities: a dish's own
+   heat damage and the shock's damage, so a shock that lasts PACE times as
+   many steps kills the same share of the culture. */
+function paceDish(e) {
+  var k = PACE, i;
+  if (k === 1) return;
+  if (e.grace) e.grace *= k;
+  if (e.timeLimit) e.timeLimit *= k;
+  if (e.reseal) e.reseal *= k;
+  if (e.grow) e.grow /= k;
+  if (e.starve) e.starve /= k;
+  if (e.heatDmg != null) e.heatDmg /= k;
+  if (e.shock) {
+    var sh = e.shock;
+    if (sh.first) sh.first *= k;
+    if (sh.period) sh.period *= k;
+    if (sh.warn) sh.warn *= k;
+    if (sh.dur) sh.dur *= k;
+    if (sh.minPeriod) sh.minPeriod *= k;
+    if (sh.dmg) sh.dmg /= k;
+  }
+  if (e.events) for (i = 0; i < e.events.length; i++) if (e.events[i].t) e.events[i].t *= k;
+  if (e.script) for (i = 0; i < e.script.length; i++) if (e.script[i].t) e.script[i].t *= k;
+}
+for (var pdi = 0; pdi < EXPERIMENTS.length; pdi++) paceDish(EXPERIMENTS[pdi]);
 
 /* ------------------------------------------------------------
    3. field + agent storage (all typed, allocated once)
@@ -3083,8 +3130,8 @@ function step() {
      they take the damage, so at the old rate the front was culled at the
      bitter edge before it could learn anything — which is the one outcome
      this dish must not have. */
-  var quinDmg = 0.011 * (1 - S.hab);
-  var heatDmg = (e.heatDmg == null) ? 0.010 : e.heatDmg;
+  var quinDmg = 0.011 / PACE * (1 - S.hab);
+  var heatDmg = (e.heatDmg == null) ? 0.010 / PACE : e.heatDmg;   /* a dish's own is paced in paceDish */
   var inQuin = 0;
 
   /* The stranger's culture, hoisted to three numbers so the test in the loop
@@ -3436,9 +3483,9 @@ function step() {
     if (nAgents > 0 && inQuin > 0) {
       S.quinTime += DT;
       var frac = inQuin / nAgents;
-      S.hab = clamp(S.hab + frac * 1.5 * DT * hrate + 0.020 * DT * hrate, 0, 1);
+      S.hab = clamp(S.hab + (frac * 1.5 * DT * hrate + 0.020 * DT * hrate) / PACE, 0, 1);
     } else {
-      S.hab = clamp(S.hab - 0.012 * DT, 0, 1);
+      S.hab = clamp(S.hab - 0.012 * DT / PACE, 0, 1);
     }
     if (S.hab > S.habPeak) S.habPeak = S.hab;
     if (Math.abs(S.hab - S.habBuilt) > 0.03) rebuildStatic();
@@ -3455,7 +3502,7 @@ function step() {
       logLine('the two fronts meet and do not stop at each other. one tube now, and it remembers things you never did.', true);
     }
     if (S.hab < donor.hab) {
-      S.hab = Math.min(donor.hab, S.hab + 0.10 * DT);
+      S.hab = Math.min(donor.hab, S.hab + 0.10 * DT / PACE);
       if (S.hab > S.habPeak) S.habPeak = S.hab;
       if (Math.abs(S.hab - S.habBuilt) > 0.03) rebuildStatic();
     }
@@ -5961,7 +6008,7 @@ function updateNarration(e) {
   }
   /* ambient mutterings */
   if (S.simT >= S.ambientAt) {
-    S.ambientAt = S.simT + 17 + rnd() * 12;
+    S.ambientAt = S.simT + (17 + rnd() * 12) * PACE;
     if (S.simT > 8) logLine(pick(e.ambient));
   }
 }
@@ -6490,7 +6537,7 @@ var TURBO_MAX = 24;
    It is stated in the controls so a multiplier means something outside the
    dish, and it is read NOWHERE in the simulation — no step, rate, schedule or
    score has ever heard of it. Changing it changes captions and nothing else. */
-var REAL_X = 100;
+var REAL_X = 100 / PACE;
 function realX(t) { return fmtNum(t * REAL_X); }
 
 /* The verdict screen offers three stops rather than all nine. It is a row of
@@ -7218,7 +7265,7 @@ function startRun(i, seed, trace) {
   S.shockActive = false; S.shockWarn = false; S.shocksSurvived = 0;
   S.shockWarned = -1; S.shockCycle = 0;
   S.quinTime = 0; S.slow = 1; S.anticipated = false;
-  S.ambientAt = 14; S.scriptIdx = 0; S.failReason = '';
+  S.ambientAt = 14 * PACE; S.scriptIdx = 0; S.failReason = '';
   /* The active plate, before anything reads it: buildDish stamps from these. */
   S.walls = e.walls; S.hazards = e.hazards; S.eventIdx = 0;
   SLIME_W = e.slimeAvoid || 0;
