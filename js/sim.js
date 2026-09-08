@@ -6840,7 +6840,10 @@ var GHOST_ENT = 9;
    does to the dish, and the last two change how many draws a step takes from
    the generator as well, so every tape recorded under 1 replays into a
    different run. */
-var SIM_V = 2;
+/* 3: the tip-supply gate (TIP_FEED 24 at TIP_BACK), retraction feeding the
+   front each step, and PACE. The first two change what a step does and how
+   many draws it takes; PACE changes every dish's clock. */
+var SIM_V = 3;
 
 function ghostSig() {
   var h = mix32(SIM_V, Math.round(CUE_CAP * 1000), Math.round(CUE_REGEN * 1000));
