@@ -4049,6 +4049,13 @@ var bN = 0;                            // how many of them, as a list in bAux
    halted dish the envelope snaps to the truth, per the verdict rule. */
 var bridgeP = new Uint8Array(NCELL);   // last rebuild's corridors — the hold
 var BRIDGE_MIN_LO = BRIDGE_MIN * 0.72;
+/* What a routed corridor draws at, as coverage out of 255 — see the paint
+   site. Set where a one-cell path reads as a fine vein in the tissue colour
+   rather than as a smudge: GAM's own edge is at full coverage by BODY_T +
+   BODY_SOFT, and 0.80 of that lands a corridor a shade softer than a trunk
+   and a long way above the crossing band where the plate reads as neither
+   tissue nor agar. */
+var BRIDGE_COV = (0.80 * 255) | 0;
 var brenv = new Float32Array(NCELL);   // drawn-coverage presence per cell
 var bFrac = new Uint8Array(NCELL);     // distance from attachment, 0..255
 var brT = 0;                           // S.simT at the last bridge rebuild
@@ -4392,7 +4399,22 @@ function paintField() {
               if (gp > 1) gp = 1;
               var gt = (trail[i] * GAM_SCALE) | 0;
               if (gt < 0) gt = 0; else if (gt >= GAMN) gt = GAMN - 1;
-              vcov = (GAM_LO[gt] * gp) | 0;
+              /* Drawn as TUBE, not in proportion to the trail under it.
+                 The whole reason a corridor exists is that the field cannot
+                 say this cell is connected — so painting it as a function
+                 of that field paints the assertion at the strength of the
+                 thing it is compensating for. Measured on the plate: the
+                 GAM_LO ramp gives a cell held at BRIDGE_MIN_LO about 4%
+                 coverage, live corridors sampled at a third of tube
+                 brightness at the median, and two in five of their cells
+                 could not be told from agar. The organism was connected
+                 and the connections were not drawn — which is the exact
+                 shape of "orphaned chunks" as a player sees them. The floor
+                 is what a corridor draws at; the growth gate still sweeps
+                 it in and retreats it, so nothing here stamps or flashes. */
+              var gcov = GAM_LO[gt];
+              if (gcov < BRIDGE_COV) gcov = BRIDGE_COV;
+              vcov = (gcov * gp) | 0;
             }
           } else {
             vcov = GAM[gi];
@@ -4408,7 +4430,14 @@ function paintField() {
                 if (gp2 > 1) gp2 = 1;
                 var gt2 = (trail[i] * GAM_SCALE) | 0;
                 if (gt2 < 0) gt2 = 0; else if (gt2 >= GAMN) gt2 = GAMN - 1;
-                var fv = (GAM_LO[gt2] * gp2) | 0;
+                /* the same floor, so a corridor retreats from the coverage
+                   it was drawn at rather than dropping to the ramp's value
+                   the instant it stops being routed and fading from there —
+                   which would be the flash this branch exists to prevent,
+                   moved one step later */
+                var gcov2 = GAM_LO[gt2];
+                if (gcov2 < BRIDGE_COV) gcov2 = BRIDGE_COV;
+                var fv = (gcov2 * gp2) | 0;
                 if (fv > vcov) vcov = fv;
               }
             }
