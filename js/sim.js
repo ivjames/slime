@@ -4085,13 +4085,6 @@ var BRIDGE_MIN_LO = BRIDGE_MIN * 0.72;
    four rebuilds after it stops being the chosen route — bounded, and only
    over ground the flood still reaches. */
 var BR_HOLD_N = 4;
-/* What a routed corridor draws at, as coverage out of 255 — see the paint
-   site. Set where a one-cell path reads as a fine vein in the tissue colour
-   rather than as a smudge: GAM's own edge is at full coverage by BODY_T +
-   BODY_SOFT, and 0.80 of that lands a corridor a shade softer than a trunk
-   and a long way above the crossing band where the plate reads as neither
-   tissue nor agar. */
-var BRIDGE_COV = (0.80 * 255) | 0;
 var brenv = new Float32Array(NCELL);   // drawn-coverage presence per cell
 var bFrac = new Uint8Array(NCELL);     // distance from attachment, 0..255
 var brT = 0;                           // S.simT at the last bridge rebuild
@@ -4100,7 +4093,29 @@ var BR_TAU_DN = 0.15;                  // sim-seconds of retreat
 var BR_FRONT = 0.75;                   // envelope fraction spent sweeping
 var BR_FR = BR_FRONT / 255;            // bFrac -> envelope threshold
 var BR_WIN = 1 / (1 - BR_FRONT);       // per-cell fade width at the front
-var BR_DT_CAP = 0.08;                  // per-rebuild clock clamp (see above)
+/* The clamp is what set how fast a corridor could sweep in at time-lapse,
+   and it was set where the joint never painted. At ×24 a rebuild arrives
+   every ~0.167 sim-seconds; clamped to 0.08 the envelope gained 0.305 a
+   rebuild, and a corridor's MEETING cells — bFrac 255, the place two pieces
+   actually join — draw nothing until the envelope passes 0.75 and reach ink
+   at 0.83: five rebuilds, for a corridor that lives two. Classified over 86
+   detached pieces on the canvas, 39% of the cells that invisibly joined
+   them to the body were live corridor with the gate still shut, and a
+   further 11% mid-sweep; body in the crossing band was 1%. So the joint was
+   the one part of a corridor guaranteed not to be drawn, and no coverage
+   floor could touch it (measured: a floor drew a blocky sleeve on the
+   dilated band and left the count where it was).
+
+   At 0.25 the envelope tracks the rebuild interval time-lapse actually
+   runs at, meeting cells reach ink in two rebuilds, and the same
+   checkpoints re-captured showed visible pieces 42 → 18 and their share
+   of ink 4.65% → 3.23%. The clamp does not bind at ×1 — a rebuild there
+   is ~0.03 sim-s, under either value — so nothing about the speed the
+   dish is mostly watched at changes. What it was guarding against, a
+   corridor snapping on in one rebuild at time-lapse, is not what 0.25
+   does: brUp is 0.68 a rebuild, a sweep of two, at a speed where the
+   whole plate moves between frames anyway. */
+var BR_DT_CAP = 0.25;                  // per-rebuild clock clamp
 var brUp = 1, brDn = 0;                // folded per rebuild in buildBridges
 /* The envelope's bookkeeping lives in ONE dedicated sweep in buildBridges,
    not in the paint loop: interleaving brenv updates with the painter's
@@ -4449,22 +4464,7 @@ function paintField() {
               if (gp > 1) gp = 1;
               var gt = (trail[i] * GAM_SCALE) | 0;
               if (gt < 0) gt = 0; else if (gt >= GAMN) gt = GAMN - 1;
-              /* Drawn as TUBE, not in proportion to the trail under it.
-                 The whole reason a corridor exists is that the field cannot
-                 say this cell is connected — so painting it as a function
-                 of that field paints the assertion at the strength of the
-                 thing it is compensating for. Measured on the plate: the
-                 GAM_LO ramp gives a cell held at BRIDGE_MIN_LO about 4%
-                 coverage, live corridors sampled at a third of tube
-                 brightness at the median, and two in five of their cells
-                 could not be told from agar. The organism was connected
-                 and the connections were not drawn — which is the exact
-                 shape of "orphaned chunks" as a player sees them. The floor
-                 is what a corridor draws at; the growth gate still sweeps
-                 it in and retreats it, so nothing here stamps or flashes. */
-              var gcov = GAM_LO[gt];
-              if (gcov < BRIDGE_COV) gcov = BRIDGE_COV;
-              vcov = (gcov * gp) | 0;
+              vcov = (GAM_LO[gt] * gp) | 0;
             }
           } else {
             vcov = GAM[gi];
@@ -4480,14 +4480,7 @@ function paintField() {
                 if (gp2 > 1) gp2 = 1;
                 var gt2 = (trail[i] * GAM_SCALE) | 0;
                 if (gt2 < 0) gt2 = 0; else if (gt2 >= GAMN) gt2 = GAMN - 1;
-                /* the same floor, so a corridor retreats from the coverage
-                   it was drawn at rather than dropping to the ramp's value
-                   the instant it stops being routed and fading from there —
-                   which would be the flash this branch exists to prevent,
-                   moved one step later */
-                var gcov2 = GAM_LO[gt2];
-                if (gcov2 < BRIDGE_COV) gcov2 = BRIDGE_COV;
-                var fv = (gcov2 * gp2) | 0;
+                var fv = (GAM_LO[gt2] * gp2) | 0;
                 if (fv > vcov) vcov = fv;
               }
             }
