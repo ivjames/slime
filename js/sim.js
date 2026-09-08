@@ -285,8 +285,29 @@ var TIP_SPEED   = 0.20;  // a supplied tip's fraction of full speed
    the ones that lead nowhere are starved out — which is the pruning the whole
    game is about, arrived at from the growth rule rather than bolted on. */
 var TIP_BACK = 6.0;      // how far BEHIND a tip its supply is read, cells
-var TIP_FEED = 12.0;     // trail there that counts as a supplied tube
-var TIP_MIN  = 0.25;     // ...and the fraction of it below which this is no tip
+/* The bar a tip must clear, and why it is where it is. The test reads the
+   trail TIP_BACK cells behind the tip and demotes it below TIP_FEED x
+   TIP_MIN. That product was 3.0, and at 3.0 the test cannot fail: a tip lays
+   TIP_LAY x DEPOSIT = 7.2 a step at TIP_SPEED = 0.2 cells a step, which is
+   36 trail per cell, and six cells back is thirty steps ago, where that cell
+   has decayed to about 23. A tip on nothing but its own thread passed by
+   eight times over and was never demoted. It ran until it hit a wall, at
+   twelve cells a second, and the thread behind it went invisible three
+   seconds back — which on the plate is a hair with a bead at the end,
+   drifting away from the body, and then a crescent of residue where it was.
+   The supply test was written to ask whether the NETWORK is feeding the tip
+   and was answering whether this tip had passed here lately.
+
+   At 30 the question is the one intended. A lone thread tops out near 23
+   before the blur takes its share; a tube with cytoplasm following into it
+   sits at 30 to 90. So a tip is a tip while there is a tube behind it, and
+   a tip that has outrun its followers is cytoplasm again — which is the
+   pruning the file keeps saying it wants, arrived at by the tip stopping
+   rather than by anything chasing it. Cold start is fine: the inoculum is
+   a disc that reaches 30 within a second, and a rim tip reads six cells
+   into it. What this costs is exploration speed, and that is measured. */
+var TIP_FEED = 40.0;     // trail there that counts as a supplied tube
+var TIP_MIN  = 0.75;     // ...and the fraction of it below which this is no tip
 /* What a tip lays per STEP, as a multiple of DEPOSIT — not per cell travelled
    like everything else. That exception is the point. Deposit is otherwise
    proportional to distance because trail is material dragged through a cell by
