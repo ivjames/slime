@@ -220,6 +220,29 @@ function markTouch() {
 var GW = 420, GH = 260, NCELL = GW * GH;   // internal grid resolution
 var MAXA = 14000;                          // hard agent ceiling (typed array size)
 var DT = 1 / 60;                           // fixed sim timestep
+/* ---- pace ----
+   How many dish-seconds the organism now takes to do what it used to do in
+   one. The supply test (see TIP_FEED) stops a tip outrunning the network, so
+   the front advances at the speed cytoplasm follows it rather than at the
+   speed a lone thread can be laid, and that is slower by about this factor.
+   Every dish was tuned to the fast organism: its grace period, time limit,
+   shock schedule and wall events are in dish-seconds, and so are the rates
+   it starves, eats, habituates and takes damage at. Stretching the
+   schedules by PACE and dividing the rates by it puts every dish back where
+   it was, measured in the organism's own progress rather than in seconds.
+   paceDish() applies it to the dish definitions once at load; the handful
+   of rates that live outside them are scaled where they are declared or
+   used. What is NOT scaled is anything per step tied to the organism's own
+   motion — trail decay, the trace, conductivity, the adrift clock — since an
+   agent still moves the same cells per step; it is the front that is slower,
+   not the cytoplasm. Growth is not scaled either, and that one is measured
+   rather than argued: a sheet's reach is set by its biomass, not by time, so
+   a dish whose far food is reached by eating the near food first and growing
+   is reached at the speed the culture grows. Dividing growth by PACE doubled
+   the time to win EXP-03 at PACE 2 and left it unwon at 18000 steps at PACE
+   3. The clocks that punish the organism are stretched; the one that feeds
+   it is left alone. */
+var PACE = 2;
 
 /* Motion + trail are the Jones (2010) lattice-forming regime, in grid cells:
    a 45 deg rotation toward the better sensor, one cell of travel per step, a
@@ -285,8 +308,35 @@ var TIP_SPEED   = 0.20;  // a supplied tip's fraction of full speed
    the ones that lead nowhere are starved out — which is the pruning the whole
    game is about, arrived at from the growth rule rather than bolted on. */
 var TIP_BACK = 6.0;      // how far BEHIND a tip its supply is read, cells
-var TIP_FEED = 12.0;     // trail there that counts as a supplied tube
-var TIP_MIN  = 0.25;     // ...and the fraction of it below which this is no tip
+/* The bar a tip must clear, and why it is where it is. The test reads the
+   trail TIP_BACK cells behind the tip and demotes it below TIP_FEED x
+   TIP_MIN. That product was 3.0, and at 3.0 the test cannot fail: a tip lays
+   TIP_LAY x DEPOSIT = 7.2 a step at TIP_SPEED = 0.2 cells a step, which is
+   36 trail per cell, and six cells back is thirty steps ago, where that cell
+   has decayed to about 23. A tip on nothing but its own thread passed by
+   eight times over and was never demoted. It ran until it hit a wall, at
+   twelve cells a second, and the thread behind it went invisible three
+   seconds back — which on the plate is a hair with a bead at the end,
+   drifting away from the body, and then a crescent of residue where it was.
+   The supply test was written to ask whether the NETWORK is feeding the tip
+   and was answering whether this tip had passed here lately.
+
+   At 18 the question is the one intended, and the number was swept rather
+   than reasoned. A lone thread tops out near 23 before the blur takes its
+   share and nearer 15 after it; the interior of a sheet six cells behind
+   its rim sits above 18 wherever cytoplasm is actually following. Measured
+   across 3/15/18/22/26/30 on EXP-01 and EXP-02: from 18 up the organism is
+   ONE component at every sample (deployed: two to thirty-eight fragments)
+   with a hairline share of 0.11 against 0.18. Below 18 the fragments come
+   back. Above 22 something else goes wrong — the inoculum disc has no tips
+   at all for six hundred steps and shrinks, because a dense disc's blocked
+   agents lay nothing and its interior never reaches the bar, so the rim
+   cannot qualify; 30 was first tried here and that is what it did. 18 keeps
+   the disc alive (sixty tips by step 300) at 1.5x the time to the first
+   sixty cells. What it costs beyond that is not speed but REACH, and that
+   is the subject of RECRUIT_P below. */
+var TIP_FEED = 24.0;     // trail there that counts as a supplied tube
+var TIP_MIN  = 0.75;     // ...and the fraction of it below which this is no tip
 /* What a tip lays per STEP, as a multiple of DEPOSIT — not per cell travelled
    like everything else. That exception is the point. Deposit is otherwise
    proportional to distance because trail is material dragged through a cell by
@@ -407,7 +457,7 @@ var CUE_R = 52;
    REGEN is below 1: a full reserve costs more real time to rebuild than it
    does to spend, which is what stops "hold, release, hold" from being the same
    free brush at a stutter. */
-var CUE_CAP   = 26;   // seconds of continuous cueing a full reserve buys
+var CUE_CAP   = 26 * PACE;   // seconds of continuous cueing a full reserve buys (paced)
 var CUE_REGEN = 0.55; // reserve-seconds recovered per second released
 var CUE_RET   = 0.5;  // retract's share of the drain rate
 var CUE_LOW   = 0.22; // fraction below which the meter reads critical
@@ -607,6 +657,11 @@ var ADRIFT_R     = 3.0;   // ...and how far from that cell it may land, cells
 
 var SPENT_FOOD = 0.30; // an engulfed node's remaining pull (a refuge, not a beacon)
 var SPENT_FALL = 34;   // and only over this reach, so spent food cannot outbid fresh
+/* Not paced. Eating is the organism's own flow, like growth: a front in
+   contact with a node consumes it at the speed cytoplasm arrives, and a
+   dish's far food is reached by eating the near food first. Paced, this
+   added 3.3 s x (PACE - 1) per node to every multi-node dish for nothing the
+   dish was asking. */
 var MAX_ENGULF_RATE = 1 / 200; // a node takes >= 3.3s to consume however big the front
 /* Half-rate front, as a fraction of the node's own area. Blocked agents count
    as contact, which roughly doubled the hits a jammed front reports — but
@@ -618,7 +673,7 @@ var MAX_ENGULF_RATE = 1 / 200; // a node takes >= 3.3s to consume however big th
    came out genuinely too quick are corrected by their own `engulf` multiplier
    instead, which is the knob meant for per-dish pacing. */
 var ENGULF_SOFT = 0.42;
-var ENGULF_DECAY = 0.0022; // an abandoned node re-forms: commit, or lose the ground
+var ENGULF_DECAY = 0.0022 / PACE; // an abandoned node re-forms: commit, or lose the ground (paced)
 
 /* ---- the fan on a flake ----
    A plasmodium that reaches food does not file past it. It stops advancing
@@ -1740,6 +1795,44 @@ var EXPERIMENTS = [
   }
 ];
 
+/* Stretch a dish's schedule and slow its rates by PACE — see the pace block
+   in section 1. Idempotent by construction only because it runs once, here,
+   over the literal above. Times: grace, time limit, reseal, the shock
+   schedule, every scripted line and every wall or hazard event. Rates per
+   dish-second: starvation, and not growth — see the pace block for why.
+   Per-step probabilities: a dish's own heat damage and the shock's damage,
+   so a shock that lasts PACE times as many steps kills the same share of
+   the culture. */
+function paceDish(e) {
+  var k = PACE, i;
+  if (k === 1) return;
+  if (e.grace) e.grace *= k;
+  if (e.timeLimit) e.timeLimit *= k;
+  if (e.reseal) e.reseal *= k;
+  if (e.starve) e.starve /= k;
+  if (e.heatDmg != null) e.heatDmg /= k;
+  if (e.shock) {
+    var sh = e.shock;
+    if (sh.first) sh.first *= k;
+    if (sh.period) sh.period *= k;
+    if (sh.warn) sh.warn *= k;
+    if (sh.dur) sh.dur *= k;
+    if (sh.minPeriod) sh.minPeriod *= k;
+    if (sh.dmg) sh.dmg /= k;
+  }
+  if (e.events) for (i = 0; i < e.events.length; i++) if (e.events[i].t) e.events[i].t *= k;
+  /* A chip that quotes a period ("dry shock every ~25 s", "~30s door cycle")
+     quotes the schedule stretched above, so the number moves with it. Only
+     the ~Ns form is a period; counts of cycles in an objective are not. */
+  if (e.chips) for (i = 0; i < e.chips.length; i++) {
+    if (e.chips[i] && typeof e.chips[i][1] === 'string') {
+      e.chips[i][1] = e.chips[i][1].replace(/~(\d+)( ?)s\b/g, function (m, n, sp) { return '~' + (n * k) + sp + 's'; });
+    }
+  }
+  if (e.script) for (i = 0; i < e.script.length; i++) if (e.script[i].t) e.script[i].t *= k;
+}
+for (var pdi = 0; pdi < EXPERIMENTS.length; pdi++) paceDish(EXPERIMENTS[pdi]);
+
 /* ------------------------------------------------------------
    3. field + agent storage (all typed, allocated once)
    ------------------------------------------------------------ */
@@ -2665,6 +2758,93 @@ function drawHome(k, from) {
    deterministic sweep, which would strip one part of the dish bare. */
 var KILL_DRAWS = 6;
 
+/* ---- retraction feeds the front ----
+   A sheet has a reach. Its rim needs cytoplasm along the whole perimeter to
+   keep its tips supplied, and a fixed population can only stretch so far
+   before the rim thins under TIP_FEED and the front stops. Measured at every
+   supply threshold that gives the sheet shape, EXP-01's front stalls near
+   ninety cells with thousands of agents still alive, and its food is at two
+   hundred. The old organism escaped that limit by not being a sheet: a lone
+   thread costs nothing to extend, so it reached food that a front cannot,
+   and every dish was tuned to that.
+
+   A plasmodium reaches distant food as a sheet all the same, and does it by
+   WITHDRAWING: cytoplasm streams out of the interior and into the front,
+   and what it leaves behind is the lattice — the dense margin with the open
+   net behind it that every photograph of the organism shows. Nothing in the
+   step did that. Starvation culled the idlest agent and that was all; the
+   biomass it took was simply gone.
+
+   So every step, RECRUIT_RATE of the idlest agents — lowest conductivity,
+   the cytoplasm the network has least use for — are drawn to the front. The
+   interior thins into veins, the rim is fed, and the front advances on
+   biomass the body was not using. It runs from the first step and has
+   nothing to do with the biomass economy: the first version hung it on the
+   starvation tick, which meant it did not start until the grace period was
+   over and would have started LATER on a dish whose clock had been
+   stretched, and a front that only begins to be fed once the culture is
+   already dying is not foraging. Starvation is untouched — the same cull at
+   the same rate, so a culture that finds nothing still dies exactly as it
+   did. Per step, not per dish-second, because it is the organism's own flow
+   and moves with its cytoplasm rather than with the dish's clock. */
+var RECRUIT_RATE  = 0.5;   // agents drawn to the front per step
+var recAcc = 0;
+/* The tips, listed once per step on the first tick that needs them. Tips are
+   one or two per cent of the population, so drawing at random over the whole
+   of it found one about one time in six (measured: 3157 of 5279 attempts
+   came back empty) and the mechanism ran at a third of its stated strength.
+   A list costs one pass over the agents on a step that recruits at all. */
+var recTips = new Int32Array(MAXA);
+var recN = -1;             // -1: not built this step
+function listTips() {
+  recN = 0;
+  for (var i = 0; i < nAgents; i++) if (atip[i]) recTips[recN++] = i;
+}
+
+/* The idlest agent: best-of-K on conductivity, front priced up — the same
+   choice killWeakest made, lifted out so retraction and culling pick the
+   same cytoplasm. Returns -1 on an empty dish. */
+function weakest() {
+  if (nAgents <= 0) return -1;
+  var k = -1, worst = 1e9;
+  for (var t = 0; t < KILL_DRAWS; t++) {
+    var c = (rnd() * nAgents) | 0;
+    var ci2 = (ay[c] | 0) * GW + (ax[c] | 0);
+    var v = condF[ci2];
+    if (atip[c]) v += 1;
+    if (traceF[ci2] > 0) v += 0.5;
+    if (v < worst) { worst = v; k = c; }
+  }
+  return k;
+}
+
+/* Move agent k to the front: beside a tip, in a free cell. False if no tip
+   could be found or nothing near one would take it, in which case the
+   caller culls instead — a body with no front has nothing to feed. */
+function drawFront(k) {
+  if (recN < 0) listTips();
+  if (recN === 0) return false;
+  var from = (ay[k] | 0) * GW + (ax[k] | 0);
+  for (var t = 0; t < 4; t++) {
+    var c = recTips[(rnd() * recN) | 0];
+    if (c === k) continue;
+    for (var tries = 0; tries < ADRIFT_DRAWS; tries++) {
+      var nx = ax[c] + (rnd() - 0.5) * 2 * ADRIFT_R;
+      var ny = ay[c] + (rnd() - 0.5) * 2 * ADRIFT_R;
+      if (nx < 1 || ny < 1 || nx >= GW - 1 || ny >= GH - 1) continue;
+      var ci = (ny | 0) * GW + (nx | 0);
+      if (wallM[ci] || occ[ci]) continue;
+      if (occ[from]) occ[from]--;
+      occ[ci]++;
+      ax[k] = Math.fround(nx); ay[k] = Math.fround(ny);
+      ah[k] = ah[c];           /* arrives heading the way the front is going */
+      atip[k] = 0; astv[k] = 0;
+      return true;
+    }
+  }
+  return false;
+}
+
 function killWeakest() {
   if (nAgents <= 0) return;
   var k = -1, worst = 1e9;
@@ -3062,8 +3242,8 @@ function step() {
      they take the damage, so at the old rate the front was culled at the
      bitter edge before it could learn anything — which is the one outcome
      this dish must not have. */
-  var quinDmg = 0.011 * (1 - S.hab);
-  var heatDmg = (e.heatDmg == null) ? 0.010 : e.heatDmg;
+  var quinDmg = 0.011 / PACE * (1 - S.hab);
+  var heatDmg = (e.heatDmg == null) ? 0.010 / PACE : e.heatDmg;   /* a dish's own is paced in paceDish */
   var inQuin = 0;
 
   /* The stranger's culture, hoisted to three numbers so the test in the loop
@@ -3415,9 +3595,9 @@ function step() {
     if (nAgents > 0 && inQuin > 0) {
       S.quinTime += DT;
       var frac = inQuin / nAgents;
-      S.hab = clamp(S.hab + frac * 1.5 * DT * hrate + 0.020 * DT * hrate, 0, 1);
+      S.hab = clamp(S.hab + (frac * 1.5 * DT * hrate + 0.020 * DT * hrate) / PACE, 0, 1);
     } else {
-      S.hab = clamp(S.hab - 0.012 * DT, 0, 1);
+      S.hab = clamp(S.hab - 0.012 * DT / PACE, 0, 1);
     }
     if (S.hab > S.habPeak) S.habPeak = S.hab;
     if (Math.abs(S.hab - S.habBuilt) > 0.03) rebuildStatic();
@@ -3434,7 +3614,7 @@ function step() {
       logLine('the two fronts meet and do not stop at each other. one tube now, and it remembers things you never did.', true);
     }
     if (S.hab < donor.hab) {
-      S.hab = Math.min(donor.hab, S.hab + 0.10 * DT);
+      S.hab = Math.min(donor.hab, S.hab + 0.10 * DT / PACE);
       if (S.hab > S.habPeak) S.habPeak = S.hab;
       if (Math.abs(S.hab - S.habBuilt) > 0.03) rebuildStatic();
     }
@@ -3489,6 +3669,16 @@ function step() {
     }
   }
 
+  /* --- retraction feeds the front, every step — see RECRUIT_RATE --- */
+  recN = -1;   /* the tip list, if a draw below wants it, is this step's */
+  recAcc += RECRUIT_RATE;
+  while (recAcc >= 1 && nAgents > 0) {
+    var wk = weakest();
+    if (wk < 0 || !drawFront(wk)) break;   /* no front to feed: nothing moves */
+    recAcc -= 1;
+  }
+  if (recAcc > 4) recAcc = 4;   /* a frontless step does not bank a rush */
+
   /* --- biomass: fed by engulfed nodes, drained otherwise --- */
   var target = Math.min(S.engulfed * e.sustain, e.cap);
   if (nAgents < target) {
@@ -3496,7 +3686,10 @@ function step() {
     while (S.growAcc >= 1 && nAgents < target && nAgents < MAXA) { spawnAgent(); S.growAcc -= 1; }
   } else if (S.simT > e.grace && nAgents > target) {
     S.starveAcc += (e.starve * DT);
-    while (S.starveAcc >= 1 && nAgents > 0) { killWeakest(); S.starveAcc -= 1; }
+    while (S.starveAcc >= 1 && nAgents > 0) {
+      killWeakest();
+      S.starveAcc -= 1;
+    }
   } else {
     S.growAcc = 0; S.starveAcc = 0;
   }
@@ -5940,7 +6133,7 @@ function updateNarration(e) {
   }
   /* ambient mutterings */
   if (S.simT >= S.ambientAt) {
-    S.ambientAt = S.simT + 17 + rnd() * 12;
+    S.ambientAt = S.simT + (17 + rnd() * 12) * PACE;
     if (S.simT > 8) logLine(pick(e.ambient));
   }
 }
@@ -6220,18 +6413,25 @@ function pct(f) { return Math.round(f * 100) + '%'; }
    loads into it unchanged with those fields simply absent. Bumping the key
    would have thrown away every logged run on the site to gain nothing. */
 var SAVE_KEY = 'slime980.v1';
-var save = { v: 2, done: {}, best: {}, score: {}, ghost: {}, daily: null };
+var save = { v: 2, done: {}, best: {}, score: {}, ghost: {}, daily: null, bestV: 0 };
 
 function savedMap(o) { return (o && typeof o === 'object') ? o : {}; }
 
 function loadSave() {
+  /* Best times are clocks, and the clock a run is measured on is SIM_V's: a
+     time set by the organism of another SIM_V is not a time this one can be
+     asked to beat, so the marks come across only when the version matches.
+     Done, score and daily stay — progress is progress, and the score is a
+     ratio a run of either organism can be held to. The ghosts have their
+     own signature and reject themselves. */
+  save.bestV = SIM_V;
   try {
     var raw = window.localStorage.getItem(SAVE_KEY);
     if (!raw) return;
     var o = JSON.parse(raw);
     if (o && typeof o === 'object') {
       save.done  = savedMap(o.done);
-      save.best  = savedMap(o.best);
+      save.best  = (o.bestV === SIM_V) ? savedMap(o.best) : {};
       save.score = savedMap(o.score);
       save.ghost = savedMap(o.ghost);
       save.daily = (o.daily && typeof o.daily === 'object') ? o.daily : null;
@@ -6469,7 +6669,7 @@ var TURBO_MAX = 24;
    It is stated in the controls so a multiplier means something outside the
    dish, and it is read NOWHERE in the simulation — no step, rate, schedule or
    score has ever heard of it. Changing it changes captions and nothing else. */
-var REAL_X = 100;
+var REAL_X = 100 / PACE;
 function realX(t) { return fmtNum(t * REAL_X); }
 
 /* The verdict screen offers three stops rather than all nine. It is a row of
@@ -6666,7 +6866,10 @@ var GHOST_ENT = 9;
    does to the dish, and the last two change how many draws a step takes from
    the generator as well, so every tape recorded under 1 replays into a
    different run. */
-var SIM_V = 2;
+/* 3: the tip-supply gate (TIP_FEED 24 at TIP_BACK), retraction feeding the
+   front each step, and PACE. The first two change what a step does and how
+   many draws it takes; PACE changes every dish's clock. */
+var SIM_V = 3;
 
 function ghostSig() {
   var h = mix32(SIM_V, Math.round(CUE_CAP * 1000), Math.round(CUE_REGEN * 1000));
@@ -6707,7 +6910,10 @@ function ghostSig() {
    constant's problem, because writeSave sheds the largest recording first
    when a browser actually refuses the write, which is precisely the
    pathological tape this cap would otherwise have to guess at. */
-var GHOST_MAX = 700000;
+/* Times PACE: the longest clocked dish is 900 dish-seconds at PACE 1, and the
+   tape is per step, so it grows with the clock — 1,296,016 characters at
+   PACE 2 by the formula above. */
+var GHOST_MAX = 700000 * PACE;
 
 function encodeGhost(t) {
   /* A zero-entry trace is encoded, not refused. A dish CAN be won without the
@@ -7191,13 +7397,13 @@ function startRun(i, seed, trace) {
   S.engulfed = 0;
   S.hab = 0; S.habPeak = 0; S.habBuilt = -1; S.fused = false;
   S.dietP = 0; S.dietC = 0; S.dietDoomedT = 0;
-  S.growAcc = 0; S.starveAcc = 0;
+  S.growAcc = 0; S.starveAcc = 0; recAcc = 0;
   S.shockNext = e.shock ? e.shock.first : 0;
   S.shockPeriod = e.shock ? e.shock.period : 0;
   S.shockActive = false; S.shockWarn = false; S.shocksSurvived = 0;
   S.shockWarned = -1; S.shockCycle = 0;
   S.quinTime = 0; S.slow = 1; S.anticipated = false;
-  S.ambientAt = 14; S.scriptIdx = 0; S.failReason = '';
+  S.ambientAt = 14 * PACE; S.scriptIdx = 0; S.failReason = '';
   /* The active plate, before anything reads it: buildDish stamps from these. */
   S.walls = e.walls; S.hazards = e.hazards; S.eventIdx = 0;
   SLIME_W = e.slimeAvoid || 0;
