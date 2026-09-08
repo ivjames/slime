@@ -4181,13 +4181,13 @@ function buildBridges() {
   } else {
     /* a halted or restored dish shows what it is: corridors at full
        presence, everything else at none — and "corridors" means the ones
-       routed THIS rebuild. The route hold is switched off here (brLive),
-       because with it on a halted plate snapped up to four rebuilds of
-       stale routes to full presence at once, and the held band drew as a
-       blocky sleeve down every thin arm: exactly the texture the coverage
-       floor was removed for, arriving instead through Hold and through
-       every screenshot. The hold exists to stop corridors flickering on a
-       RUNNING plate, which is the only plate that has flicker. */
+       routed THIS rebuild, so the route hold is off here (brLive). This
+       branch runs on a finished, restored or title plate, not under Hold:
+       fieldDirty is set only by step(), and step() does not run while
+       paused, so a held plate is the last running rebuild frozen and
+       nothing here fires for it. What the switch guards is the snapped
+       envelope — with the hold on, a restored plate would put up to four
+       rebuilds of stale routes at full presence in one frame. */
     brUp = 1;
     brDn = 0;
     brLive = false;
