@@ -4117,6 +4117,7 @@ var BR_WIN = 1 / (1 - BR_FRONT);       // per-cell fade width at the front
    whole plate moves between frames anyway. */
 var BR_DT_CAP = 0.25;                  // per-rebuild clock clamp
 var brUp = 1, brDn = 0;                // folded per rebuild in buildBridges
+var brLive = false;                    // ...and whether the route hold applies
 /* The envelope's bookkeeping lives in ONE dedicated sweep in buildBridges,
    not in the paint loop: interleaving brenv updates with the painter's
    innermost branches measured a sixth of the throttled frame budget, where a
@@ -4176,11 +4177,20 @@ function buildBridges() {
     if (dtB > BR_DT_CAP) dtB = BR_DT_CAP;
     brUp = 1 - Math.exp(-dtB / BR_TAU_UP);
     brDn = Math.exp(-dtB / BR_TAU_DN);
+    brLive = true;
   } else {
     /* a halted or restored dish shows what it is: corridors at full
-       presence, everything else at none */
+       presence, everything else at none — and "corridors" means the ones
+       routed THIS rebuild. The route hold is switched off here (brLive),
+       because with it on a halted plate snapped up to four rebuilds of
+       stale routes to full presence at once, and the held band drew as a
+       blocky sleeve down every thin arm: exactly the texture the coverage
+       floor was removed for, arriving instead through Hold and through
+       every screenshot. The hold exists to stop corridors flickering on a
+       RUNNING plate, which is the only plate that has flicker. */
     brUp = 1;
     brDn = 0;
+    brLive = false;
   }
   bridge.fill(0);
   bN = 0;
@@ -4346,8 +4356,8 @@ function bridgeSettle() {
       bridgeP[i] = BR_HOLD_N;
       var bev = brenv[i];
       if (bev < 1) brenv[i] = bev + (1 - bev) * brUp;
-    } else if (bridgeP[i] > 0 && !bStrong[i] && !wallM[i] && bLab[i] >= 0 &&
-               trail[i] >= BRIDGE_MIN_LO) {
+    } else if (brLive && bridgeP[i] > 0 && !bStrong[i] && !wallM[i] &&
+               bLab[i] >= 0 && trail[i] >= BRIDGE_MIN_LO) {
       /* Not chosen this rebuild, but held: still supplied, still reached
          by this rebuild's flood from a piece, and still not body of its
          own — so "routed means connected and drawable" holds for it as
