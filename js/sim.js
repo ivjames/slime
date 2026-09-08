@@ -1821,6 +1821,14 @@ function paceDish(e) {
     if (sh.dmg) sh.dmg /= k;
   }
   if (e.events) for (i = 0; i < e.events.length; i++) if (e.events[i].t) e.events[i].t *= k;
+  /* A chip that quotes a period ("dry shock every ~25 s", "~30s door cycle")
+     quotes the schedule stretched above, so the number moves with it. Only
+     the ~Ns form is a period; counts of cycles in an objective are not. */
+  if (e.chips) for (i = 0; i < e.chips.length; i++) {
+    if (e.chips[i] && typeof e.chips[i][1] === 'string') {
+      e.chips[i][1] = e.chips[i][1].replace(/~(\d+)( ?)s\b/g, function (m, n, sp) { return '~' + (n * k) + sp + 's'; });
+    }
+  }
   if (e.script) for (i = 0; i < e.script.length; i++) if (e.script[i].t) e.script[i].t *= k;
 }
 for (var pdi = 0; pdi < EXPERIMENTS.length; pdi++) paceDish(EXPERIMENTS[pdi]);
@@ -6405,18 +6413,25 @@ function pct(f) { return Math.round(f * 100) + '%'; }
    loads into it unchanged with those fields simply absent. Bumping the key
    would have thrown away every logged run on the site to gain nothing. */
 var SAVE_KEY = 'slime980.v1';
-var save = { v: 2, done: {}, best: {}, score: {}, ghost: {}, daily: null };
+var save = { v: 2, done: {}, best: {}, score: {}, ghost: {}, daily: null, bestV: 0 };
 
 function savedMap(o) { return (o && typeof o === 'object') ? o : {}; }
 
 function loadSave() {
+  /* Best times are clocks, and the clock a run is measured on is SIM_V's: a
+     time set by the organism of another SIM_V is not a time this one can be
+     asked to beat, so the marks come across only when the version matches.
+     Done, score and daily stay — progress is progress, and the score is a
+     ratio a run of either organism can be held to. The ghosts have their
+     own signature and reject themselves. */
+  save.bestV = SIM_V;
   try {
     var raw = window.localStorage.getItem(SAVE_KEY);
     if (!raw) return;
     var o = JSON.parse(raw);
     if (o && typeof o === 'object') {
       save.done  = savedMap(o.done);
-      save.best  = savedMap(o.best);
+      save.best  = (o.bestV === SIM_V) ? savedMap(o.best) : {};
       save.score = savedMap(o.score);
       save.ghost = savedMap(o.ghost);
       save.daily = (o.daily && typeof o.daily === 'object') ? o.daily : null;
@@ -6895,7 +6910,10 @@ function ghostSig() {
    constant's problem, because writeSave sheds the largest recording first
    when a browser actually refuses the write, which is precisely the
    pathological tape this cap would otherwise have to guess at. */
-var GHOST_MAX = 700000;
+/* Times PACE: the longest clocked dish is 900 dish-seconds at PACE 1, and the
+   tape is per step, so it grows with the clock — 1,296,016 characters at
+   PACE 2 by the formula above. */
+var GHOST_MAX = 700000 * PACE;
 
 function encodeGhost(t) {
   /* A zero-entry trace is encoded, not refused. A dish CAN be won without the
