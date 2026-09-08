@@ -657,7 +657,12 @@ var ADRIFT_R     = 3.0;   // ...and how far from that cell it may land, cells
 
 var SPENT_FOOD = 0.30; // an engulfed node's remaining pull (a refuge, not a beacon)
 var SPENT_FALL = 34;   // and only over this reach, so spent food cannot outbid fresh
-var MAX_ENGULF_RATE = 1 / (200 * PACE); // a node takes >= 3.3s x PACE to consume however big the front
+/* Not paced. Eating is the organism's own flow, like growth: a front in
+   contact with a node consumes it at the speed cytoplasm arrives, and a
+   dish's far food is reached by eating the near food first. Paced, this
+   added 3.3 s x (PACE - 1) per node to every multi-node dish for nothing the
+   dish was asking. */
+var MAX_ENGULF_RATE = 1 / 200; // a node takes >= 3.3s to consume however big the front
 /* Half-rate front, as a fraction of the node's own area. Blocked agents count
    as contact, which roughly doubled the hits a jammed front reports — but
    simply doubling this to compensate is wrong, and measurably so. A cued front
