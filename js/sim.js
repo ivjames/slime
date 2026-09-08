@@ -2756,15 +2756,20 @@ var KILL_DRAWS = 6;
    step did that. Starvation culled the idlest agent and that was all; the
    biomass it took was simply gone.
 
-   So when the culture is over its target, the idlest agent — lowest
-   conductivity, the cytoplasm the network has least use for — is drawn to
-   the front RECRUIT_P of the time and culled the rest. The interior thins
-   into veins, the rim is fed, and the front advances on biomass the body
-   was not using. Starvation still drains at (1 - RECRUIT_P) of the old rate,
-   so a culture that finds nothing still dies; it just spends itself reaching
-   first. The cull rate was tuned per dish and is stretched by PACE with the
-   rest, so the fraction, not the rate, is what this adds. */
-var RECRUIT_P     = 0.8;   // share of starvation ticks that move an agent to the front
+   So every step, RECRUIT_RATE of the idlest agents — lowest conductivity,
+   the cytoplasm the network has least use for — are drawn to the front. The
+   interior thins into veins, the rim is fed, and the front advances on
+   biomass the body was not using. It runs from the first step and has
+   nothing to do with the biomass economy: the first version hung it on the
+   starvation tick, which meant it did not start until the grace period was
+   over and would have started LATER on a dish whose clock had been
+   stretched, and a front that only begins to be fed once the culture is
+   already dying is not foraging. Starvation is untouched — the same cull at
+   the same rate, so a culture that finds nothing still dies exactly as it
+   did. Per step, not per dish-second, because it is the organism's own flow
+   and moves with its cytoplasm rather than with the dish's clock. */
+var RECRUIT_RATE  = 0.5;   // agents drawn to the front per step
+var recAcc = 0;
 /* The tips, listed once per step on the first tick that needs them. Tips are
    one or two per cent of the population, so drawing at random over the whole
    of it found one about one time in six (measured: 3157 of 5279 attempts
@@ -3645,20 +3650,25 @@ function step() {
     }
   }
 
+  /* --- retraction feeds the front, every step — see RECRUIT_RATE --- */
+  recN = -1;   /* the tip list, if a draw below wants it, is this step's */
+  recAcc += RECRUIT_RATE;
+  while (recAcc >= 1 && nAgents > 0) {
+    var wk = weakest();
+    if (wk < 0 || !drawFront(wk)) break;   /* no front to feed: nothing moves */
+    recAcc -= 1;
+  }
+  if (recAcc > 4) recAcc = 4;   /* a frontless step does not bank a rush */
+
   /* --- biomass: fed by engulfed nodes, drained otherwise --- */
   var target = Math.min(S.engulfed * e.sustain, e.cap);
-  recN = -1;   /* the tip list, if any tick below wants it, is this step's */
   if (nAgents < target) {
     S.growAcc += (e.grow * DT);
     while (S.growAcc >= 1 && nAgents < target && nAgents < MAXA) { spawnAgent(); S.growAcc -= 1; }
   } else if (S.simT > e.grace && nAgents > target) {
     S.starveAcc += (e.starve * DT);
     while (S.starveAcc >= 1 && nAgents > 0) {
-      /* retraction first, culling when there is no front to feed — see
-         RECRUIT_P */
-      var wk = -1;
-      if (rnd() < RECRUIT_P) { wk = weakest(); if (wk >= 0 && !drawFront(wk)) wk = -1; }
-      if (wk < 0) killWeakest();
+      killWeakest();
       S.starveAcc -= 1;
     }
   } else {
@@ -7355,7 +7365,7 @@ function startRun(i, seed, trace) {
   S.engulfed = 0;
   S.hab = 0; S.habPeak = 0; S.habBuilt = -1; S.fused = false;
   S.dietP = 0; S.dietC = 0; S.dietDoomedT = 0;
-  S.growAcc = 0; S.starveAcc = 0;
+  S.growAcc = 0; S.starveAcc = 0; recAcc = 0;
   S.shockNext = e.shock ? e.shock.first : 0;
   S.shockPeriod = e.shock ? e.shock.period : 0;
   S.shockActive = false; S.shockWarn = false; S.shocksSurvived = 0;
