@@ -4192,6 +4192,15 @@ function buildBridges() {
     brDn = 0;
     brLive = false;
   }
+  /* The age a cell must carry for the flood and the dilation below to admit
+     it at BRIDGE_MIN_LO rather than BRIDGE_MIN. Running: any age, which is
+     the hold doing its work upstream of the walk as well as after it. Halted:
+     only a cell routed on the rebuild just gone, which is exactly the 0/1
+     bridgeP the routing read before ages existed — so a finished or restored
+     plate routes what it always routed. Without this the switch above guarded
+     only the settle step, and the flood had already let a route three
+     rebuilds stale qualify at the low bar and hand it to a snapped envelope. */
+  var pAge = brLive ? 1 : BR_HOLD_N;
   bridge.fill(0);
   bN = 0;
 
@@ -4265,7 +4274,7 @@ function buildBridges() {
     if (bInner[c]) {
       for (k = 0; k < 8; k++) {
         q = c + BOFF[k];
-        if (bLab[q] >= 0 || trail[q] < (bridgeP[q] ? BRIDGE_MIN_LO : BRIDGE_MIN)) continue;
+        if (bLab[q] >= 0 || trail[q] < (bridgeP[q] >= pAge ? BRIDGE_MIN_LO : BRIDGE_MIN)) continue;
         bLab[q] = o; bPar[q] = c; bQ[tail++] = q;
       }
     } else {
@@ -4275,7 +4284,7 @@ function buildBridges() {
         nx = x + dx; ny = y + dy;
         if (nx < 0 || ny < 0 || nx >= GW || ny >= GH) continue;
         q = ny * GW + nx;
-        if (bLab[q] >= 0 || trail[q] < (bridgeP[q] ? BRIDGE_MIN_LO : BRIDGE_MIN)) continue;
+        if (bLab[q] >= 0 || trail[q] < (bridgeP[q] >= pAge ? BRIDGE_MIN_LO : BRIDGE_MIN)) continue;
         bLab[q] = o; bPar[q] = c; bQ[tail++] = q;
       }
     }
@@ -4322,7 +4331,7 @@ function buildBridges() {
       for (i = 0; i < 8; i++) {
         q = c + BOFF[i];
         if (!bridge[q] && !bStrong[q] &&
-            trail[q] >= (bridgeP[q] ? BRIDGE_MIN_LO : BRIDGE_MIN)) {
+            trail[q] >= (bridgeP[q] >= pAge ? BRIDGE_MIN_LO : BRIDGE_MIN)) {
           bridge[q] = 1; bFrac[q] = bFrac[c];
         }
       }
@@ -4334,7 +4343,7 @@ function buildBridges() {
         if (nx < 0 || ny < 0 || nx >= GW || ny >= GH) continue;
         q = ny * GW + nx;
         if (!bridge[q] && !bStrong[q] &&
-            trail[q] >= (bridgeP[q] ? BRIDGE_MIN_LO : BRIDGE_MIN)) {
+            trail[q] >= (bridgeP[q] >= pAge ? BRIDGE_MIN_LO : BRIDGE_MIN)) {
           bridge[q] = 1; bFrac[q] = bFrac[c];
         }
       }
