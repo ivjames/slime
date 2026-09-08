@@ -315,15 +315,21 @@ var TIP_BACK = 6.0;      // how far BEHIND a tip its supply is read, cells
    The supply test was written to ask whether the NETWORK is feeding the tip
    and was answering whether this tip had passed here lately.
 
-   At 30 the question is the one intended. A lone thread tops out near 23
-   before the blur takes its share; a tube with cytoplasm following into it
-   sits at 30 to 90. So a tip is a tip while there is a tube behind it, and
-   a tip that has outrun its followers is cytoplasm again — which is the
-   pruning the file keeps saying it wants, arrived at by the tip stopping
-   rather than by anything chasing it. Cold start is fine: the inoculum is
-   a disc that reaches 30 within a second, and a rim tip reads six cells
-   into it. What this costs is exploration speed, and that is measured. */
-var TIP_FEED = 40.0;     // trail there that counts as a supplied tube
+   At 18 the question is the one intended, and the number was swept rather
+   than reasoned. A lone thread tops out near 23 before the blur takes its
+   share and nearer 15 after it; the interior of a sheet six cells behind
+   its rim sits above 18 wherever cytoplasm is actually following. Measured
+   across 3/15/18/22/26/30 on EXP-01 and EXP-02: from 18 up the organism is
+   ONE component at every sample (deployed: two to thirty-eight fragments)
+   with a hairline share of 0.11 against 0.18. Below 18 the fragments come
+   back. Above 22 something else goes wrong — the inoculum disc has no tips
+   at all for six hundred steps and shrinks, because a dense disc's blocked
+   agents lay nothing and its interior never reaches the bar, so the rim
+   cannot qualify; 30 was first tried here and that is what it did. 18 keeps
+   the disc alive (sixty tips by step 300) at 1.5x the time to the first
+   sixty cells. What it costs beyond that is not speed but REACH, and that
+   is the subject of RECRUIT_P below. */
+var TIP_FEED = 24.0;     // trail there that counts as a supplied tube
 var TIP_MIN  = 0.75;     // ...and the fraction of it below which this is no tip
 /* What a tip lays per STEP, as a multiple of DEPOSIT — not per cell travelled
    like everything else. That exception is the point. Deposit is otherwise
@@ -2733,6 +2739,76 @@ function drawHome(k, from) {
    deterministic sweep, which would strip one part of the dish bare. */
 var KILL_DRAWS = 6;
 
+/* ---- retraction feeds the front ----
+   A sheet has a reach. Its rim needs cytoplasm along the whole perimeter to
+   keep its tips supplied, and a fixed population can only stretch so far
+   before the rim thins under TIP_FEED and the front stops. Measured at every
+   supply threshold that gives the sheet shape, EXP-01's front stalls near
+   ninety cells with thousands of agents still alive, and its food is at two
+   hundred. The old organism escaped that limit by not being a sheet: a lone
+   thread costs nothing to extend, so it reached food that a front cannot,
+   and every dish was tuned to that.
+
+   A plasmodium reaches distant food as a sheet all the same, and does it by
+   WITHDRAWING: cytoplasm streams out of the interior and into the front,
+   and what it leaves behind is the lattice — the dense margin with the open
+   net behind it that every photograph of the organism shows. Nothing in the
+   step did that. Starvation culled the idlest agent and that was all; the
+   biomass it took was simply gone.
+
+   So when the culture is over its target, the idlest agent — lowest
+   conductivity, the cytoplasm the network has least use for — is drawn to
+   the front RECRUIT_P of the time and culled the rest. The interior thins
+   into veins, the rim is fed, and the front advances on biomass the body
+   was not using. Starvation still drains at (1 - RECRUIT_P) of the old rate,
+   so a culture that finds nothing still dies; it just spends itself reaching
+   first. The cull rate was tuned per dish and is stretched by PACE with the
+   rest, so the fraction, not the rate, is what this adds. */
+var RECRUIT_P     = 0.8;   // share of starvation ticks that move an agent to the front
+var RECRUIT_DRAWS = 12;    // draws taken looking for a tip to join
+
+/* The idlest agent: best-of-K on conductivity, front priced up — the same
+   choice killWeakest made, lifted out so retraction and culling pick the
+   same cytoplasm. Returns -1 on an empty dish. */
+function weakest() {
+  if (nAgents <= 0) return -1;
+  var k = -1, worst = 1e9;
+  for (var t = 0; t < KILL_DRAWS; t++) {
+    var c = (rnd() * nAgents) | 0;
+    var ci2 = (ay[c] | 0) * GW + (ax[c] | 0);
+    var v = condF[ci2];
+    if (atip[c]) v += 1;
+    if (traceF[ci2] > 0) v += 0.5;
+    if (v < worst) { worst = v; k = c; }
+  }
+  return k;
+}
+
+/* Move agent k to the front: beside a tip, in a free cell. False if no tip
+   could be found or nothing near one would take it, in which case the
+   caller culls instead — a body with no front has nothing to feed. */
+function drawFront(k) {
+  var from = (ay[k] | 0) * GW + (ax[k] | 0);
+  for (var t = 0; t < RECRUIT_DRAWS; t++) {
+    var c = (rnd() * nAgents) | 0;
+    if (c === k || !atip[c]) continue;
+    for (var tries = 0; tries < ADRIFT_TRIES; tries++) {
+      var nx = ax[c] + (rnd() - 0.5) * 2 * ADRIFT_R;
+      var ny = ay[c] + (rnd() - 0.5) * 2 * ADRIFT_R;
+      if (nx < 1 || ny < 1 || nx >= GW - 1 || ny >= GH - 1) continue;
+      var ci = (ny | 0) * GW + (nx | 0);
+      if (wallM[ci] || occ[ci]) continue;
+      if (occ[from]) occ[from]--;
+      occ[ci]++;
+      ax[k] = Math.fround(nx); ay[k] = Math.fround(ny);
+      ah[k] = ah[c];           /* arrives heading the way the front is going */
+      atip[k] = 0; astv[k] = 0;
+      return true;
+    }
+  }
+  return false;
+}
+
 function killWeakest() {
   if (nAgents <= 0) return;
   var k = -1, worst = 1e9;
@@ -3564,7 +3640,14 @@ function step() {
     while (S.growAcc >= 1 && nAgents < target && nAgents < MAXA) { spawnAgent(); S.growAcc -= 1; }
   } else if (S.simT > e.grace && nAgents > target) {
     S.starveAcc += (e.starve * DT);
-    while (S.starveAcc >= 1 && nAgents > 0) { killWeakest(); S.starveAcc -= 1; }
+    while (S.starveAcc >= 1 && nAgents > 0) {
+      /* retraction first, culling when there is no front to feed — see
+         RECRUIT_P */
+      var wk = -1;
+      if (rnd() < RECRUIT_P) { wk = weakest(); if (wk >= 0 && !drawFront(wk)) wk = -1; }
+      if (wk < 0) killWeakest();
+      S.starveAcc -= 1;
+    }
   } else {
     S.growAcc = 0; S.starveAcc = 0;
   }
