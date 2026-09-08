@@ -4049,6 +4049,42 @@ var bN = 0;                            // how many of them, as a list in bAux
    halted dish the envelope snaps to the truth, per the verdict rule. */
 var bridgeP = new Uint8Array(NCELL);   // last rebuild's corridors — the hold
 var BRIDGE_MIN_LO = BRIDGE_MIN * 0.72;
+/* ---- the route hold ----
+   bridgeP is no longer a 0/1 record of last rebuild's corridors but an AGE:
+   set to BR_HOLD_N when a cell is routed, counted down each rebuild it is
+   not, and the cell stays a corridor until it reaches zero — provided it is
+   still supplied, still reached by the flood, and still not body of its
+   own. The flood's threshold test (bridgeP ? BRIDGE_MIN_LO : BRIDGE_MIN)
+   reads it exactly as before, since any nonzero age is truthy.
+
+   Why: the corridors were not living long enough to be seen. Measured on
+   EXP-01 at time-lapse speed, a corridor cell survived a median of TWO
+   rebuilds, 31% only one, and the routed set turned over by a third every
+   rebuild — while the growth gate needs several to sweep a corridor in.
+   So most corridor cells sat mid-sweep or past the front at any instant,
+   painting little or nothing, and the plate showed pieces the router had
+   in fact joined. Painting them brighter could not fix that: a cell the
+   gate has not reached draws nothing at any floor.
+
+   The churn is not the trail's doing, which is what the LO threshold was
+   built to hold against. Rerun with both inputs frozen the routing is
+   deterministic — zero drops — and with the trail frozen but the drawn
+   pieces allowed to move it reproduces 92–95% of the real churn. A piece's
+   rim gains and loses cells at BODY_DRAW every rebuild, that changes the
+   order in which the multi-source flood discovers cells, and a one-cell
+   shift in discovery moves the parent chain behind every meeting sideways
+   by a cell: 70% of dropped corridor cells were still supplied and still
+   reached, just no longer on the chain the walk happened to take. The
+   hysteresis held which cells QUALIFY and never which PATH is chosen.
+
+   Holding membership for a few rebuilds is the smallest change that
+   answers that: a chain that shifts a cell and shifts back never leaves
+   state 1. Four covers 78% of the lifetimes measured at time-lapse speed
+   (two thirds of a sim-second there, an eighth at ×1, where churn was a
+   third as bad to begin with). The cost is that a corridor can stand up to
+   four rebuilds after it stops being the chosen route — bounded, and only
+   over ground the flood still reaches. */
+var BR_HOLD_N = 4;
 /* What a routed corridor draws at, as coverage out of 255 — see the paint
    site. Set where a one-cell path reads as a fine vein in the tissue colour
    rather than as a smudge: GAM's own edge is at full coverage by BODY_T +
@@ -4289,12 +4325,26 @@ function buildBridges() {
    exit, or is cleared at the floor. Walls clear outright: the mold is not on
    the wall. */
 function bridgeSettle() {
-  bridgeP.set(bridge);
   for (var i = 0; i < NCELL; i++) {
     if (bridge[i] === 1) {
+      /* routed this rebuild: the hold is refreshed */
+      bridgeP[i] = BR_HOLD_N;
       var bev = brenv[i];
       if (bev < 1) brenv[i] = bev + (1 - bev) * brUp;
+    } else if (bridgeP[i] > 0 && !bStrong[i] && !wallM[i] && bLab[i] >= 0 &&
+               trail[i] >= BRIDGE_MIN_LO) {
+      /* Not chosen this rebuild, but held: still supplied, still reached
+         by this rebuild's flood from a piece, and still not body of its
+         own — so "routed means connected and drawable" holds for it as
+         firmly as for a cell the walk marked, and it stays a corridor with
+         its envelope rising. bFrac is left alone, so the growth gate keeps
+         the coordinate it had. See BR_HOLD_N for why this exists. */
+      bridgeP[i]--;
+      bridge[i] = 1;
+      var bev2 = brenv[i];
+      if (bev2 < 1) brenv[i] = bev2 + (1 - bev2) * brUp;
     } else {
+      bridgeP[i] = 0;
       var bef = brenv[i];
       if (bef > 0.02) {
         bef *= brDn;
