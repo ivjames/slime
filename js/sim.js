@@ -2532,7 +2532,11 @@ function buildFood() {
     /* A spent node keeps a short, shallow pull: enough to hold the plasmodium
        on it as a refuge, not enough to outbid fresh food further away. Giving
        it the full reach made the gradient point back at food already eaten. */
-    var done = S.nodeDone[ni];
+    /* While a dish settles its flakes are food again at full pull: the
+       organism in the photographs is still feeding on every one of them
+       while it prunes, and that is what anchors the network to the flakes
+       instead of letting it draw up into a clump or two. */
+    var done = S.nodeDone[ni] && S.refineT0 < 0;
     var fall = done ? SPENT_FALL : FALL;
     var amp = done ? SPENT_FOOD : 1;
     var core = done ? 0 : e.nodes[ni].r * 2.4;
@@ -3860,7 +3864,9 @@ function step() {
   /* --- one body: what is off it is drawn back in — see CONN_T --- */
   recN = -1;   /* the tip list, if a draw below wants it, is this step's */
   if (stepsRun % CONN_EVERY === 0) labelMain();
-  if (mainOK) {
+  /* not while settling: a network drawn thin between its flakes is many
+     pieces by the trail test for a moment at a time, and each is the body */
+  if (mainOK && S.refineT0 < 0) {
     var nOff = 0;
     for (i = 0; i < nAgents; i++) if (aoff[i] >= CONN_GRACE) nOff++;
     if (nOff) {
@@ -3934,6 +3940,7 @@ function step() {
   } else if (winMet(e)) {
     if (e.refine) {
       S.refineT0 = S.simT;
+      buildFood();   /* the flakes pull again — see buildFood */
       if (e.refine.text) logLine(e.refine.text, true);
     } else { finish(true, ''); return; }
   }
