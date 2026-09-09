@@ -235,14 +235,16 @@ var DT = 1 / 60;                           // fixed sim timestep
    used. What is NOT scaled is anything per step tied to the organism's own
    motion — trail decay, the trace, conductivity, the adrift clock — since an
    agent still moves the same cells per step; it is the front that is slower,
-   not the cytoplasm. Growth is not scaled either, and that one is measured
+   not the cytoplasm. At 1 now: the front is the filament front again (see
+   TIP_FEED), which is the organism every dish was tuned to, and the scaffold
+   stays for the next time the organism's pace moves. Growth is not scaled either, and that one is measured
    rather than argued: a sheet's reach is set by its biomass, not by time, so
    a dish whose far food is reached by eating the near food first and growing
    is reached at the speed the culture grows. Dividing growth by PACE doubled
    the time to win EXP-03 at PACE 2 and left it unwon at 18000 steps at PACE
    3. The clocks that punish the organism are stretched; the one that feeds
    it is left alone. */
-var PACE = 2;
+var PACE = 1;
 
 /* Motion + trail are the Jones (2010) lattice-forming regime, in grid cells:
    a 45 deg rotation toward the better sensor, one cell of travel per step, a
@@ -308,35 +310,24 @@ var TIP_SPEED   = 0.20;  // a supplied tip's fraction of full speed
    the ones that lead nowhere are starved out — which is the pruning the whole
    game is about, arrived at from the growth rule rather than bolted on. */
 var TIP_BACK = 6.0;      // how far BEHIND a tip its supply is read, cells
-/* The bar a tip must clear, and why it is where it is. The test reads the
-   trail TIP_BACK cells behind the tip and demotes it below TIP_FEED x
-   TIP_MIN. That product was 3.0, and at 3.0 the test cannot fail: a tip lays
-   TIP_LAY x DEPOSIT = 7.2 a step at TIP_SPEED = 0.2 cells a step, which is
-   36 trail per cell, and six cells back is thirty steps ago, where that cell
-   has decayed to about 23. A tip on nothing but its own thread passed by
-   eight times over and was never demoted. It ran until it hit a wall, at
-   twelve cells a second, and the thread behind it went invisible three
-   seconds back — which on the plate is a hair with a bead at the end,
-   drifting away from the body, and then a crescent of residue where it was.
-   The supply test was written to ask whether the NETWORK is feeding the tip
-   and was answering whether this tip had passed here lately.
-
-   At 18 the question is the one intended, and the number was swept rather
-   than reasoned. A lone thread tops out near 23 before the blur takes its
-   share and nearer 15 after it; the interior of a sheet six cells behind
-   its rim sits above 18 wherever cytoplasm is actually following. Measured
-   across 3/15/18/22/26/30 on EXP-01 and EXP-02: from 18 up the organism is
-   ONE component at every sample (deployed: two to thirty-eight fragments)
-   with a hairline share of 0.11 against 0.18. Below 18 the fragments come
-   back. Above 22 something else goes wrong — the inoculum disc has no tips
-   at all for six hundred steps and shrinks, because a dense disc's blocked
-   agents lay nothing and its interior never reaches the bar, so the rim
-   cannot qualify; 30 was first tried here and that is what it did. 18 keeps
-   the disc alive (sixty tips by step 300) at 1.5x the time to the first
-   sixty cells. What it costs beyond that is not speed but REACH, and that
-   is the subject of RECRUIT_P below. */
-var TIP_FEED = 24.0;     // trail there that counts as a supplied tube
-var TIP_MIN  = 0.75;     // ...and the fraction of it below which this is no tip
+/* The bar a tip must clear: the trail TIP_BACK cells behind it, below
+   TIP_FEED x TIP_MIN. The product is 3.0, and at 3.0 a tip on nothing but
+   its own thread passes — it lays 36 trail per cell and six cells back that
+   has decayed to about 23 — so a single agent can run a hairline out across
+   the plate at twelve cells a second. That is the organism: a plasmodium
+   sends out filaments that cost almost nothing, and that is how it reaches
+   food a solid front cannot. Raising the bar to 18 was tried and measured
+   (3/15/18/22/26/30 on EXP-01 and EXP-02): the fragments went away, and so
+   did the reach — a 4500-agent sheet plateaus near 120 cells and EXP-01's
+   flakes are at 200, so the first dish could not be won without a cue.
+   The bar is back where it was. What was wrong with the hairlines was never
+   that they were thin; it was that they BROKE — the thread behind a runner
+   decayed, the runner and whatever followed it became an island, and the
+   island lived on its own trail for good. That is handled where it happens,
+   by the body test (CONN_T), which draws an island back into the body
+   rather than asking the tip to be fat. */
+var TIP_FEED = 12.0;     // trail there that counts as a supplied tube
+var TIP_MIN  = 0.25;     // ...and the fraction of it below which this is no tip
 /* What a tip lays per STEP, as a multiple of DEPOSIT — not per cell travelled
    like everything else. That exception is the point. Deposit is otherwise
    proportional to distance because trail is material dragged through a cell by
@@ -2412,7 +2403,7 @@ function applyEvent(e, ev) {
            clock is reabsorbed early or late by up to ADRIFT_TIME on the
            strength of a wall appearing somewhere else in the dish. */
         ax[k] = ax[nAgents]; ay[k] = ay[nAgents]; ah[k] = ah[nAgents];
-        atip[k] = atip[nAgents]; astv[k] = astv[nAgents];
+        atip[k] = atip[nAgents]; astv[k] = astv[nAgents]; aoff[k] = aoff[nAgents];
         continue;
       }
       k++;
@@ -2566,7 +2557,7 @@ function inoculate(e) {
       occ[si] = 1;
       ah[nAgents] = rnd() * Math.PI * 2;
       atip[nAgents] = 0;
-      astv[nAgents] = 0;
+      astv[nAgents] = 0; aoff[nAgents] = 0;
       nAgents++;
     }
     var w = ci - 1, ee = ci + 1, nn = ci - GW, ss2 = ci + GW;
@@ -2598,7 +2589,7 @@ function emit(nx, ny, nh, tip) {
   if (wallM[ci] || occ[ci]) return false;
   ax[nAgents] = Math.fround(nx); ay[nAgents] = Math.fround(ny); ah[nAgents] = nh;
   atip[nAgents] = tip ? 1 : 0;
-  astv[nAgents] = 0;
+  astv[nAgents] = 0; aoff[nAgents] = 0;
   occ[ci]++;
   nAgents++;
   return true;
@@ -2711,7 +2702,9 @@ function drawHome(k, from) {
   for (var t = 0; t < ADRIFT_DRAWS; t++) {
     var c = (rnd() * nAgents) | 0;
     if (c === k) continue;
-    var v = trail[(ay[c] | 0) * GW + (ax[c] | 0)];
+    var cc = (ay[c] | 0) * GW + (ax[c] | 0);
+    if (mainOK && !mainC[cc]) continue;   /* home is the body, not an island */
+    var v = trail[cc];
     if (v > bestV) { bestV = v; best = c; }
   }
   if (best < 0) return false;
@@ -2725,10 +2718,101 @@ function drawHome(k, from) {
     occ[ci]++;
     ax[k] = Math.fround(nx); ay[k] = Math.fround(ny);
     ah[k] = rnd() * Math.PI * 2;
-    atip[k] = 0; astv[k] = 0;
+    atip[k] = 0; astv[k] = 0; aoff[k] = 0;
     return true;
   }
   return false;
+}
+
+/* --- one body ---------------------------------------------------------
+   A plasmodium is one cell. Every photograph shows filaments, lobes, a
+   lattice, a margin — and no islands: a branch that finds nothing is drawn
+   back through the tube it came out on, and a piece that is cut off dies
+   or is a different organism. The step had no idea of this. An island of
+   agents stands on its own trail, its trail feeds its own tips, and it
+   lives for good; the plate filled with crescents and beads that were once
+   the far end of a hairline whose near end had decayed.
+
+   So every CONN_EVERY steps the trail field is labelled into 8-connected
+   pieces of tube (trail >= CONN_T, not wall), and the piece holding the
+   most cytoplasm is the body. An agent that is not a tip and has been off
+   the body for CONN_GRACE labellings is drawn back into it — beside a tip
+   if there is one, so the biomass a dead end tied up goes to the front,
+   else beside the nearest tube. A tip off the body is left alone: it is a
+   runner, and runners are the reach. Demoting them was measured (EXP-01,
+   seed 12345): reach at step 2400 fell from 188 cells to 137 and the dish
+   was not won at 7200 where the runners-free version wins at 4693, against
+   the deployed 4471 — with islands at zero either way. What the body test
+   takes back is what a runner LEAVES: the followers on a thread that has
+   decayed behind them, the beads and crescents, never the runner itself. The draw is rate-limited (REAB_BASE a step plus a
+   share of what is off), so an island dissolves over a second or two and
+   a large lobe that loses its connection retreats over several rather
+   than vanishing, and it keeps its trail where it was, which is what the
+   scar and trace fields then fade: a branch withdrawn, not deleted.
+
+   CONN_T is low on purpose. A hairline is the organism — a followed thread
+   carries a few units of trail for tens of cells, a lone runner's thread
+   holds 2 for about thirty cells behind it before it falls away — so 2.0
+   keeps every filament that is still a filament and breaks exactly the
+   ones that have already broken. ADRIFT_T (18) is a different question,
+   whether an agent is standing ON tube, and stays what it is.
+
+   mainOK guards the cold start and a body that has genuinely split in two:
+   with less than half the cytoplasm in the largest piece there is no body
+   to draw into, and nothing is drawn. Labelling is a BFS over the grid
+   every CONN_EVERY steps, so a step pays about a tenth of a pass. */
+var CONN_EVERY = 10;    // steps between labellings
+var CONN_T     = 2.0;   // trail that counts as tube for connectivity
+/* Six seconds, not two. A bead in a corridor is often the stalled train of
+   a runner that turned, and the next runner through picks it up and lays
+   the vein over it — the deployed build got through EXP-06 and EXP-10 that
+   way. At two seconds the beads were gone before that happened: EXP-10
+   unwon at 12000 on two seeds against deployed wins near 10000, EXP-06
+   1.4x slower. At six, EXP-10 9592/9829 against 9795/10182 and EXP-06
+   7547/8755 against 7626/6376, with islands of five or more agents at 0 to
+   3 per sample on EXP-01 and each gone within the six seconds. */
+var CONN_GRACE = 36;    // labellings off the body before a scrap is drawn home (6 s)
+var REAB_BASE  = 1;     // scraps drawn home per step, plus one per 256 off
+var mainC   = new Uint8Array(NCELL);
+var connLab = new Int32Array(NCELL);
+var connQ   = new Int32Array(NCELL);
+var aoff    = new Uint16Array(MAXA);   // labellings this agent has spent off the body
+var mainOK  = false;
+var reabCursor = 0;
+
+function labelMain() {
+  var i, lab = 0, bestLab = 0, bestOcc = 0;
+  for (i = 0; i < NCELL; i++) connLab[i] = 0;
+  for (var s = 0; s < NCELL; s++) {
+    if (connLab[s] || wallM[s] || trail[s] < CONN_T) continue;
+    lab++;
+    var head = 0, tail = 0, sum = 0;
+    connQ[tail++] = s; connLab[s] = lab;
+    while (head < tail) {
+      var c = connQ[head++];
+      sum += occ[c];
+      var cx = c % GW, cy = (c / GW) | 0;
+      for (var dy = -1; dy <= 1; dy++) {
+        var ny = cy + dy;
+        if (ny < 0 || ny >= GH) continue;
+        for (var dx = -1; dx <= 1; dx++) {
+          if (!dx && !dy) continue;
+          var nx = cx + dx;
+          if (nx < 0 || nx >= GW) continue;
+          var nc = ny * GW + nx;
+          if (connLab[nc] || wallM[nc] || trail[nc] < CONN_T) continue;
+          connLab[nc] = lab; connQ[tail++] = nc;
+        }
+      }
+    }
+    if (sum > bestOcc) { bestOcc = sum; bestLab = lab; }
+  }
+  for (i = 0; i < NCELL; i++) mainC[i] = (bestLab && connLab[i] === bestLab) ? 1 : 0;
+  mainOK = bestLab > 0 && nAgents > 0 && bestOcc * 2 >= nAgents;
+  for (i = 0; i < nAgents; i++) {
+    if (mainC[(ay[i] | 0) * GW + (ax[i] | 0)]) aoff[i] = 0;
+    else if (aoff[i] < 65535) aoff[i]++;
+  }
 }
 
 /* Starvation, and WHERE it takes the cytoplasm from. Uniformly at random is
@@ -2775,20 +2859,16 @@ var KILL_DRAWS = 6;
    step did that. Starvation culled the idlest agent and that was all; the
    biomass it took was simply gone.
 
-   So every step, RECRUIT_RATE of the idlest agents — lowest conductivity,
-   the cytoplasm the network has least use for — are drawn to the front. The
-   interior thins into veins, the rim is fed, and the front advances on
-   biomass the body was not using. It runs from the first step and has
-   nothing to do with the biomass economy: the first version hung it on the
-   starvation tick, which meant it did not start until the grace period was
-   over and would have started LATER on a dish whose clock had been
-   stretched, and a front that only begins to be fed once the culture is
-   already dying is not foraging. Starvation is untouched — the same cull at
-   the same rate, so a culture that finds nothing still dies exactly as it
-   did. Per step, not per dish-second, because it is the organism's own flow
-   and moves with its cytoplasm rather than with the dish's clock. */
-var RECRUIT_RATE  = 0.5;   // agents drawn to the front per step
-var recAcc = 0;
+   Drawing the idlest agents to the front every step was tried for that and
+   measured: it thinned the interior and extended the reach of a sheet by
+   nothing (p95 107 against 93 with no recruitment and 122 with starvation
+   softened), and worse, it fed tips that were no longer attached to
+   anything — a recruit lands beside a tip and lays the tube the supply test
+   then reads, so an island with a tip on it was kept alive by the very
+   mechanism meant to feed the front. It is gone. What is left of it is
+   drawFront(), which is how a scrap drawn back into the body arrives: beside
+   a tip, heading the way the front is going, so retraction feeds the front
+   in the one case where cytoplasm is actually moving — see CONN_T. */
 /* The tips, listed once per step on the first tick that needs them. Tips are
    one or two per cent of the population, so drawing at random over the whole
    of it found one about one time in six (measured: 3157 of 5279 attempts
@@ -2798,25 +2878,16 @@ var recTips = new Int32Array(MAXA);
 var recN = -1;             // -1: not built this step
 function listTips() {
   recN = 0;
-  for (var i = 0; i < nAgents; i++) if (atip[i]) recTips[recN++] = i;
+  for (var i = 0; i < nAgents; i++) {
+    if (!atip[i]) continue;
+    if (mainOK && !mainC[(ay[i] | 0) * GW + (ax[i] | 0)]) continue;   /* the body's tips */
+    recTips[recN++] = i;
+  }
 }
 
 /* The idlest agent: best-of-K on conductivity, front priced up — the same
    choice killWeakest made, lifted out so retraction and culling pick the
    same cytoplasm. Returns -1 on an empty dish. */
-function weakest() {
-  if (nAgents <= 0) return -1;
-  var k = -1, worst = 1e9;
-  for (var t = 0; t < KILL_DRAWS; t++) {
-    var c = (rnd() * nAgents) | 0;
-    var ci2 = (ay[c] | 0) * GW + (ax[c] | 0);
-    var v = condF[ci2];
-    if (atip[c]) v += 1;
-    if (traceF[ci2] > 0) v += 0.5;
-    if (v < worst) { worst = v; k = c; }
-  }
-  return k;
-}
 
 /* Move agent k to the front: beside a tip, in a free cell. False if no tip
    could be found or nothing near one would take it, in which case the
@@ -2825,9 +2896,23 @@ function drawFront(k) {
   if (recN < 0) listTips();
   if (recN === 0) return false;
   var from = (ay[k] | 0) * GW + (ax[k] | 0);
+  /* The NEAREST of a handful of tips, not any tip. Cytoplasm withdrawn
+     from a dead end flows back down the tube it came out on and into the
+     front nearest it — which in a corridor is the runner still working
+     that corridor, so the vein it is laying is what gets fed. Sent to a
+     random tip anywhere on the plate, the corridor dishes ran slower than
+     the deployed build (EXP-10 unwon at 12000 on two seeds where deployed
+     won near 10000); this is the difference. Best-of-eight is enough to
+     land in the right corridor without being a search. */
   for (var t = 0; t < 4; t++) {
-    var c = recTips[(rnd() * recN) | 0];
-    if (c === k) continue;
+    var c = -1, cd = 1e9;
+    for (var d = 0; d < 8; d++) {
+      var cand = recTips[(rnd() * recN) | 0];
+      if (cand === k) continue;
+      var ddx = ax[cand] - ax[k], ddy = ay[cand] - ay[k], dist = ddx * ddx + ddy * ddy;
+      if (dist < cd) { cd = dist; c = cand; }
+    }
+    if (c < 0) continue;
     for (var tries = 0; tries < ADRIFT_DRAWS; tries++) {
       var nx = ax[c] + (rnd() - 0.5) * 2 * ADRIFT_R;
       var ny = ay[c] + (rnd() - 0.5) * 2 * ADRIFT_R;
@@ -2838,7 +2923,7 @@ function drawFront(k) {
       occ[ci]++;
       ax[k] = Math.fround(nx); ay[k] = Math.fround(ny);
       ah[k] = ah[c];           /* arrives heading the way the front is going */
-      atip[k] = 0; astv[k] = 0;
+      atip[k] = 0; astv[k] = 0; aoff[k] = 0;
       return true;
     }
   }
@@ -2867,7 +2952,7 @@ function killWeakest() {
   if (occ[ci]) occ[ci]--;          /* every removal path decrements */
   nAgents--;
   ax[k] = ax[nAgents]; ay[k] = ay[nAgents]; ah[k] = ah[nAgents];
-  atip[k] = atip[nAgents]; astv[k] = astv[nAgents];
+  atip[k] = atip[nAgents]; astv[k] = astv[nAgents]; aoff[k] = aoff[nAgents];
 }
 
 /* sample the combined desirability field (nearest cell) */
@@ -3546,7 +3631,7 @@ function step() {
       if (occ[cell]) occ[cell]--;
       nAgents--;
       ax[k] = ax[nAgents]; ay[k] = ay[nAgents]; ah[k] = ah[nAgents];
-      atip[k] = atip[nAgents]; astv[k] = astv[nAgents];
+      atip[k] = atip[nAgents]; astv[k] = astv[nAgents]; aoff[k] = aoff[nAgents];
       continue;
     }
 
@@ -3579,7 +3664,7 @@ function step() {
         if (occ[cell]) occ[cell]--;
         nAgents--;
         ax[k] = ax[nAgents]; ay[k] = ay[nAgents]; ah[k] = ah[nAgents];
-        atip[k] = atip[nAgents]; astv[k] = astv[nAgents];
+        atip[k] = atip[nAgents]; astv[k] = astv[nAgents]; aoff[k] = aoff[nAgents];
         continue;
       }
     }
@@ -3669,15 +3754,27 @@ function step() {
     }
   }
 
-  /* --- retraction feeds the front, every step — see RECRUIT_RATE --- */
+  /* --- one body: what is off it is drawn back in — see CONN_T --- */
   recN = -1;   /* the tip list, if a draw below wants it, is this step's */
-  recAcc += RECRUIT_RATE;
-  while (recAcc >= 1 && nAgents > 0) {
-    var wk = weakest();
-    if (wk < 0 || !drawFront(wk)) break;   /* no front to feed: nothing moves */
-    recAcc -= 1;
+  if (stepsRun % CONN_EVERY === 0) labelMain();
+  if (mainOK) {
+    var nOff = 0;
+    for (i = 0; i < nAgents; i++) if (aoff[i] >= CONN_GRACE) nOff++;
+    if (nOff) {
+      var quota = REAB_BASE + (nOff >> 8);
+      /* the cull, a shock or heat may have shrunk the population since the
+         cursor last moved; past the live prefix it would read a dead slot */
+      if (reabCursor >= nAgents) reabCursor = 0;
+      for (var scanned = 0; scanned < nAgents && quota > 0; scanned++) {
+        k = reabCursor;
+        reabCursor = (reabCursor + 1 >= nAgents) ? 0 : reabCursor + 1;
+        if (aoff[k] < CONN_GRACE || atip[k]) continue;   /* a runner is not a scrap */
+        var from = (ay[k] | 0) * GW + (ax[k] | 0);
+        if (drawFront(k) || drawHome(k, from)) { aoff[k] = 0; quota--; }
+        else break;   /* nowhere on the body would take it this step */
+      }
+    }
   }
-  if (recAcc > 4) recAcc = 4;   /* a frontless step does not bank a rush */
 
   /* --- biomass: fed by engulfed nodes, drained otherwise --- */
   var target = Math.min(S.engulfed * e.sustain, e.cap);
@@ -6869,7 +6966,9 @@ var GHOST_ENT = 9;
 /* 3: the tip-supply gate (TIP_FEED 24 at TIP_BACK), retraction feeding the
    front each step, and PACE. The first two change what a step does and how
    many draws it takes; PACE changes every dish's clock. */
-var SIM_V = 3;
+/* 4: the tip bar back at 3.0, the body test and reabsorption, recruitment
+   gone, PACE 1. Each changes what a step does and how many draws it takes. */
+var SIM_V = 4;
 
 function ghostSig() {
   var h = mix32(SIM_V, Math.round(CUE_CAP * 1000), Math.round(CUE_REGEN * 1000));
@@ -7397,7 +7496,7 @@ function startRun(i, seed, trace) {
   S.engulfed = 0;
   S.hab = 0; S.habPeak = 0; S.habBuilt = -1; S.fused = false;
   S.dietP = 0; S.dietC = 0; S.dietDoomedT = 0;
-  S.growAcc = 0; S.starveAcc = 0; recAcc = 0;
+  S.growAcc = 0; S.starveAcc = 0; reabCursor = 0; mainOK = false;
   S.shockNext = e.shock ? e.shock.first : 0;
   S.shockPeriod = e.shock ? e.shock.period : 0;
   S.shockActive = false; S.shockWarn = false; S.shocksSurvived = 0;
@@ -8375,6 +8474,20 @@ function init() {
       return { x: sx / c, y: sy / c };
     },
     grid: function () { return { w: GW, h: GH }; },
+    /* harness only: the body test as it last stood — agents off the body,
+       and how many islands of five or more agents are standing off it */
+    body: function () {
+      var off = 0, i, n = 0, cnt = {};
+      for (i = 0; i < nAgents; i++) {
+        var c = (ay[i] | 0) * GW + (ax[i] | 0);
+        if (mainC[c]) continue;
+        off++;
+        var l = connLab[c];
+        if (l) cnt[l] = (cnt[l] || 0) + 1;
+      }
+      for (var key in cnt) if (cnt[key] >= 5) n++;
+      return { ok: mainOK, off: off, islands: n };
+    },
     /* a copy of the trail field, for measuring the network from outside */
     trail: function () { return Float32Array.prototype.slice.call(trail); },
     trailMax: function () { return TRAIL_MAX; },
