@@ -4346,6 +4346,48 @@ var dirtyFrames = 0;
    Off "for now": the painter is kept whole behind this flag, so the sheet
    can come back as contours later without being written again. */
 var SHEET = false;
+/* What the sheet also carried, and the shapes cannot: the three fields the
+   player and the dish write into the agar itself — the cue and retract
+   haze under the brush, and on a dish that runs on its own mat, the mat.
+   They are what the organism is feeling, so they are drawn from the field
+   and not from a list of where the brush was: one image at the grid's own
+   resolution, no supersampling, painted on a rebuild only while any of
+   them is live (ovlLive — set by the brush and by a mat dish, cleared by
+   a pass that finds nothing) and added onto the plate with 'lighter', which
+   is the painter's own r += … per cell. A haze has no edge to see cells on;
+   the cost is one pass over the cells while a cue is fading and a small
+   drawImage. */
+var ovl = null, ovlCtx = null, ovlImg = null, ovlData = null;
+var ovlLive = false, ovlAny = false;
+
+function paintOverlay() {
+  var d = ovlData, any = false, mat = SLIME_W > 0;
+  for (var i = 0, p = 0; i < NCELL; i++, p += 4) {
+    var r = 0, g = 0, b = 0;
+    if (mat) {
+      var sv = slimeF[i];
+      if (sv > 0.05 && !wallM[i]) {
+        var thin = 1 - (trail[i] > 8 ? 1 : trail[i] * 0.125);
+        if (thin > 0) { r += sv * MAT_ADD[0] * thin; g += sv * MAT_ADD[1] * thin; b += sv * MAT_ADD[2] * thin; }
+      }
+    }
+    var c = cueF[i];
+    if (c > 0.02) { r += c * CUE_ADD[0]; g += c * CUE_ADD[1]; b += c * CUE_ADD[2]; }
+    var q = retF[i];
+    if (q > 0.02) { r += q * RET_ADD[0]; g += q * RET_ADD[1]; b += q * RET_ADD[2]; }
+    if (r > 0 || g > 0 || b > 0) {
+      any = true;
+      d[p] = r > 255 ? 255 : r; d[p + 1] = g > 255 ? 255 : g; d[p + 2] = b > 255 ? 255 : b; d[p + 3] = 255;
+    } else {
+      d[p + 3] = 0;
+    }
+  }
+  ovlAny = any;
+  if (any) ovlCtx.putImageData(ovlImg, 0, 0);
+  /* a mat dish is live for as long as it runs; a cue is live until it has
+     faded to nothing, and the brush relights it */
+  if (!any && !mat) ovlLive = false;
+}
 
 /* ---- the frame clock, on request ----
    Where a frame goes, on the device it is going on. A headless profile on a
@@ -4401,6 +4443,13 @@ function initCanvas() {
   off = document.createElement('canvas');
   octx = off.getContext('2d', { alpha: false });
   allocField();
+  if (!SHEET) {
+    ovl = document.createElement('canvas');
+    ovl.width = GW; ovl.height = GH;
+    ovlCtx = ovl.getContext('2d');
+    ovlImg = ovlCtx.createImageData(GW, GH);
+    ovlData = ovlImg.data;
+  }
   resizeCanvas();
 }
 
@@ -6488,6 +6537,7 @@ function render() {
          the painter, since only the painter drew what it found. */
       buildRidge();
       smoothRidgeField();
+      if (ovlLive) paintOverlay();
     }
     buildVeins();
     if (PROF) { profBuild += performance.now() - pb0; profBuilds++; }
@@ -6498,7 +6548,14 @@ function render() {
   ctx.imageSmoothingEnabled = true;
   if ('imageSmoothingQuality' in ctx) ctx.imageSmoothingQuality = 'high';
   if (SHEET) ctx.drawImage(off, 0, 0, cv.width, cv.height);
-  else paintGround(ctx, cv.width / GW, cv.height / GH);
+  else {
+    paintGround(ctx, cv.width / GW, cv.height / GH);
+    if (ovlAny) {
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.drawImage(ovl, 0, 0, cv.width, cv.height);
+      ctx.globalCompositeOperation = 'source-over';
+    }
+  }
 
   /* The sheet is the field; the veins are lines drawn over it — through the
      veil accumulator, so what leaves the picture fades instead of vanishing.
@@ -6614,6 +6671,7 @@ function render() {
    ------------------------------------------------------------ */
 function paintBrush(gx, gy, mode) {
   fieldDirty = true;
+  ovlLive = true;
   var R = CUE_R, R2 = R * R;
   var x0 = clamp(Math.round(gx - R), 0, GW - 1), x1 = clamp(Math.round(gx + R), 0, GW - 1);
   var y0 = clamp(Math.round(gy - R), 0, GH - 1), y1 = clamp(Math.round(gy + R), 0, GH - 1);
@@ -7766,6 +7824,7 @@ function exitReplay() {
   if (FINAL_STATE) {
     trail.set(FINAL_STATE.trail);
     cueF.set(FINAL_STATE.cueF); retF.set(FINAL_STATE.retF);
+    ovlLive = true;   /* whatever haze the run ended under is drawn with it */
     if (FINAL_STATE.slimeF) slimeF.set(FINAL_STATE.slimeF);
     if (FINAL_STATE.knotF) knotF.set(FINAL_STATE.knotF);
     if (FINAL_STATE.traceF) traceF.set(FINAL_STATE.traceF);
@@ -8058,6 +8117,7 @@ function startRun(i, seed, trace) {
   /* The active plate, before anything reads it: buildDish stamps from these. */
   S.walls = e.walls; S.hazards = e.hazards; S.eventIdx = 0;
   SLIME_W = e.slimeAvoid || 0;
+  ovlLive = SLIME_W > 0; ovlAny = false;   /* a mat dish draws its mat from the first rebuild; a new dish shows none of the old one's haze */
   /* the cue count is bookkeeping, not sim state — a replay inherits the
      recorded run's tally so its observations match the run it is replaying */
   if (trace) S.cues = trace.cues;
