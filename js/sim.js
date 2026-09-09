@@ -3015,35 +3015,32 @@ function pickIdle() {
   return k;
 }
 
-/* Cytoplasm streaming into the trunk. Best-of-K over the population for the
-   agent standing on the most CONDUCTIVE cell — the tube carrying the most
-   traffic — and a free cell beside it. The shape of drawHome with the
-   opposite question: not "where is tube" but "where is the tube that is
-   working". Mass is conserved; what moves is where it stands. */
-function drawTrunk(k) {
-  var best = -1, bestV = -1;
-  for (var t = 0; t < ADRIFT_DRAWS; t++) {
-    var c = (rnd() * nAgents) | 0;
-    if (c === k) continue;
-    var v = condF[(ay[c] | 0) * GW + (ax[c] | 0)];
+/* Cytoplasm streaming into the tube. Best-of-K over random cells for the
+   strongest tube cell nobody is standing on — trail at least TUBE_T, free,
+   not wall — and the idle agent is put there. Aimed at the busiest AGENT it
+   piled the settling culture onto its flakes and let every long tube between
+   them empty and lapse: the plate ended as pads with short bridges between
+   the close pairs and nothing across it. Aimed at the strongest empty tube
+   cell, the tubes the mesh built are kept manned in order of their strength,
+   the weakest lapse first, and a tube between two distant flakes is a tube
+   with cytoplasm in it. Mass is conserved; what moves is where it stands. */
+var TUBE_T = 20;
+function drawTube(k) {
+  var best = -1, bestV = TUBE_T;
+  for (var t = 0; t < 16; t++) {
+    var c = (rnd() * NCELL) | 0;
+    if (wallM[c] || occ[c]) continue;
+    var v = trail[c];
     if (v > bestV) { bestV = v; best = c; }
   }
   if (best < 0) return false;
   var from = (ay[k] | 0) * GW + (ax[k] | 0);
-  for (var tries = 0; tries < 6; tries++) {
-    var nx = ax[best] + (rnd() - 0.5) * 2 * ADRIFT_R;
-    var ny = ay[best] + (rnd() - 0.5) * 2 * ADRIFT_R;
-    if (nx < 1 || ny < 1 || nx >= GW - 1 || ny >= GH - 1) continue;
-    var ci = (ny | 0) * GW + (nx | 0);
-    if (wallM[ci] || occ[ci]) continue;
-    if (occ[from]) occ[from]--;
-    occ[ci]++;
-    ax[k] = Math.fround(nx); ay[k] = Math.fround(ny);
-    ah[k] = ah[best];
-    atip[k] = 0; astv[k] = 0; aoff[k] = 0;
-    return true;
-  }
-  return false;
+  if (occ[from]) occ[from]--;
+  occ[best]++;
+  ax[k] = Math.fround((best % GW) + 0.5); ay[k] = Math.fround(((best / GW) | 0) + 0.5);
+  ah[k] = rnd() * Math.PI * 2;
+  atip[k] = 0; astv[k] = 0; aoff[k] = 0;
+  return true;
 }
 
 /* sample the combined desirability field (nearest cell) */
@@ -3896,14 +3893,14 @@ function step() {
     if (settle < target) target = settle;
     var need = e.cap * (1 - e.refine.keep) / e.refine.dur;
     if (need > starveRate) starveRate = need;
-    /* and the cytoplasm that is kept streams out of the idle tubes into the
-       busy ones, `flow` agents a second: the lapse and the thickening are
-       the same movement, which is what the paper's second day was */
+    /* and the cytoplasm that is kept streams out of wherever it is idle into
+       the strongest tube that has room for it, `flow` agents a second: the
+       lapse and the keeping are the same movement — see drawTube */
     if (e.refine.flow) {
       S.flowAcc += e.refine.flow * DT;
       while (S.flowAcc >= 1 && nAgents > 1) {
         var idl = pickIdle();
-        if (idl < 0 || !drawTrunk(idl)) break;
+        if (idl < 0 || !drawTube(idl)) break;
         S.flowAcc -= 1;
       }
       if (S.flowAcc > 4) S.flowAcc = 4;
