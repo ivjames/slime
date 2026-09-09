@@ -898,7 +898,7 @@ var EXPERIMENTS = [
        keep 0.3 into a few thick tubes between the depots with the plate
        between them bare, which is the paper's second day. The verdict comes
        at the end of the settling, not at the ninth depot. */
-    refine: { dur: 120, keep: 0.2, flow: 60, sense: 3, stream: 250,
+    refine: { dur: 120, keep: 0.3, flow: 60, sense: 3, stream: 250,
               text: 'nine on one network. now the network decides which of itself to keep.' },
     script: [
       { t: 2, hi: true, text: 'nine depots. the dish is the wrong shape for a city and you do not care.' },
