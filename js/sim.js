@@ -4440,6 +4440,8 @@ function initCanvas() {
   vtctx = veilTmp.getContext('2d');
   veilMask = document.createElement('canvas');
   vmctx = veilMask.getContext('2d');
+  ink = document.createElement('canvas');
+  ictx = ink.getContext('2d');
   off = document.createElement('canvas');
   octx = off.getContext('2d', { alpha: false });
   allocField();
@@ -4489,6 +4491,16 @@ function resizeCanvas() {
     if (veilTmp) { veilTmp.width = w; veilTmp.height = h; }
     if (veilMask) { veilMask.width = w; veilMask.height = h; }
     if (veil) { veinFresh = true; veilDn = 0; }
+    /* the ink is the one canvas here that must NOT be wiped by a resize: it
+       is the record, and a record that a window drag empties is not one.
+       Rescaled through a copy, since sizing clears */
+    if (ink && ink.width && ink.height) {
+      var keep = document.createElement('canvas');
+      keep.width = ink.width; keep.height = ink.height;
+      keep.getContext('2d').drawImage(ink, 0, 0);
+      ink.width = w; ink.height = h;
+      ictx.drawImage(keep, 0, 0, w, h);
+    } else if (ink) { ink.width = w; ink.height = h; }
   }
 }
 
@@ -4623,6 +4635,8 @@ function resetVeinTemporal() {
   brT = S.simT;
   envT = S.simT;
   if (vactx && veilAcc.width) vactx.clearRect(0, 0, veilAcc.width, veilAcc.height);
+  if (ictx && ink.width) ictx.clearRect(0, 0, ink.width, ink.height);   /* a new dish has no record */
+  inked.fill(0);
 }
 
 /* The other kind of cut: abandoning a replay, which puts a dish back that this
@@ -4679,6 +4693,11 @@ function restoreVeinTemporal(fs) {
      next rebuild has dt 0 and so takes veilDn 0 — but clear it anyway, so no
      path that skips that rebuild can composite another dish's ghosts */
   if (vactx && veilAcc.width) vactx.clearRect(0, 0, veilAcc.width, veilAcc.height);
+  /* the ink holds the replay's lines over the original's, and there is no
+     way to take one out of the other: the record restarts from the restored
+     network, which the next rebuild inks whole */
+  if (ictx && ink.width) ictx.clearRect(0, 0, ink.width, ink.height);
+  inked.fill(0);
 }
 
 function smoothRidgeField() {
@@ -5602,6 +5621,9 @@ function tintVeins(vein) {
     band.style = 'rgba(' + Math.round(c[0] * band.dim) + ','
                          + Math.round(c[1] * band.dim) + ','
                          + Math.round(c[2] * band.dim) + ',' + band.alpha + ')';
+    band.ink = 'rgb(' + Math.round(c[0] * band.dim) + ','
+                      + Math.round(c[1] * band.dim) + ','
+                      + Math.round(c[2] * band.dim) + ')';
   }
   /* The advancing front, and the one place mixWhite is still right. A tip is
      a filament with no tube behind it yet — film thin enough that the plate
@@ -5711,6 +5733,71 @@ function envBucket(p) { return p < 0.35 ? 0 : (p < 0.75 ? 1 : 2); }
 var veil = null, vlctx = null;        // this rebuild's strokes
 var veilMask = null, vmctx = null;    // the same strokes, opaque — the punch
 var veilAcc = null, vactx = null;     // the running max
+/* ---- the ink ----
+   A vein line, once drawn, is never erased. The veil above fades a line the
+   trace no longer finds, over about half a second, to nothing — which is
+   right for the live picture and wrong for the record: a tube the organism
+   has withdrawn from leaves its track on the agar, the faint vector of the
+   filament that was there, and that is what a lab plate shows at the end.
+   So every fresh stroke of the vein layer is laid a second time, opaque, in
+   its band's own colour, into a canvas that is never decayed and never
+   punched, and that canvas is composited under the live veins at INK_A. A
+   line drawn a thousand times is no brighter than one drawn once, since the
+   strokes are opaque; a line drawn once stays. Cleared only when a dish is
+   built or a replay abandoned, and carried across a resize. Masses and the
+   front's whiskers are not inked: the record is of the lines. Settled tier
+   only, because the trace wobbles by a cell or so from rebuild to rebuild
+   and inking every rebuild's line filled the space between them. The
+   walls are painted OVER the record: a door that closes across a recorded
+   vein, or a wall poured over one, covers it, as it covers the agar. */
+var ink = null, ictx = null;
+var INK_A = 0.30;                     // how much of the live vein's brightness the record keeps
+/* Which cells the record already holds. A settled run is inked only where it
+   passes through a cell not yet inked, and each such piece is stroked into
+   the ink exactly once: that is what makes the record idempotent. Stroking
+   the whole settled path again every rebuild was not, even opaque — the
+   antialiased edge pixels take fractional coverage each time and creep
+   toward full, so a line that merely sat still grew darker and wider by a
+   pixel for having been rebuilt longer. */
+var inked = new Uint8Array(NCELL);
+
+/* Lay this rebuild's settled runs into the record, new cells only. Walks the
+   runs of every band as the bake does; a run's piece through a cell not yet
+   inked is the segment into that point and the segment out of it. */
+function inkFresh(tc, sx, sy) {
+  tc.save();
+  tc.setTransform(sx, 0, 0, sy, 0, 0);
+  tc.lineCap = 'round';
+  tc.lineJoin = 'round';
+  for (var b = VEIN_BANDS.length - 1; b >= 0; b--) {
+    var end = vsegN[b];
+    if (!end) continue;
+    var a3 = vseg[b], r = 0, path = null;
+    while (r < end) {
+      var tk = a3[r++] | 0;
+      var cnt = a3[r++] | 0;
+      if (tk === 2) {
+        for (var q = 0; q < cnt; q++) {
+          var x = a3[r + q * 2], y = a3[r + q * 2 + 1];
+          var ci = (y | 0) * GW + (x | 0);
+          if (ci < 0 || ci >= NCELL || inked[ci]) continue;
+          inked[ci] = 1;
+          if (!path) path = new Path2D();
+          if (q > 0) { path.moveTo(a3[r + q * 2 - 2], a3[r + q * 2 - 1]); path.lineTo(x, y); }
+          if (q + 1 < cnt) { path.moveTo(x, y); path.lineTo(a3[r + q * 2 + 2], a3[r + q * 2 + 3]); }
+          if (cnt === 1) { path.moveTo(x, y); path.lineTo(x + 0.01, y); }
+        }
+      }
+      r += cnt * 2;
+    }
+    if (path) {
+      tc.lineWidth = VEIN_BANDS[b].w;
+      tc.strokeStyle = VEIN_BANDS[b].ink;
+      tc.stroke(path);
+    }
+  }
+  tc.restore();
+}
 var veilTmp = null, vtctx = null;     // scratch for the in-place decay
 var veilDn = 0;                       // decay folded in at the next composite
 var veinFresh = false;                // buildVeins ran since the last composite
@@ -6654,11 +6741,11 @@ var ptr = { down: false, mode: 0, gx: 0, gy: 0 };
 var downIds = [];      /* pointerIds currently on the stage */
 var primaryId = null;  /* the one the brush follows */
 
-/* The ground as shapes: agar, then each hazard and wall as the rectangle the
-   dish declared, in the colours the field painter mixed per cell — the same
+/* The ground as shapes: agar, then each hazard as the rectangle the dish
+   declared, in the colours the field painter mixed per cell — the same
    picture at any size, with no cell to see. Drawn in grid space under the
-   plate's transform, at the masks' own rounding, so a wall sits exactly where
-   the agents find it. */
+   plate's transform, at the masks' own rounding, so a wall (paintWalls, laid
+   after the record) sits exactly where the agents find it. */
 function paintGround(tc, sx, sy) {
   tc.save();
   tc.setTransform(sx, 0, 0, sy, 0, 0);
@@ -6672,8 +6759,16 @@ function paintGround(tc, sx, sy) {
     tc.fillStyle = 'rgb(' + (AGAR[0] + hl[0]) + ',' + (AGAR[1] + hl[1]) + ',' + (AGAR[2] + hl[2]) + ')';
     tc.fillRect(Math.round(hz.x), Math.round(hz.y), Math.round(hz.x + hz.w) - Math.round(hz.x), Math.round(hz.y + hz.h) - Math.round(hz.y));
   }
+  tc.restore();
+}
+
+/* The walls, painted last of the ground so they cover the record too */
+function paintWalls(tc, sx, sy) {
+  if (!S.walls.length) return;
+  tc.save();
+  tc.setTransform(sx, 0, 0, sy, 0, 0);
   tc.fillStyle = 'rgb(46,50,40)';
-  for (i = 0; i < S.walls.length; i++) {
+  for (var i = 0; i < S.walls.length; i++) {
     var w = S.walls[i];
     tc.fillRect(Math.round(w[0]), Math.round(w[1]), Math.round(w[0] + w[2]) - Math.round(w[0]), Math.round(w[1] + w[3]) - Math.round(w[1]));
   }
@@ -6739,6 +6834,7 @@ function render() {
     vlctx.setTransform(1, 0, 0, 1, 0, 0);
     vlctx.clearRect(0, 0, veil.width, veil.height);
     strokeVeins(vlctx, sx, sy, false);
+    inkFresh(ictx, sx, sy);
     vmctx.setTransform(1, 0, 0, 1, 0, 0);
     vmctx.clearRect(0, 0, veilMask.width, veilMask.height);
     strokeVeins(vmctx, sx, sy, true);
@@ -6758,6 +6854,10 @@ function render() {
     vactx.drawImage(veil, 0, 0);
     veinFresh = false;
   }
+  ctx.globalAlpha = INK_A;
+  ctx.drawImage(ink, 0, 0);
+  ctx.globalAlpha = 1;
+  if (!SHEET) paintWalls(ctx, cv.width / GW, cv.height / GH);
   ctx.drawImage(veilAcc, 0, 0);
   strokeWhiskers(ctx, sx, sy);
   ctx.save();
