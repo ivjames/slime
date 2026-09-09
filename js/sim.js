@@ -6079,8 +6079,16 @@ function buildVeins() {
       var lv = shpV[i];
       if (wallM[i]) { lmark[i] = 0; continue; }   /* as in pass one */
       var hold = lmark[i] ? LOBE_HOLD : 1;
+      /* The junction mark is read as the peak over the lattice cell's own
+         two-by-two block, not at the cell alone. A mark is laid where an
+         agent happened to test, and a fork centred on an odd/odd cell puts
+         its 0.70 there and about 0.44 on the four even/even cells around
+         it, which a bar of 0.50 read at the cell alone would miss: a lone
+         fork would be a mass or not by which cell it landed on. */
+      var kf = knotF[i], k2 = knotF[i + 1], k3 = knotF[i + GW], k4 = knotF[i + GW + 1];
+      if (k2 > kf) kf = k2; if (k3 > kf) kf = k3; if (k4 > kf) kf = k4;
       var mass = lv >= BODY_T * hold &&
-                 (knotF[i] > LOBE_MARK * hold ||
+                 (kf > LOBE_MARK * hold ||
                   (lv > LOBE_PAD * hold && feedAt[i] >= 0));
       lmark[i] = mass ? 1 : 0;
       if (!mass) {
