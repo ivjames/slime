@@ -5591,6 +5591,11 @@ var LOBE_OUT  = 0.5;   // how far past the mask's boundary a mass is drawn, cell
    drawn at, or -1. Filled from lseg/lbuck at bake, read by the tracer. */
 var LW = GW >> 1, LH = GH >> 1;
 var ltier = new Int8Array(LW * LH);
+/* ...and which of those cells the tracer will actually draw: a lone cell,
+   or two touching only at a corner, trace as four-point loops that the
+   tracer drops, so a cell is drawn iff a four-neighbour on the lattice is
+   marked too. The joins reach for drawn masses, not for marks. */
+var ldrawn = new Uint8Array(LW * LH);
 var lnext = new Int32Array(LW * LH * 2);  // marching-squares edge links, per trace
 var lseen2 = new Uint8Array(LW * LH * 2);
 /* One slot per cell of the two-cell lattice, so the list cannot overflow and
@@ -5904,6 +5909,7 @@ var JOIN_T = 12;             // cells a chain end reaches through tissue (a stra
 var JOIN_CLIMB = 24;         // cells a chain end climbs the trail
 var JOIN_FLOOR = RIDGE_MIN;  // trail below which there is nothing to climb
 var jcx = new Float32Array(JOIN_CLIMB + 2), jcy = new Float32Array(JOIN_CLIMB + 2);
+var jvis = new Int32Array(NCELL), jstamp = 0;   // cells a climb has stood on, by endpoint
 var EP_CAP = 16384;
 var rchain = new Int32Array(NCELL);
 var epX = new Float32Array(EP_CAP), epY = new Float32Array(EP_CAP);
@@ -6263,6 +6269,13 @@ function buildVeins() {
   for (i = 0; i < lsegN; i++) {
     ltier[(((lseg[i * 2 + 1] - 0.5) | 0) >> 1) * LW + (((lseg[i * 2] - 0.5) | 0) >> 1)] = lbuck[i];
   }
+  ldrawn.fill(0);
+  for (i = 0; i < lsegN; i++) {
+    var ln = (((lseg[i * 2 + 1] - 0.5) | 0) >> 1) * LW + (((lseg[i * 2] - 0.5) | 0) >> 1);
+    var lx0 = ln % LW, ly0 = (ln / LW) | 0;
+    if ((lx0 > 0 && ltier[ln - 1] >= 0) || (lx0 < LW - 1 && ltier[ln + 1] >= 0) ||
+        (ly0 > 0 && ltier[ln - LW] >= 0) || (ly0 < LH - 1 && ltier[ln + LW] >= 0)) ldrawn[ln] = 1;
+  }
 
   /* --- pass two: walk each ridge from end to end into a polyline ---
      Emitting one short segment per ridge cell instead — which is the obvious
@@ -6408,7 +6421,7 @@ function buildVeins() {
         if (shpV[cj] >= BODY_T) {
           tissue = true;
           /* a drawn mass under this cell is the body, reached */
-          if (ltier[(jiy >> 1) * LW + (jix >> 1)] >= 0) { mass = cj; break; }
+          if (ldrawn[(jiy >> 1) * LW + (jix >> 1)]) { mass = cj; break; }
         }
       }
       if (blocked) break;
@@ -6417,9 +6430,19 @@ function buildVeins() {
     }
     if (hit < 0 && mass < 0) {
       /* the climb */
-      var cx0 = Math.round(ex), cy0 = Math.round(ey);
+      /* the endpoint's own cell: a crest point is its cell's centre plus a
+         sub-cell offset, so the containing cell is the floor, not the
+         nearest integer, which for a centred crest is the cell beyond */
+      var cx0 = ex | 0, cy0 = ey | 0;
       if (cx0 < 1 || cy0 < 1 || cx0 >= GW - 1 || cy0 >= GH - 1) continue;
       var cc = cy0 * GW + cx0, cv = shpV[cc], nc = 0;
+      if (wallM[cc]) continue;
+      /* cells this climb has stood on, stamped per endpoint so nothing is
+         cleared between them: with the level tolerance the cell just left
+         is often the highest neighbour, and a walk allowed back onto it
+         would rock between two cells until its steps ran out */
+      jstamp++;
+      jvis[cc] = jstamp;
       for (var st = 0; st < JOIN_CLIMB && hit < 0 && mass < 0; st++) {
         var best = -1, bv = cv * 0.90;   /* rising, or near enough level: a thread's root is a shallow climb */
         for (var oy = -1; oy <= 1; oy++) for (var ox = -1; ox <= 1; ox++) {
@@ -6427,15 +6450,15 @@ function buildVeins() {
           var nx3 = (cc % GW) + ox, ny3 = ((cc / GW) | 0) + oy;
           if (nx3 < 1 || ny3 < 1 || nx3 >= GW - 1 || ny3 >= GH - 1) continue;
           var nn = ny3 * GW + nx3;
-          if (wallM[nn] || rchain[nn] === own) continue;
+          if (wallM[nn] || rchain[nn] === own || jvis[nn] === jstamp) continue;
           var v3 = shpV[nn];
           if (v3 > bv) { bv = v3; best = nn; }
         }
         if (best < 0 || bv < JOIN_FLOOR) break;
-        cc = best; cv = bv;
+        cc = best; cv = bv; jvis[cc] = jstamp;
         jcx[nc] = (cc % GW) + 0.5; jcy[nc] = ((cc / GW) | 0) + 0.5; nc++;
         if (rchain[cc]) hit = cc;
-        else if (ltier[(((cc / GW) | 0) >> 1) * LW + ((cc % GW) >> 1)] >= 0) mass = cc;
+        else if (ldrawn[(((cc / GW) | 0) >> 1) * LW + ((cc % GW) >> 1)]) mass = cc;
       }
       if (hit < 0 && mass < 0) continue;
       var jb2 = epB[je], ja2 = vseg[jb2], jw2 = vsegN[jb2];
