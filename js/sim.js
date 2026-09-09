@@ -669,7 +669,18 @@ var SCAR_REF  = 25.0;      // trail at which a live tube silences its own scar
 var ADRIFT_T     = 18.0;  // trail below which an agent is not standing on tube
 var ADRIFT_TIME  = 2.5;   // seconds of that before the scrap is drawn home
 var ADRIFT_DRAWS = 8;     // draws taken looking for somewhere to put it
-var ADRIFT_R     = 3.0;   // ...and how far from that cell it may land, cells
+var ADRIFT_R     = 1.5;   // ...and how far from that cell it may land, cells
+/* Cytoplasm stays in the tube. Everything the organism does starts on the
+   line and moves outward from it: a tip leaves the tube, and the tube
+   follows the tip. Nothing else leaves. Ordinary cytoplasm standing on tube
+   that would step onto bare agar is turned instead — the same treatment as
+   a wall — so the mass between two veins is never seeded by an agent that
+   wandered off one and laid trail where it stood, which was what the
+   patches in the holes of the lattice were: a stray, its own puddle, and
+   then a bridge to it. The tube it may step onto is anything at TUBE_LEAVE
+   or more, which a stalk is (STALK_W x 36) and bare agar is not; food is
+   always open, since a pad spreads across its flake before it has trail. */
+var TUBE_LEAVE   = 6.0;   // trail below which a cell is bare agar to a follower
 
 var SPENT_FOOD = 0.30; // an engulfed node's remaining pull (a refuge, not a beacon)
 var SPENT_FALL = 34;   // and only over this reach, so spent food cannot outbid fresh
@@ -2727,7 +2738,9 @@ function thicken() {
   }
   if (best < 0) return false;
   for (var tries = 0; tries < 6; tries++) {
-    if (emit(ax[best] + (rnd() - 0.5) * 8, ay[best] + (rnd() - 0.5) * 8, rnd() * Math.PI * 2, 0)) return true;
+    /* within a cell and a half of the parent, which is on tube: new
+       cytoplasm arrives ON the line, not in the hole beside it */
+    if (emit(ax[best] + (rnd() - 0.5) * 3, ay[best] + (rnd() - 0.5) * 3, rnd() * Math.PI * 2, 0)) return true;
   }
   return false;
 }
@@ -3712,6 +3725,9 @@ function step() {
     if (!blocked) {
       idx = (ny | 0) * GW + (nx | 0);
       if (wallM[idx] || (idx !== oldIdx && occ[idx])) blocked = true;
+      /* and a follower does not step off the tube onto bare agar — TUBE_LEAVE */
+      else if (!tip && idx !== oldIdx && !feeding && trail[oldIdx] >= ADRIFT_T &&
+               trail[idx] < TUBE_LEAVE && feedAt[idx] < 0) blocked = true;
     }
 
     /* Where this agent ends the step, moved or not. A blocked agent used to
@@ -7333,8 +7349,9 @@ var GHOST_ENT = 9;
    gone, PACE 1. Each changes what a step does and how many draws it takes. */
 /* 5: the stalk. It changes the trail under every runner's thread.
    6: settling — a dish with `refine` runs on past its last node.
-   7: the stalk floors at STALK_W, and idle tube is withdrawn from. */
-var SIM_V = 7;
+   7: the stalk floors at STALK_W, and idle tube is withdrawn from.
+   8: followers stay in the tube, and new cytoplasm arrives on it. */
+var SIM_V = 8;
 
 function ghostSig() {
   var h = mix32(SIM_V, Math.round(CUE_CAP * 1000), Math.round(CUE_REGEN * 1000));
