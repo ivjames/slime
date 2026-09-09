@@ -4332,6 +4332,63 @@ var fieldDirty = true;
 var REBUILD_EVERY = 2;
 var dirtyFrames = 0;
 
+/* ---- the sheet, off ----
+   The body used to be drawn twice: once as a field, painted per subpixel
+   into an offscreen image and scaled onto the plate, and once as lines, the
+   veins and lobes traced from the same field and stroked as paths over it.
+   The field was the frame's biggest single cost after the canvas copies —
+   SUP squared subpixels a rebuild, a quarter of the CPU at SUP 3 — and the
+   fat under every filament. With it off, what is drawn is what the organism
+   is: tubes and the swellings at their junctions, on a ground that is agar,
+   walls and hazards as the shapes the dish declares them to be. Pads on
+   flakes show only as the veins that cross them, and a corridor a single
+   cell wide, which the bridge pass drew as coverage, is not drawn at all.
+   Off "for now": the painter is kept whole behind this flag, so the sheet
+   can come back as contours later without being written again. */
+var SHEET = false;
+/* What the sheet also carried, and the shapes cannot: the three fields the
+   player and the dish write into the agar itself — the cue and retract
+   haze under the brush, and on a dish that runs on its own mat, the mat.
+   They are what the organism is feeling, so they are drawn from the field
+   and not from a list of where the brush was: one image at the grid's own
+   resolution, no supersampling, painted on a rebuild only while any of
+   them is live (ovlLive — set by the brush and by a mat dish, cleared by
+   a pass that finds nothing) and added onto the plate with 'lighter', which
+   is the painter's own r += … per cell. A haze has no edge to see cells on;
+   the cost is one pass over the cells while a cue is fading and a small
+   drawImage. */
+var ovl = null, ovlCtx = null, ovlImg = null, ovlData = null;
+var ovlLive = false, ovlAny = false;
+
+function paintOverlay() {
+  var d = ovlData, any = false, mat = SLIME_W > 0;
+  for (var i = 0, p = 0; i < NCELL; i++, p += 4) {
+    var r = 0, g = 0, b = 0;
+    if (mat) {
+      var sv = slimeF[i];
+      if (sv > 0.05 && !wallM[i]) {
+        var thin = 1 - (trail[i] > 8 ? 1 : trail[i] * 0.125);
+        if (thin > 0) { r += sv * MAT_ADD[0] * thin; g += sv * MAT_ADD[1] * thin; b += sv * MAT_ADD[2] * thin; }
+      }
+    }
+    var c = cueF[i];
+    if (c > 0.02) { r += c * CUE_ADD[0]; g += c * CUE_ADD[1]; b += c * CUE_ADD[2]; }
+    var q = retF[i];
+    if (q > 0.02) { r += q * RET_ADD[0]; g += q * RET_ADD[1]; b += q * RET_ADD[2]; }
+    if (r > 0 || g > 0 || b > 0) {
+      any = true;
+      d[p] = r > 255 ? 255 : r; d[p + 1] = g > 255 ? 255 : g; d[p + 2] = b > 255 ? 255 : b; d[p + 3] = 255;
+    } else {
+      d[p + 3] = 0;
+    }
+  }
+  ovlAny = any;
+  if (any) ovlCtx.putImageData(ovlImg, 0, 0);
+  /* a mat dish is live for as long as it runs; a cue is live until it has
+     faded to nothing, and the brush relights it */
+  if (!any && !mat) ovlLive = false;
+}
+
 /* ---- the frame clock, on request ----
    Where a frame goes, on the device it is going on. A headless profile on a
    build box says which half of the work is which THERE — the simulation, the
@@ -4386,11 +4443,19 @@ function initCanvas() {
   off = document.createElement('canvas');
   octx = off.getContext('2d', { alpha: false });
   allocField();
+  if (!SHEET) {
+    ovl = document.createElement('canvas');
+    ovl.width = GW; ovl.height = GH;
+    ovlCtx = ovl.getContext('2d');
+    ovlImg = ovlCtx.createImageData(GW, GH);
+    ovlData = ovlImg.data;
+  }
   resizeCanvas();
 }
 
 /* the field image at the current SUP — see SUP */
 function allocField() {
+  if (!SHEET) return;
   off.width = GW * SUP; off.height = GH * SUP;
   img = octx.createImageData(GW * SUP, GH * SUP);
   imgData = img.data;
@@ -5601,7 +5666,13 @@ var ENV_DN_TAU = 0.18;                // sim-seconds to fall
 /* Three tiers rather than a continuous alpha, because a continuous alpha is a
    Path2D per distinct value: the whole layer stays a handful of draw calls. */
 var BUCK_A  = [0.35, 0.68, 1];        // stroke alpha per tier
-var LOBE_RK = [0.50, 0.78, 1];        // disc radius factor per tier: masses scale in
+/* Disc radius per tier. It used to scale in with the tier (0.50, 0.78, 1), a
+   mass growing to size as it arrived; under the sheet that read as growth,
+   and on bare agar it reads as beads — a half-radius disc on the two-cell
+   lattice does not reach its neighbour, so an arriving mass was a string
+   of dots until it settled. The alpha tiers carry the arrival on their own;
+   the discs are full size from the first. */
+var LOBE_RK = [1, 1, 1];
 function envBucket(p) { return p < 0.35 ? 0 : (p < 0.75 ? 1 : 2); }
 
 /* The other half of the envelope, and the half the tiers cannot do: FADE-OUT.
@@ -6425,6 +6496,32 @@ var ptr = { down: false, mode: 0, gx: 0, gy: 0 };
 var downIds = [];      /* pointerIds currently on the stage */
 var primaryId = null;  /* the one the brush follows */
 
+/* The ground as shapes: agar, then each hazard and wall as the rectangle the
+   dish declared, in the colours the field painter mixed per cell — the same
+   picture at any size, with no cell to see. Drawn in grid space under the
+   plate's transform, at the masks' own rounding, so a wall sits exactly where
+   the agents find it. */
+function paintGround(tc, sx, sy) {
+  tc.save();
+  tc.setTransform(sx, 0, 0, sy, 0, 0);
+  tc.fillStyle = 'rgb(' + AGAR[0] + ',' + AGAR[1] + ',' + AGAR[2] + ')';
+  tc.fillRect(0, 0, GW, GH);
+  var i, k;
+  for (i = 0; i < S.hazards.length; i++) {
+    var hz = S.hazards[i];
+    k = hz.type === 'q' ? 2 : (hz.type === 'l' ? 3 : 1);
+    var hl = HAZ_ADD[k];
+    tc.fillStyle = 'rgb(' + (AGAR[0] + hl[0]) + ',' + (AGAR[1] + hl[1]) + ',' + (AGAR[2] + hl[2]) + ')';
+    tc.fillRect(Math.round(hz.x), Math.round(hz.y), Math.round(hz.x + hz.w) - Math.round(hz.x), Math.round(hz.y + hz.h) - Math.round(hz.y));
+  }
+  tc.fillStyle = 'rgb(46,50,40)';
+  for (i = 0; i < S.walls.length; i++) {
+    var w = S.walls[i];
+    tc.fillRect(Math.round(w[0]), Math.round(w[1]), Math.round(w[0] + w[2]) - Math.round(w[0]), Math.round(w[1] + w[3]) - Math.round(w[1]));
+  }
+  tc.restore();
+}
+
 function render() {
   if (!cv || !S.exp) return;
   /* A run that has stopped is not going to get another frame from the loop —
@@ -6433,7 +6530,15 @@ function render() {
      arrives and leaving the verdict over a stale dish. */
   if (fieldDirty && (!S.running || ++dirtyFrames >= REBUILD_EVERY)) {
     var pb0 = PROF ? performance.now() : 0;
-    paintField();
+    if (SHEET) paintField();
+    else {
+      /* the two passes of the painter the vein trace reads: the ridge, and
+         the eased field it is followed on. The bridge pass is skipped with
+         the painter, since only the painter drew what it found. */
+      buildRidge();
+      smoothRidgeField();
+      if (ovlLive) paintOverlay();
+    }
     buildVeins();
     if (PROF) { profBuild += performance.now() - pb0; profBuilds++; }
     dirtyFrames = 0;
@@ -6442,7 +6547,15 @@ function render() {
 
   ctx.imageSmoothingEnabled = true;
   if ('imageSmoothingQuality' in ctx) ctx.imageSmoothingQuality = 'high';
-  ctx.drawImage(off, 0, 0, cv.width, cv.height);
+  if (SHEET) ctx.drawImage(off, 0, 0, cv.width, cv.height);
+  else {
+    paintGround(ctx, cv.width / GW, cv.height / GH);
+    if (ovlAny) {
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.drawImage(ovl, 0, 0, cv.width, cv.height);
+      ctx.globalCompositeOperation = 'source-over';
+    }
+  }
 
   /* The sheet is the field; the veins are lines drawn over it — through the
      veil accumulator, so what leaves the picture fades instead of vanishing.
@@ -6558,6 +6671,7 @@ function render() {
    ------------------------------------------------------------ */
 function paintBrush(gx, gy, mode) {
   fieldDirty = true;
+  ovlLive = true;
   var R = CUE_R, R2 = R * R;
   var x0 = clamp(Math.round(gx - R), 0, GW - 1), x1 = clamp(Math.round(gx + R), 0, GW - 1);
   var y0 = clamp(Math.round(gy - R), 0, GH - 1), y1 = clamp(Math.round(gy + R), 0, GH - 1);
@@ -7710,6 +7824,7 @@ function exitReplay() {
   if (FINAL_STATE) {
     trail.set(FINAL_STATE.trail);
     cueF.set(FINAL_STATE.cueF); retF.set(FINAL_STATE.retF);
+    ovlLive = true;   /* whatever haze the run ended under is drawn with it */
     if (FINAL_STATE.slimeF) slimeF.set(FINAL_STATE.slimeF);
     if (FINAL_STATE.knotF) knotF.set(FINAL_STATE.knotF);
     if (FINAL_STATE.traceF) traceF.set(FINAL_STATE.traceF);
@@ -8002,6 +8117,7 @@ function startRun(i, seed, trace) {
   /* The active plate, before anything reads it: buildDish stamps from these. */
   S.walls = e.walls; S.hazards = e.hazards; S.eventIdx = 0;
   SLIME_W = e.slimeAvoid || 0;
+  ovlLive = SLIME_W > 0; ovlAny = false;   /* a mat dish draws its mat from the first rebuild; a new dish shows none of the old one's haze */
   /* the cue count is bookkeeping, not sim state — a replay inherits the
      recorded run's tally so its observations match the run it is replaying */
   if (trace) S.cues = trace.cues;
