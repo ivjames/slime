@@ -4440,6 +4440,8 @@ function initCanvas() {
   vtctx = veilTmp.getContext('2d');
   veilMask = document.createElement('canvas');
   vmctx = veilMask.getContext('2d');
+  ink = document.createElement('canvas');
+  ictx = ink.getContext('2d');
   off = document.createElement('canvas');
   octx = off.getContext('2d', { alpha: false });
   allocField();
@@ -4489,6 +4491,16 @@ function resizeCanvas() {
     if (veilTmp) { veilTmp.width = w; veilTmp.height = h; }
     if (veilMask) { veilMask.width = w; veilMask.height = h; }
     if (veil) { veinFresh = true; veilDn = 0; }
+    /* the ink is the one canvas here that must NOT be wiped by a resize: it
+       is the record, and a record that a window drag empties is not one.
+       Rescaled through a copy, since sizing clears */
+    if (ink && ink.width && ink.height) {
+      var keep = document.createElement('canvas');
+      keep.width = ink.width; keep.height = ink.height;
+      keep.getContext('2d').drawImage(ink, 0, 0);
+      ink.width = w; ink.height = h;
+      ictx.drawImage(keep, 0, 0, w, h);
+    } else if (ink) { ink.width = w; ink.height = h; }
   }
 }
 
@@ -4623,6 +4635,7 @@ function resetVeinTemporal() {
   brT = S.simT;
   envT = S.simT;
   if (vactx && veilAcc.width) vactx.clearRect(0, 0, veilAcc.width, veilAcc.height);
+  if (ictx && ink.width) ictx.clearRect(0, 0, ink.width, ink.height);   /* a new dish has no record */
 }
 
 /* The other kind of cut: abandoning a replay, which puts a dish back that this
@@ -4679,6 +4692,10 @@ function restoreVeinTemporal(fs) {
      next rebuild has dt 0 and so takes veilDn 0 — but clear it anyway, so no
      path that skips that rebuild can composite another dish's ghosts */
   if (vactx && veilAcc.width) vactx.clearRect(0, 0, veilAcc.width, veilAcc.height);
+  /* the ink holds the replay's lines over the original's, and there is no
+     way to take one out of the other: the record restarts from the restored
+     network, which the next rebuild inks whole */
+  if (ictx && ink.width) ictx.clearRect(0, 0, ink.width, ink.height);
 }
 
 function smoothRidgeField() {
@@ -5602,6 +5619,9 @@ function tintVeins(vein) {
     band.style = 'rgba(' + Math.round(c[0] * band.dim) + ','
                          + Math.round(c[1] * band.dim) + ','
                          + Math.round(c[2] * band.dim) + ',' + band.alpha + ')';
+    band.ink = 'rgb(' + Math.round(c[0] * band.dim) + ','
+                      + Math.round(c[1] * band.dim) + ','
+                      + Math.round(c[2] * band.dim) + ')';
   }
   /* The advancing front, and the one place mixWhite is still right. A tip is
      a filament with no tube behind it yet — film thin enough that the plate
@@ -5711,6 +5731,21 @@ function envBucket(p) { return p < 0.35 ? 0 : (p < 0.75 ? 1 : 2); }
 var veil = null, vlctx = null;        // this rebuild's strokes
 var veilMask = null, vmctx = null;    // the same strokes, opaque — the punch
 var veilAcc = null, vactx = null;     // the running max
+/* ---- the ink ----
+   A vein line, once drawn, is never erased. The veil above fades a line the
+   trace no longer finds, over about half a second, to nothing — which is
+   right for the live picture and wrong for the record: a tube the organism
+   has withdrawn from leaves its track on the agar, the faint vector of the
+   filament that was there, and that is what a lab plate shows at the end.
+   So every fresh stroke of the vein layer is laid a second time, opaque, in
+   its band's own colour, into a canvas that is never decayed and never
+   punched, and that canvas is composited under the live veins at INK_A. A
+   line drawn a thousand times is no brighter than one drawn once, since the
+   strokes are opaque; a line drawn once stays. Cleared only when a dish is
+   built or a replay abandoned, and carried across a resize. Masses and the
+   front's whiskers are not inked: the record is of the lines. */
+var ink = null, ictx = null;
+var INK_A = 0.30;                     // how much of the live vein's brightness the record keeps
 var veilTmp = null, vtctx = null;     // scratch for the in-place decay
 var veilDn = 0;                       // decay folded in at the next composite
 var veinFresh = false;                // buildVeins ran since the last composite
@@ -6378,6 +6413,23 @@ function strokeVeins(tc, sx, sy, mono) {
      stroke's antialiased skirt too. Tier interactions do not matter in a
      mask, so the mono pass stays a single flat sweep. */
   var k, b;
+  if (mono === 'ink') {
+    /* the record: every band, the SETTLED tier only, opaque in the band's
+       colour, no masses. Opaque so that re-inking a line changes nothing.
+       Settled only, because the trace wobbles by a cell or so from rebuild
+       to rebuild and inking every rebuild's line filled the space between
+       them: at thirty rebuilds a second the record of a vein was a smear
+       as wide as its wander. A line that has held its tier for a third of
+       a second was a tube; that is what gets recorded. */
+    for (b = VEIN_BANDS.length - 1; b >= 0; b--) {
+      if (!veinPath[b] || !veinPath[b][2]) continue;
+      ctx.lineWidth = VEIN_BANDS[b].w;
+      ctx.strokeStyle = VEIN_BANDS[b].ink;
+      ctx.stroke(veinPath[b][2]);
+    }
+    ctx.restore();
+    return;
+  }
   if (mono) {
     if (lobeMaskPath) {
       ctx.fillStyle = '#fff';
@@ -6734,6 +6786,8 @@ function render() {
     vlctx.setTransform(1, 0, 0, 1, 0, 0);
     vlctx.clearRect(0, 0, veil.width, veil.height);
     strokeVeins(vlctx, sx, sy, false);
+    ictx.setTransform(1, 0, 0, 1, 0, 0);
+    strokeVeins(ictx, sx, sy, 'ink');
     vmctx.setTransform(1, 0, 0, 1, 0, 0);
     vmctx.clearRect(0, 0, veilMask.width, veilMask.height);
     strokeVeins(vmctx, sx, sy, true);
@@ -6753,6 +6807,9 @@ function render() {
     vactx.drawImage(veil, 0, 0);
     veinFresh = false;
   }
+  ctx.globalAlpha = INK_A;
+  ctx.drawImage(ink, 0, 0);
+  ctx.globalAlpha = 1;
   ctx.drawImage(veilAcc, 0, 0);
   strokeWhiskers(ctx, sx, sy);
   ctx.save();
