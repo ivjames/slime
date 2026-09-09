@@ -5591,6 +5591,11 @@ var LOBE_OUT  = 0.5;   // how far past the mask's boundary a mass is drawn, cell
    drawn at, or -1. Filled from lseg/lbuck at bake, read by the tracer. */
 var LW = GW >> 1, LH = GH >> 1;
 var ltier = new Int8Array(LW * LH);
+/* ...and which of those cells the tracer will actually draw: a lone cell,
+   or two touching only at a corner, trace as four-point loops that the
+   tracer drops, so a cell is drawn iff a four-neighbour on the lattice is
+   marked too. The joins reach for drawn masses, not for marks. */
+var ldrawn = new Uint8Array(LW * LH);
 var lnext = new Int32Array(LW * LH * 2);  // marching-squares edge links, per trace
 var lseen2 = new Uint8Array(LW * LH * 2);
 /* One slot per cell of the two-cell lattice, so the list cannot overflow and
@@ -5882,7 +5887,29 @@ var RIDGE_MINPTS = 5;        // a chain shorter than this is speckle
    that cell's crest, in the end's own band and tier. rchain says which
    chain a cell is on (0 for none, or for a chain dropped as speckle), and
    the endpoint lists are filled as chains are emitted. */
-var JOIN_R = 8;              // cells a chain end reaches, along its tangent
+var JOIN_R = 8;              // cells a chain end reaches, along its tangent, over bare agar
+/* ...and further through TISSUE. A line that starts detached — a hairline
+   hanging in the dark a few cells off the body — is a chain whose inner
+   end sits on the body's plateau: the ridge test finds no ridge on flat
+   tissue, so the walk stopped there, and the tissue itself is no longer
+   drawn. The vein is attached; the picture was not. So through tissue the
+   reach is longer, and a mass counts as something to join to: the end
+   marches on while the cells under it are body, and stops at the first
+   chain or mass it meets, or where the body ends. Bare agar still gives
+   the short reach, and a wall still ends it. */
+var JOIN_T = 12;             // cells a chain end reaches through tissue (a straight chord: kept short)
+/* And when the tangent finds nothing, the end CLIMBS: from its cell, step
+   by step onto the highest neighbouring trail that is not its own chain,
+   as long as the trail keeps rising, until it lands on another chain or a
+   mass. The trail between a thread's root and the body rises toward the
+   body, whatever direction the thread happens to leave at, so this is the
+   walk that finds the root the tangent misses. The climb is drawn as it
+   was walked, not straightened. Off a free tip it goes nowhere: the only
+   higher ground there is the chain's own cells, which are excluded. */
+var JOIN_CLIMB = 24;         // cells a chain end climbs the trail
+var JOIN_FLOOR = RIDGE_MIN;  // trail below which there is nothing to climb
+var jcx = new Float32Array(JOIN_CLIMB + 2), jcy = new Float32Array(JOIN_CLIMB + 2);
+var jvis = new Int32Array(NCELL), jstamp = 0;   // cells a climb has stood on, by endpoint
 var EP_CAP = 16384;
 var rchain = new Int32Array(NCELL);
 var epX = new Float32Array(EP_CAP), epY = new Float32Array(EP_CAP);
@@ -6236,6 +6263,20 @@ function buildVeins() {
     }
   }
 
+  /* the mass mask, from pass one's emission, so the joins below can reach a
+     mass; the bake reads the same mask */
+  ltier.fill(-1);
+  for (i = 0; i < lsegN; i++) {
+    ltier[(((lseg[i * 2 + 1] - 0.5) | 0) >> 1) * LW + (((lseg[i * 2] - 0.5) | 0) >> 1)] = lbuck[i];
+  }
+  ldrawn.fill(0);
+  for (i = 0; i < lsegN; i++) {
+    var ln = (((lseg[i * 2 + 1] - 0.5) | 0) >> 1) * LW + (((lseg[i * 2] - 0.5) | 0) >> 1);
+    var lx0 = ln % LW, ly0 = (ln / LW) | 0;
+    if ((lx0 > 0 && ltier[ln - 1] >= 0) || (lx0 < LW - 1 && ltier[ln + 1] >= 0) ||
+        (ly0 > 0 && ltier[ln - LW] >= 0) || (ly0 < LH - 1 && ltier[ln + LW] >= 0)) ldrawn[ln] = 1;
+  }
+
   /* --- pass two: walk each ridge from end to end into a polyline ---
      Emitting one short segment per ridge cell instead — which is the obvious
      way to do this and was the first way it was done — draws a dashed
@@ -6362,10 +6403,11 @@ function buildVeins() {
   /* --- the joins: a chain end reaches for the chain it was walking toward --- */
   for (var je = 0; je < epN; je++) {
     var ex = epX[je], ey = epY[je], jdx = epDX[je], jdy = epDY[je];
-    var own = epC[je], hit = -1, blocked = false;
-    for (var js = 1; js <= JOIN_R && hit < 0; js++) {
+    var own = epC[je], hit = -1, blocked = false, mass = -1;
+    for (var js = 1; js <= JOIN_T && hit < 0 && mass < 0; js++) {
       var sx0 = ex + jdx * js, sy0 = ey + jdy * js;
-      for (var jside = 0; jside < 3 && hit < 0; jside++) {
+      var tissue = false;
+      for (var jside = 0; jside < 3 && hit < 0 && mass < 0; jside++) {
         var joff = jside === 0 ? 0 : (jside === 1 ? 1 : -1);
         var jix = Math.round(sx0 - jdy * joff), jiy = Math.round(sy0 + jdx * joff);
         if (jix < 1 || jiy < 1 || jix >= GW - 1 || jiy >= GH - 1) continue;
@@ -6375,16 +6417,71 @@ function buildVeins() {
            across the door would show the gate as open */
         if (wallM[cj]) { blocked = true; break; }
         var rc = rchain[cj];
-        if (rc && rc !== own) hit = cj;
+        if (rc && rc !== own) { hit = cj; break; }
+        if (shpV[cj] >= BODY_T) {
+          tissue = true;
+          /* a drawn mass under this cell is the body, reached */
+          if (ldrawn[(jiy >> 1) * LW + (jix >> 1)]) { mass = cj; break; }
+        }
       }
       if (blocked) break;
+      /* past the short reach, only tissue carries the end further */
+      if (js >= JOIN_R && !tissue) break;
     }
-    if (hit < 0) continue;
+    if (hit < 0 && mass < 0) {
+      /* the climb */
+      /* the endpoint's own cell: a crest point is its cell's centre plus a
+         sub-cell offset, so the containing cell is the floor, not the
+         nearest integer, which for a centred crest is the cell beyond */
+      var cx0 = ex | 0, cy0 = ey | 0;
+      if (cx0 < 1 || cy0 < 1 || cx0 >= GW - 1 || cy0 >= GH - 1) continue;
+      var cc = cy0 * GW + cx0, cv = shpV[cc], nc = 0;
+      if (wallM[cc]) continue;
+      /* cells this climb has stood on, stamped per endpoint so nothing is
+         cleared between them: with the level tolerance the cell just left
+         is often the highest neighbour, and a walk allowed back onto it
+         would rock between two cells until its steps ran out */
+      /* the stamp lives in an Int32Array: wrapped well short of the sign
+         bit, clearing the array with it, so a tab left running for years
+         does not turn the visited test off */
+      if (++jstamp > 2000000000) { jvis.fill(0); jstamp = 1; }
+      jvis[cc] = jstamp;
+      for (var st = 0; st < JOIN_CLIMB && hit < 0 && mass < 0; st++) {
+        var best = -1, bv = cv * 0.90;   /* rising, or near enough level: a thread's root is a shallow climb */
+        for (var oy = -1; oy <= 1; oy++) for (var ox = -1; ox <= 1; ox++) {
+          if (!ox && !oy) continue;
+          var nx3 = (cc % GW) + ox, ny3 = ((cc / GW) | 0) + oy;
+          if (nx3 < 1 || ny3 < 1 || nx3 >= GW - 1 || ny3 >= GH - 1) continue;
+          var nn = ny3 * GW + nx3;
+          if (wallM[nn] || rchain[nn] === own || jvis[nn] === jstamp) continue;
+          var v3 = shpV[nn];
+          if (v3 > bv) { bv = v3; best = nn; }
+        }
+        if (best < 0 || bv < JOIN_FLOOR) break;
+        cc = best; cv = bv; jvis[cc] = jstamp;
+        jcx[nc] = (cc % GW) + 0.5; jcy[nc] = ((cc / GW) | 0) + 0.5; nc++;
+        if (rchain[cc]) hit = cc;
+        else if (ldrawn[(((cc / GW) | 0) >> 1) * LW + ((cc % GW) >> 1)]) mass = cc;
+      }
+      if (hit < 0 && mass < 0) continue;
+      var jb2 = epB[je], ja2 = vseg[jb2], jw2 = vsegN[jb2];
+      if (jw2 + (nc + 1) * 2 + 2 > VEIN_CAP) continue;
+      ja2[jw2++] = epK[je]; ja2[jw2++] = nc + 1; ja2[jw2++] = ex; ja2[jw2++] = ey;
+      for (var jq = 0; jq < nc; jq++) { ja2[jw2++] = jcx[jq]; ja2[jw2++] = jcy[jq]; }
+      vsegN[jb2] = jw2;
+      continue;
+    }
     var jb = epB[je], ja = vseg[jb], jw = vsegN[jb];
     if (jw + 6 > VEIN_CAP) continue;
-    var jd = rdir[hit];
-    var jx = (hit % GW) + 0.5 + roff[hit] * RIDGE_DIR[jd].ax;
-    var jy = ((hit / GW) | 0) + 0.5 + roff[hit] * RIDGE_DIR[jd].ay;
+    var jx, jy;
+    if (hit >= 0) {
+      var jd = rdir[hit];
+      jx = (hit % GW) + 0.5 + roff[hit] * RIDGE_DIR[jd].ax;
+      jy = ((hit / GW) | 0) + 0.5 + roff[hit] * RIDGE_DIR[jd].ay;
+    } else {
+      /* to the mass cell's own lattice centre, which its outline covers */
+      jx = (((mass % GW) >> 1) << 1) + 0.5; jy = ((((mass / GW) | 0) >> 1) << 1) + 0.5;
+    }
     ja[jw++] = epK[je]; ja[jw++] = 2; ja[jw++] = ex; ja[jw++] = ey; ja[jw++] = jx; ja[jw++] = jy;
     vsegN[jb] = jw;
   }
@@ -6429,10 +6526,6 @@ function buildVeins() {
      between two. The mask path for the veil's punch is the widest outline a
      quarter-cell wider still, as the discs' was. */
   if (lsegN) {
-    ltier.fill(-1);
-    for (i = 0; i < lsegN; i++) {
-      ltier[(((lseg[i * 2 + 1] - 0.5) | 0) >> 1) * LW + (((lseg[i * 2] - 0.5) | 0) >> 1)] = lbuck[i];
-    }
     var lps = [traceMass(0, LOBE_OUT), traceMass(1, LOBE_OUT), traceMass(2, LOBE_OUT)];
     lobePath = lps[0] ? lps : null;
     lobeMaskPath = lps[0] ? traceMass(0, LOBE_OUT + 0.25) : null;
