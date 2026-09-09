@@ -891,7 +891,7 @@ var EXPERIMENTS = [
        the cap to `keep` of it over `dur` seconds, and the cull takes the
        idlest cytoplasm first — which is the lapse. The verdict comes at the
        end of the settling, not at the ninth depot. */
-    refine: { dur: 60, keep: 0.5, flow: 160,
+    refine: { dur: 60, keep: 0.5, flow: 160, decay: 0.96,
               text: 'nine on one network. now the network decides which of itself to keep.' },
     script: [
       { t: 2, hi: true, text: 'nine depots. the dish is the wrong shape for a city and you do not care.' },
@@ -3098,6 +3098,13 @@ function sense(x, y) {
    7. field maintenance: diffuse + decay, once per step
    ------------------------------------------------------------ */
 function diffuseTrail() {
+  /* The network's memory. While a dish is settling the trail decays faster
+     (refine.decay), so a tube keeps its trail only with the traffic to
+     re-lay it: the idle ones go, the busy ones do not, and cytoplasm that
+     can no longer find the idle ones has only the busy ones to stand on.
+     That feedback is the pruning; culling and moving agents alone left the
+     mesh whole and fainter, measured twice. */
+  var decay = (S.refineT0 >= 0 && S.exp && S.exp.refine && S.exp.refine.decay) ? S.exp.refine.decay : DECAY;
   var x, y, i, row;
   var sw = DIFF, cw = 1 - 2 * DIFF;
   /* horizontal blur into tmpF */
@@ -3124,7 +3131,7 @@ function diffuseTrail() {
     var dn = y < GH - 1 ? row + GW : row;
     for (x = 0; x < GW; x++) {
       i = row + x;
-      var v = (sw * tmpF[up + x] + cw * tmpF[i] + sw * tmpF[dn + x]) * DECAY;
+      var v = (sw * tmpF[up + x] + cw * tmpF[i] + sw * tmpF[dn + x]) * decay;
       var cd = condF[i];
       if (cd > 0) { var hold = COND_LEVEL * cd; if (v < hold) v = hold; }
       var sk = stalkF[i];
