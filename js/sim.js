@@ -3762,6 +3762,9 @@ function step() {
     for (i = 0; i < nAgents; i++) if (aoff[i] >= CONN_GRACE) nOff++;
     if (nOff) {
       var quota = REAB_BASE + (nOff >> 8);
+      /* the cull, a shock or heat may have shrunk the population since the
+         cursor last moved; past the live prefix it would read a dead slot */
+      if (reabCursor >= nAgents) reabCursor = 0;
       for (var scanned = 0; scanned < nAgents && quota > 0; scanned++) {
         k = reabCursor;
         reabCursor = (reabCursor + 1 >= nAgents) ? 0 : reabCursor + 1;
