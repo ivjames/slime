@@ -4332,6 +4332,21 @@ var fieldDirty = true;
 var REBUILD_EVERY = 2;
 var dirtyFrames = 0;
 
+/* ---- the sheet, off ----
+   The body used to be drawn twice: once as a field, painted per subpixel
+   into an offscreen image and scaled onto the plate, and once as lines, the
+   veins and lobes traced from the same field and stroked as paths over it.
+   The field was the frame's biggest single cost after the canvas copies —
+   SUP squared subpixels a rebuild, a quarter of the CPU at SUP 3 — and the
+   fat under every filament. With it off, what is drawn is what the organism
+   is: tubes and the swellings at their junctions, on a ground that is agar,
+   walls and hazards as the shapes the dish declares them to be. Pads on
+   flakes show only as the veins that cross them, and a corridor a single
+   cell wide, which the bridge pass drew as coverage, is not drawn at all.
+   Off "for now": the painter is kept whole behind this flag, so the sheet
+   can come back as contours later without being written again. */
+var SHEET = false;
+
 /* ---- the frame clock, on request ----
    Where a frame goes, on the device it is going on. A headless profile on a
    build box says which half of the work is which THERE — the simulation, the
@@ -4391,6 +4406,7 @@ function initCanvas() {
 
 /* the field image at the current SUP — see SUP */
 function allocField() {
+  if (!SHEET) return;
   off.width = GW * SUP; off.height = GH * SUP;
   img = octx.createImageData(GW * SUP, GH * SUP);
   imgData = img.data;
@@ -5601,7 +5617,13 @@ var ENV_DN_TAU = 0.18;                // sim-seconds to fall
 /* Three tiers rather than a continuous alpha, because a continuous alpha is a
    Path2D per distinct value: the whole layer stays a handful of draw calls. */
 var BUCK_A  = [0.35, 0.68, 1];        // stroke alpha per tier
-var LOBE_RK = [0.50, 0.78, 1];        // disc radius factor per tier: masses scale in
+/* Disc radius per tier. It used to scale in with the tier (0.50, 0.78, 1), a
+   mass growing to size as it arrived; under the sheet that read as growth,
+   and on bare agar it reads as beads — a half-radius disc on the two-cell
+   lattice does not reach its neighbour, so an arriving mass was a string
+   of dots until it settled. The alpha tiers carry the arrival on their own;
+   the discs are full size from the first. */
+var LOBE_RK = [1, 1, 1];
 function envBucket(p) { return p < 0.35 ? 0 : (p < 0.75 ? 1 : 2); }
 
 /* The other half of the envelope, and the half the tiers cannot do: FADE-OUT.
@@ -6425,6 +6447,32 @@ var ptr = { down: false, mode: 0, gx: 0, gy: 0 };
 var downIds = [];      /* pointerIds currently on the stage */
 var primaryId = null;  /* the one the brush follows */
 
+/* The ground as shapes: agar, then each hazard and wall as the rectangle the
+   dish declared, in the colours the field painter mixed per cell — the same
+   picture at any size, with no cell to see. Drawn in grid space under the
+   plate's transform, at the masks' own rounding, so a wall sits exactly where
+   the agents find it. */
+function paintGround(tc, sx, sy) {
+  tc.save();
+  tc.setTransform(sx, 0, 0, sy, 0, 0);
+  tc.fillStyle = 'rgb(' + AGAR[0] + ',' + AGAR[1] + ',' + AGAR[2] + ')';
+  tc.fillRect(0, 0, GW, GH);
+  var i, k;
+  for (i = 0; i < S.hazards.length; i++) {
+    var hz = S.hazards[i];
+    k = hz.type === 'q' ? 2 : (hz.type === 'l' ? 3 : 1);
+    var hl = HAZ_ADD[k];
+    tc.fillStyle = 'rgb(' + (AGAR[0] + hl[0]) + ',' + (AGAR[1] + hl[1]) + ',' + (AGAR[2] + hl[2]) + ')';
+    tc.fillRect(Math.round(hz.x), Math.round(hz.y), Math.round(hz.x + hz.w) - Math.round(hz.x), Math.round(hz.y + hz.h) - Math.round(hz.y));
+  }
+  tc.fillStyle = 'rgb(46,50,40)';
+  for (i = 0; i < S.walls.length; i++) {
+    var w = S.walls[i];
+    tc.fillRect(Math.round(w[0]), Math.round(w[1]), Math.round(w[0] + w[2]) - Math.round(w[0]), Math.round(w[1] + w[3]) - Math.round(w[1]));
+  }
+  tc.restore();
+}
+
 function render() {
   if (!cv || !S.exp) return;
   /* A run that has stopped is not going to get another frame from the loop —
@@ -6433,7 +6481,14 @@ function render() {
      arrives and leaving the verdict over a stale dish. */
   if (fieldDirty && (!S.running || ++dirtyFrames >= REBUILD_EVERY)) {
     var pb0 = PROF ? performance.now() : 0;
-    paintField();
+    if (SHEET) paintField();
+    else {
+      /* the two passes of the painter the vein trace reads: the ridge, and
+         the eased field it is followed on. The bridge pass is skipped with
+         the painter, since only the painter drew what it found. */
+      buildRidge();
+      smoothRidgeField();
+    }
     buildVeins();
     if (PROF) { profBuild += performance.now() - pb0; profBuilds++; }
     dirtyFrames = 0;
@@ -6442,7 +6497,8 @@ function render() {
 
   ctx.imageSmoothingEnabled = true;
   if ('imageSmoothingQuality' in ctx) ctx.imageSmoothingQuality = 'high';
-  ctx.drawImage(off, 0, 0, cv.width, cv.height);
+  if (SHEET) ctx.drawImage(off, 0, 0, cv.width, cv.height);
+  else paintGround(ctx, cv.width / GW, cv.height / GH);
 
   /* The sheet is the field; the veins are lines drawn over it — through the
      veil accumulator, so what leaves the picture fades instead of vanishing.
