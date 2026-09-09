@@ -6275,7 +6275,7 @@ function buildVeins() {
   /* --- the joins: a chain end reaches for the chain it was walking toward --- */
   for (var je = 0; je < epN; je++) {
     var ex = epX[je], ey = epY[je], jdx = epDX[je], jdy = epDY[je];
-    var own = epC[je], hit = -1;
+    var own = epC[je], hit = -1, blocked = false;
     for (var js = 1; js <= JOIN_R && hit < 0; js++) {
       var sx0 = ex + jdx * js, sy0 = ey + jdy * js;
       for (var jside = 0; jside < 3 && hit < 0; jside++) {
@@ -6283,9 +6283,14 @@ function buildVeins() {
         var jix = Math.round(sx0 - jdy * joff), jiy = Math.round(sy0 + jdx * joff);
         if (jix < 1 || jiy < 1 || jix >= GW - 1 || jiy >= GH - 1) continue;
         var cj = jiy * GW + jix;
+        /* a wall ends the reach: a chain on the far side of a closed door
+           is not the chain this end was walking toward, and a join drawn
+           across the door would show the gate as open */
+        if (wallM[cj]) { blocked = true; break; }
         var rc = rchain[cj];
         if (rc && rc !== own) hit = cj;
       }
+      if (blocked) break;
     }
     if (hit < 0) continue;
     var jb = epB[je], ja = vseg[jb], jw = vsegN[jb];
