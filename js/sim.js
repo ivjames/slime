@@ -863,7 +863,7 @@ var EXPERIMENTS = [
   {
     code: 'EXP-03', name: 'THE COMMUTER MAP',
     blurb: 'Nine depots laid out in a rough map of Tokyo. Build the network.',
-    obj: 'Engulf all nine depots before the dish times out.',
+    obj: 'Engulf all nine depots before the dish times out, then let the network settle.',
     objShort: 'DEPOTS',
     chips: [['ok', 'nine agar depots'], ['ok', 'open dish'], ['', 'clock is running']],
     inoc: { x: 206, y: 138 },
@@ -881,6 +881,18 @@ var EXPERIMENTS = [
     walls: [], hazards: [],
     start: 4200, cap: 12000, sustain: 1500, grow: 340, starve: 44, grace: 45, engulf: 12.0,
     timeLimit: 340, hab: false, shocks: false,
+    /* The experiment's second half. Tero's plasmodium covered the plate in a
+       fine mesh in eight hours and spent the next day pruning it: the tubes
+       carrying traffic thickened, the rest lapsed, and what was left was the
+       sparse network the paper compared to the rail map. Nothing prunes
+       here while the culture sits at cap, measured: 200 s after the ninth
+       depot the mesh still covered nine tenths of the plate. The flakes are
+       finite, so once the last one is taken the sustain target settles from
+       the cap to `keep` of it over `dur` seconds, and the cull takes the
+       idlest cytoplasm first — which is the lapse. The verdict comes at the
+       end of the settling, not at the ninth depot. */
+    refine: { dur: 60, keep: 0.35,
+              text: 'nine on one network. now the network decides which of itself to keep.' },
     script: [
       { t: 2, hi: true, text: 'nine depots. the dish is the wrong shape for a city and you do not care.' },
       { t: 15, text: 'links that carry nothing are being thinned out.' }
@@ -1817,6 +1829,7 @@ function paceDish(e) {
   if (e.grace) e.grace *= k;
   if (e.timeLimit) e.timeLimit *= k;
   if (e.reseal) e.reseal *= k;
+  if (e.refine && e.refine.dur) e.refine.dur *= k;
   if (e.starve) e.starve /= k;
   if (e.heatDmg != null) e.heatDmg /= k;
   if (e.shock) {
@@ -2275,6 +2288,7 @@ var S = {
   hab: 0, habPeak: 0, habBuilt: -1, fused: false,
   dietP: 0, dietC: 0, dietDoomedT: 0,
   growAcc: 0, starveAcc: 0,
+  refineT0: -1,   /* sim time the settling began, or -1 — see EXP-03's refine */
   shockNext: 0, shockActive: false, shockWarn: false, shocksSurvived: 0,
   shockWarned: -1, shockCycle: 0, shockPeriod: 0,
   quinTime: 0, slow: 1, anticipated: false,
@@ -3804,11 +3818,21 @@ function step() {
 
   /* --- biomass: fed by engulfed nodes, drained otherwise --- */
   var target = Math.min(S.engulfed * e.sustain, e.cap);
+  var starveRate = e.starve;
+  if (S.refineT0 >= 0 && e.refine) {
+    /* settling: the flakes are eaten, the target comes down from the cap to
+       `keep` of it over `dur`, and the cull runs fast enough to follow it */
+    var rf = Math.min(1, (S.simT - S.refineT0) / e.refine.dur);
+    var settle = Math.round(e.cap * (1 - (1 - e.refine.keep) * rf));
+    if (settle < target) target = settle;
+    var need = e.cap * (1 - e.refine.keep) / e.refine.dur;
+    if (need > starveRate) starveRate = need;
+  }
   if (nAgents < target) {
     S.growAcc += (e.grow * DT);
     while (S.growAcc >= 1 && nAgents < target && nAgents < MAXA) { spawnAgent(); S.growAcc -= 1; }
-  } else if (S.simT > e.grace && nAgents > target) {
-    S.starveAcc += (e.starve * DT);
+  } else if ((S.simT > e.grace || S.refineT0 >= 0) && nAgents > target) {
+    S.starveAcc += (starveRate * DT);
     while (S.starveAcc >= 1 && nAgents > 0) {
       killWeakest();
       S.starveAcc -= 1;
@@ -3827,13 +3851,24 @@ function step() {
 
   /* --- end conditions --- */
   if (nAgents <= 0) { finish(false, 'starved'); return; }
-  if (winMet(e)) { finish(true, ''); return; }
+  if (S.refineT0 >= 0) {
+    /* settling: the run ends when the settling does, whatever the win test
+       says on the way — the ninth depot has been taken, the verdict is the
+       network */
+    if (S.simT - S.refineT0 >= e.refine.dur) { finish(true, ''); return; }
+  } else if (winMet(e)) {
+    if (e.refine) {
+      S.refineT0 = S.simT;
+      if (e.refine.text) logLine(e.refine.text, true);
+    } else { finish(true, ''); return; }
+  }
   /* the beat is narrative, not mechanical: the outcome was decided the
      moment the flake went in */
   if (S.dietDoomedT && S.simT >= S.dietDoomedT + 4) { finish(false, 'ratio'); return; }
   /* a clock that runs out during the beat does not change what happened:
      the ratio verdict stands once the plate is past saving */
-  if (e.timeLimit && S.simT >= e.timeLimit) { finish(false, S.dietDoomedT ? 'ratio' : 'timeout'); return; }
+  /* not during settling: the plate is spoken for, the clock has done its job */
+  if (e.timeLimit && S.refineT0 < 0 && S.simT >= e.timeLimit) { finish(false, S.dietDoomedT ? 'ratio' : 'timeout'); return; }
 }
 
 /* What the dish actually asks for. Every dish asks for the food gate and, if
@@ -6400,6 +6435,7 @@ function noteText(e) {
   /* Above the shock warning on purpose. A player who cannot steer needs to be
      told that before being told what to steer away from — and the fix (let go)
      is one word, so it costs the warning almost nothing to wait a beat. */
+  if (S.refineT0 >= 0 && e.refine) return 'settling — ' + Math.max(0, Math.ceil(e.refine.dur - (S.simT - S.refineT0))) + 's · the idle tubes lapse';
   if (cueCapOf(e) && S.cueRes <= 0) return 'reserve spent — release to recover it';
   if (S.shockActive) return 'DRY SHOCK — hold the refuges';
   if (S.shockWarn && S.slow < 0.98) return 'thickening early — the interval has a shape';
@@ -6995,8 +7031,9 @@ var GHOST_ENT = 9;
    many draws it takes; PACE changes every dish's clock. */
 /* 4: the tip bar back at 3.0, the body test and reabsorption, recruitment
    gone, PACE 1. Each changes what a step does and how many draws it takes. */
-/* 5: the stalk. It changes the trail under every runner's thread. */
-var SIM_V = 5;
+/* 5: the stalk. It changes the trail under every runner's thread.
+   6: settling — a dish with `refine` runs on past its last node. */
+var SIM_V = 6;
 
 function ghostSig() {
   var h = mix32(SIM_V, Math.round(CUE_CAP * 1000), Math.round(CUE_REGEN * 1000));
@@ -7524,7 +7561,7 @@ function startRun(i, seed, trace) {
   S.engulfed = 0;
   S.hab = 0; S.habPeak = 0; S.habBuilt = -1; S.fused = false;
   S.dietP = 0; S.dietC = 0; S.dietDoomedT = 0;
-  S.growAcc = 0; S.starveAcc = 0; reabCursor = 0; mainOK = false;
+  S.growAcc = 0; S.starveAcc = 0; reabCursor = 0; mainOK = false; S.refineT0 = -1;
   S.shockNext = e.shock ? e.shock.first : 0;
   S.shockPeriod = e.shock ? e.shock.period : 0;
   S.shockActive = false; S.shockWarn = false; S.shocksSurvived = 0;
