@@ -4276,6 +4276,39 @@ var fieldDirty = true;
 var REBUILD_EVERY = 2;
 var dirtyFrames = 0;
 
+/* ---- the frame clock, on request ----
+   Where a frame goes, on the device it is going on. A headless profile on a
+   build box says which half of the work is which THERE — the simulation, the
+   field painter, or the canvas copies — and says nothing about a phone or a
+   laptop with a GPU, where the copies are cheap and the painter is not, or
+   the other way about. Opened with ?prof on the URL and otherwise not built,
+   so the page carries no clock reads it was not asked for. Three numbers a
+   second, in milliseconds of the frame: steps, the field rebuild (painter and
+   vein trace, per rebuild), and the composite (everything else render does,
+   per frame). */
+var PROF = /(^\?|&)prof(=|&|$)/.test(window.location.search);
+var profStep = 0, profBuild = 0, profComp = 0, profFrames = 0, profSteps = 0, profBuilds = 0, profT0 = 0, profEl = null;
+
+function profTick(now) {
+  if (!profT0) { profT0 = now; return; }
+  var dt = now - profT0;
+  if (dt < 1000) return;
+  if (!profEl) {
+    profEl = document.createElement('div');
+    profEl.id = 'prof';
+    profEl.style.cssText = 'position:fixed;left:8px;bottom:8px;z-index:99;font:12px/1.4 ui-monospace,Menlo,monospace;' +
+      'color:#dfe6d8;background:rgba(0,0,0,.72);padding:6px 8px;border-radius:4px;white-space:pre;pointer-events:none';
+    document.body.appendChild(profEl);
+  }
+  var fps = profFrames / dt * 1000, sps = profSteps / dt * 1000;
+  profEl.textContent =
+    fps.toFixed(1) + ' fps · ' + sps.toFixed(0) + ' steps/s · ' + (cv ? cv.width + 'x' + cv.height : '') + ' · SUP ' + SUP + '\n' +
+    'steps     ' + (profFrames ? profStep / profFrames : 0).toFixed(1).padStart(5) + ' ms/frame  (' + (profSteps ? profStep / profSteps : 0).toFixed(2) + ' ms/step)\n' +
+    'rebuild   ' + (profBuilds ? profBuild / profBuilds : 0).toFixed(1).padStart(5) + ' ms/rebuild (' + (profBuilds / dt * 1000).toFixed(1) + '/s)\n' +
+    'composite ' + (profFrames ? profComp / profFrames : 0).toFixed(1).padStart(5) + ' ms/frame';
+  profStep = profBuild = profComp = 0; profFrames = profSteps = profBuilds = 0; profT0 = now;
+}
+
 function initCanvas() {
   cv = $('cv');
   ctx = cv.getContext('2d', { alpha: false });
@@ -6336,8 +6369,10 @@ function render() {
      rebuild immediately rather than waiting for a second frame that never
      arrives and leaving the verdict over a stale dish. */
   if (fieldDirty && (!S.running || ++dirtyFrames >= REBUILD_EVERY)) {
+    var pb0 = PROF ? performance.now() : 0;
     paintField();
     buildVeins();
+    if (PROF) { profBuild += performance.now() - pb0; profBuilds++; }
     dirtyFrames = 0;
     fieldDirty = false;
   }
@@ -8427,6 +8462,7 @@ function frame(ts) {
        fixed-timestep accumulator must not throw its remainder away, not
        because two per cent was visible. */
     if ((boxed && acc >= DT) || acc > DT * budget) acc = 0;
+    if (PROF) { profStep += performance.now() - boxT0; profSteps += steps; }
     if (stepTarget && stepsRun >= stepTarget && S.running && !S.over) {
       /* one-shot: consume the target so Resume resumes and later runs run */
       stepTarget = 0;
@@ -8436,7 +8472,17 @@ function frame(ts) {
     acc = 0;
   }
 
-  render();
+  if (PROF) {
+    var pr0 = performance.now(), pb1 = profBuild;
+    render();
+    /* the rebuild inside it is counted on its own line, so it is taken back
+       out of the composite's */
+    profComp += performance.now() - pr0 - (profBuild - pb1);
+    profFrames++;
+    profTick(performance.now());
+  } else {
+    render();
+  }
   updateHUD();
 
   if (!S.running && raf) { window.cancelAnimationFrame(raf); raf = 0; }
