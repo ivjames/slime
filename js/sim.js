@@ -6607,7 +6607,11 @@ function buildVeins() {
         var pa = vseg[pb], pw = vsegN[pb], pn = 0, pcur = pc;
         while (pn < 2048 && opar[pcur] !== pcur) { pn++; pcur = opar[pcur]; }
         if (pn === 0 || pw + (pn + 1) * 2 + 2 > VEIN_CAP) continue;
-        pa[pw++] = 2; pa[pw++] = pn + 1;
+        /* drawn at the mid tier: live, but not inked — the path is the
+           shortest one through tissue THIS rebuild, and it wanders as the
+           tissue does, so recording it hatched the record with every
+           rebuild's route */
+        pa[pw++] = 1; pa[pw++] = pn + 1;
         pcur = pc;
         for (var pk = 0; pk <= pn; pk++) {
           pa[pw++] = (pcur % GW) + 0.5; pa[pw++] = ((pcur / GW) | 0) + 0.5;
