@@ -2735,11 +2735,16 @@ function drawHome(k, from) {
 
    So every CONN_EVERY steps the trail field is labelled into 8-connected
    pieces of tube (trail >= CONN_T, not wall), and the piece holding the
-   most cytoplasm is the body. A tip off the body is no tip (the gate in
-   moveAgents reads mainC), and an agent that has been off the body for
-   CONN_GRACE labellings is drawn back into it — beside a tip if there is
-   one, so the biomass a dead end tied up goes to the front, else beside
-   the nearest tube. The draw is rate-limited (REAB_BASE a step plus a
+   most cytoplasm is the body. An agent that is not a tip and has been off
+   the body for CONN_GRACE labellings is drawn back into it — beside a tip
+   if there is one, so the biomass a dead end tied up goes to the front,
+   else beside the nearest tube. A tip off the body is left alone: it is a
+   runner, and runners are the reach. Demoting them was measured (EXP-01,
+   seed 12345): reach at step 2400 fell from 188 cells to 137 and the dish
+   was not won at 7200 where the runners-free version wins at 4693, against
+   the deployed 4471 — with islands at zero either way. What the body test
+   takes back is what a runner LEAVES: the followers on a thread that has
+   decayed behind them, the beads and crescents, never the runner itself. The draw is rate-limited (REAB_BASE a step plus a
    share of what is off), so an island dissolves over a second or two and
    a large lobe that loses its connection retreats over several rather
    than vanishing, and it keeps its trail where it was, which is what the
@@ -3359,8 +3364,6 @@ function step() {
         if (feed > 1) feed = 1;
       }
       if (feed < TIP_MIN) tip = false;  /* come adrift: cytoplasm, not a front */
-      /* and a tip on an island is no tip: its tube leads nowhere — CONN_T */
-      if (tip && mainOK && !mainC[here]) tip = false;
     }
     /* On food, and there is still food there. A front that has arrived stops
        being a front: it has found what it was looking for, and what it does
@@ -3740,7 +3743,7 @@ function step() {
       for (var scanned = 0; scanned < nAgents && quota > 0; scanned++) {
         k = reabCursor;
         reabCursor = (reabCursor + 1 >= nAgents) ? 0 : reabCursor + 1;
-        if (aoff[k] < CONN_GRACE) continue;
+        if (aoff[k] < CONN_GRACE || atip[k]) continue;   /* a runner is not a scrap */
         var from = (ay[k] | 0) * GW + (ax[k] | 0);
         if (drawFront(k) || drawHome(k, from)) { aoff[k] = 0; quota--; }
         else break;   /* nowhere on the body would take it this step */
