@@ -748,6 +748,25 @@ var FEED_FILL  = 0.55; // share of the flake's own area, in agents, that opens t
 var FEED_LAY   = 1.30; // trail a feeding agent lays per step (multiple of DEPOSIT)
 var FEED_SPEED = 0.30; // floor under a feeding agent's speed, so the pad can fill
 
+/* ---- the pad thins as the food goes ----
+   A flake is at its fullest when the food is fresh and the pad on it thins as
+   the food is used up; what is left when the last of it goes is the thin
+   refuge that SPENT_FOOD describes. The first version had the hold and the
+   pull switch from full to spent in the one step the dial completed, so a
+   flake sat fat and full while its arc filled and then drained as if a plug
+   had been pulled: measured on the commuter map, the trail on a flake fell
+   by nine tenths in the twenty seconds after the arc closed. Both now run
+   down along the same line as progress runs up, from 1 at first contact to
+   SPENT_FOOD at done, so nothing jumps at the flag — done is the far end of
+   the curve the flake was already on. The hold is not scaled down; the pad
+   it holds is sized down (see FEED_FILL's use in the step), which is the
+   same thinning on a full pad and no loosening at all on a sparse one. The
+   rate a flake is eaten at follows the same size (ENGULF_SOFT's use), so a
+   smaller pad on less food eats it at the pace the full pad ate the whole. Rebuilding the field is
+   a pass over the dish per flake, so it happens when a flake's progress
+   crosses one of FOOD_Q steps, not every step. */
+var FOOD_Q = 8;        // progress steps between rebuilds of the food field
+
 /* ---- lobes at the corners ----
    The other structure the filament rule would not draw. A physarum network is
    not tubes meeting at mathematical points: where three tubes meet, and where
@@ -2530,6 +2549,13 @@ function geodesicFrom(nd) {
    nodes into a well at its centre, which pins the inoculation in place.
    Rebuilt whenever a node is engulfed: spent food stops dominating the
    gradient, so the front moves on to what it has not eaten yet. */
+/* Share of a flake's food still there: 1 at first contact, 0 once done. The
+   one number the hold on a flake and its pull in the field both run on. */
+function foodLeft(ni) {
+  return S.nodeDone[ni] ? 0 : 1 - S.nodeProg[ni];
+}
+var foodBuiltQ = new Int8Array(16);   // progress step each flake's field was built at
+
 function buildFood() {
   /* Chemotaxis reach, in cells of open agar. This is the game's main dial: it
      is how far the organism can find food BY ITSELF. Set it wide and the dish
@@ -2552,17 +2578,22 @@ function buildFood() {
     /* A spent node keeps a short, shallow pull: enough to hold the plasmodium
        on it as a refuge, not enough to outbid fresh food further away. Giving
        it the full reach made the gradient point back at food already eaten. */
-    var done = S.nodeDone[ni];
-    var fall = done ? SPENT_FALL : FALL;
-    var amp = done ? SPENT_FOOD : 1;
-    var core = done ? 0 : e.nodes[ni].r * 2.4;
+    var left = foodLeft(ni);
+    var fall = SPENT_FALL + (FALL - SPENT_FALL) * left;
+    var amp = SPENT_FOOD + (1 - SPENT_FOOD) * left;
+    /* the core bonus runs down in HEIGHT, not radius: the geodesic is 0 over
+       the whole disc, so a shrinking radius left the bonus at its full 0.85
+       everywhere on the flake until the radius reached zero and it went in
+       one step — the very jump this taper is here to remove */
+    var core = e.nodes[ni].r * 2.4, coreAmp = 0.85 * left;
     for (var i = 0; i < NCELL; i++) {
       var d = dm[i];
       if (d >= fall) continue;
       var v = amp * (1 - d / fall);
-      if (d < core) v += 0.85 * (1 - d / core);
+      if (d < core) v += coreAmp * (1 - d / core);
       if (v > foodF[i]) foodF[i] = v;
     }
+    foodBuiltQ[ni] = Math.floor((1 - left) * FOOD_Q);
   }
   rebuildStatic();
 }
@@ -3665,7 +3696,19 @@ function step() {
           var frim = fnd.r * FEED_R;
           var fout = (fdd - fnd.r) / (frim - fnd.r);
           if (fout > 1) fout = 1;
-          var froom = 1 - nodeLoad[fi] / (FEED_FILL * Math.PI * fnd.r * fnd.r);
+          /* ...against a pad sized to the food LEFT, not to the flake: what
+             remains of a three-quarters-eaten flake is covered by a quarter
+             of the agents the whole took, so the valve opens at a quarter of
+             the load, and the pad thins as the food goes instead of
+             collapsing when it is gone. Sized, not scaled: scaling the hold
+             itself by the food left loosened it on a pad that was nowhere
+             near full, and on the fire drill, where the shocks leave a
+             hundred agents to finish a flake, the survivors let go of one at
+             nine tenths, the progress ran back down (ENGULF_DECAY) and the
+             culture starved with nothing engulfed. A pad that is under the
+             reduced capacity is held as hard as ever. */
+          var fcap = FEED_FILL * Math.PI * fnd.r * fnd.r * (SPENT_FOOD + (1 - SPENT_FOOD) * foodLeft(fi));
+          var froom = 1 - nodeLoad[fi] / fcap;
           if (froom > 0) fturn = FEED_HOLD * fout * froom;
           fwant = Math.atan2(-fdy, -fdx);          /* back toward the middle */
         }
@@ -3966,6 +4009,14 @@ function step() {
        exploring lattice delivers fewer agents per cell than the old single
        blob did, and the maze became unwinnable on that alone. */
     var soft = ENGULF_SOFT * Math.PI * nd.r * nd.r * (e.engulf || 1);
+    /* What is left of a flake is covered by fewer agents than the whole was,
+       and the hold thins the pad on it by the same measure (see FOOD_Q): the
+       curve's knee follows the food down, so a flake three quarters gone is
+       eaten at the rate the pad standing on it can manage, not at the rate
+       the full pad would have. Without this the taper fed back on itself —
+       a thinner pad ate slower, so the flake stayed longer, so the pad
+       thinned further — and the corner dish went unsolved. */
+    soft *= SPENT_FOOD + (1 - SPENT_FOOD) * foodLeft(i);
     var gain = MAX_ENGULF_RATE * (hits / (hits + soft));
     S.nodeProg[i] = clamp(S.nodeProg[i] + gain, 0, 1);
     if (S.nodeProg[i] >= 1) {
@@ -3974,6 +4025,11 @@ function step() {
       buildFood();
       onEngulf(i);
     }
+  }
+  /* The field follows progress in FOOD_Q steps, up as a flake is eaten and
+     back down as an abandoned one re-forms. Done flakes were rebuilt above. */
+  for (i = 0; i < e.nodes.length; i++) {
+    if (!S.nodeDone[i] && Math.floor(S.nodeProg[i] * FOOD_Q) !== foodBuiltQ[i]) { buildFood(); break; }
   }
 
   /* --- one body: what is off it is drawn back in — see CONN_T --- */
@@ -7364,8 +7420,9 @@ var GHOST_ENT = 9;
 /* 5: the stalk. It changes the trail under every runner's thread.
    6: settling — a dish with `refine` runs on past its last node.
    7: the stalk floors at STALK_W, and idle tube is withdrawn from.
-   8: followers stay in the tube, and new cytoplasm arrives on it. */
-var SIM_V = 8;
+   8: followers stay in the tube, and new cytoplasm arrives on it.
+   9: the hold on a flake and its pull run down with the food left. */
+var SIM_V = 9;
 
 function ghostSig() {
   var h = mix32(SIM_V, Math.round(CUE_CAP * 1000), Math.round(CUE_REGEN * 1000));
