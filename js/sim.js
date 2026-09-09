@@ -863,7 +863,7 @@ var EXPERIMENTS = [
   {
     code: 'EXP-03', name: 'THE COMMUTER MAP',
     blurb: 'Nine depots laid out in a rough map of Tokyo. Build the network.',
-    obj: 'Engulf all nine depots before the dish times out.',
+    obj: 'Engulf all nine depots before the dish times out, then let the network settle.',
     objShort: 'DEPOTS',
     chips: [['ok', 'nine agar depots'], ['ok', 'open dish'], ['', 'clock is running']],
     inoc: { x: 206, y: 138 },
@@ -881,6 +881,25 @@ var EXPERIMENTS = [
     walls: [], hazards: [],
     start: 4200, cap: 12000, sustain: 1500, grow: 340, starve: 44, grace: 45, engulf: 12.0,
     timeLimit: 340, hab: false, shocks: false,
+    /* The experiment's second half. Tero's plasmodium covered the plate in a
+       fine mesh in eight hours and spent the next day pruning it: the tubes
+       carrying traffic thickened, the rest lapsed, and what was left was the
+       sparse network the paper compared to the rail map. Nothing prunes
+       here while the culture sits at cap, measured: 200 s after the ninth
+       depot the mesh still covered nine tenths of the plate. So once the
+       last one is taken: the sustain target settles from the cap to `keep`
+       of it over `dur` seconds, the cull takes the idlest cytoplasm first,
+       `flow` agents a second stream out of idle tubes into the busiest, and
+       the agents read `sense` times further ahead — the sensor offset being
+       what sets the scale of the net a population settles into. Measured on
+       seed 12345: cull alone left the mesh whole and fainter; a faster trail
+       decay made a haze; the reach is what coarsens it, x3 into large holes
+       and broad bands at keep 0.5, x5 into fat lobes, and x3 for 90 s at
+       keep 0.3 into a few thick tubes between the depots with the plate
+       between them bare, which is the paper's second day. The verdict comes
+       at the end of the settling, not at the ninth depot. */
+    refine: { dur: 120, keep: 0.3, flow: 60, sense: 3, stream: 250,
+              text: 'nine on one network. now the network decides which of itself to keep.' },
     script: [
       { t: 2, hi: true, text: 'nine depots. the dish is the wrong shape for a city and you do not care.' },
       { t: 15, text: 'links that carry nothing are being thinned out.' }
@@ -1817,6 +1836,9 @@ function paceDish(e) {
   if (e.grace) e.grace *= k;
   if (e.timeLimit) e.timeLimit *= k;
   if (e.reseal) e.reseal *= k;
+  if (e.refine && e.refine.dur) e.refine.dur *= k;
+  if (e.refine && e.refine.flow) e.refine.flow /= k;
+  if (e.refine && e.refine.stream) e.refine.stream /= k;
   if (e.starve) e.starve /= k;
   if (e.heatDmg != null) e.heatDmg /= k;
   if (e.shock) {
@@ -2275,6 +2297,8 @@ var S = {
   hab: 0, habPeak: 0, habBuilt: -1, fused: false,
   dietP: 0, dietC: 0, dietDoomedT: 0,
   growAcc: 0, starveAcc: 0,
+  refineT0: -1,   /* sim time the settling began, or -1 — see EXP-03's refine */
+  flowAcc: 0, streamAcc: 0,
   shockNext: 0, shockActive: false, shockWarn: false, shocksSurvived: 0,
   shockWarned: -1, shockCycle: 0, shockPeriod: 0,
   quinTime: 0, slow: 1, anticipated: false,
@@ -2421,7 +2445,7 @@ function applyEvent(e, ev) {
            clock is reabsorbed early or late by up to ADRIFT_TIME on the
            strength of a wall appearing somewhere else in the dish. */
         ax[k] = ax[nAgents]; ay[k] = ay[nAgents]; ah[k] = ah[nAgents];
-        atip[k] = atip[nAgents]; astv[k] = astv[nAgents]; aoff[k] = aoff[nAgents];
+        atip[k] = atip[nAgents]; astv[k] = astv[nAgents]; aoff[k] = aoff[nAgents]; agoal[k] = agoal[nAgents];
         continue;
       }
       k++;
@@ -2575,7 +2599,7 @@ function inoculate(e) {
       occ[si] = 1;
       ah[nAgents] = rnd() * Math.PI * 2;
       atip[nAgents] = 0;
-      astv[nAgents] = 0; aoff[nAgents] = 0;
+      astv[nAgents] = 0; aoff[nAgents] = 0; agoal[nAgents] = 0;
       nAgents++;
     }
     var w = ci - 1, ee = ci + 1, nn = ci - GW, ss2 = ci + GW;
@@ -2607,7 +2631,7 @@ function emit(nx, ny, nh, tip) {
   if (wallM[ci] || occ[ci]) return false;
   ax[nAgents] = Math.fround(nx); ay[nAgents] = Math.fround(ny); ah[nAgents] = nh;
   atip[nAgents] = tip ? 1 : 0;
-  astv[nAgents] = 0; aoff[nAgents] = 0;
+  astv[nAgents] = 0; aoff[nAgents] = 0; agoal[nAgents] = 0;
   occ[ci]++;
   nAgents++;
   return true;
@@ -2736,7 +2760,7 @@ function drawHome(k, from) {
     occ[ci]++;
     ax[k] = Math.fround(nx); ay[k] = Math.fround(ny);
     ah[k] = rnd() * Math.PI * 2;
-    atip[k] = 0; astv[k] = 0; aoff[k] = 0;
+    atip[k] = 0; astv[k] = 0; aoff[k] = 0; agoal[k] = 0;
     return true;
   }
   return false;
@@ -2795,6 +2819,7 @@ var mainC   = new Uint8Array(NCELL);
 var connLab = new Int32Array(NCELL);
 var connQ   = new Int32Array(NCELL);
 var aoff    = new Uint16Array(MAXA);   // labellings this agent has spent off the body
+var agoal   = new Int16Array(MAXA);    // streaming: 1 + the node this agent is bound for, or 0
 var mainOK  = false;
 var reabCursor = 0;
 
@@ -2941,7 +2966,7 @@ function drawFront(k) {
       occ[ci]++;
       ax[k] = Math.fround(nx); ay[k] = Math.fround(ny);
       ah[k] = ah[c];           /* arrives heading the way the front is going */
-      atip[k] = 0; astv[k] = 0; aoff[k] = 0;
+      atip[k] = 0; astv[k] = 0; aoff[k] = 0; agoal[k] = 0;
       return true;
     }
   }
@@ -2962,6 +2987,7 @@ function killWeakest() {
        the cytoplasm following it in — so the search is protected while there
        is anything genuinely idle to take instead. */
     if (atip[c]) v += 1;
+    if (agoal[c]) v += 1;           /* streaming: on a bare tube by design */
     if (traceF[ci2] > 0) v += 0.5;
     if (v < worst) { worst = v; k = c; }
   }
@@ -2970,7 +2996,93 @@ function killWeakest() {
   if (occ[ci]) occ[ci]--;          /* every removal path decrements */
   nAgents--;
   ax[k] = ax[nAgents]; ay[k] = ay[nAgents]; ah[k] = ah[nAgents];
-  atip[k] = atip[nAgents]; astv[k] = astv[nAgents]; aoff[k] = aoff[nAgents];
+  atip[k] = atip[nAgents]; astv[k] = astv[nAgents]; aoff[k] = aoff[nAgents]; agoal[k] = agoal[nAgents];
+}
+
+/* The idlest agent, by the same reading killWeakest uses, without the kill:
+   who to move when the settling moves cytoplasm rather than losing it. */
+function pickIdle() {
+  var k = -1, worst = 1e9;
+  for (var t = 0; t < KILL_DRAWS; t++) {
+    var c = (rnd() * nAgents) | 0;
+    var ci2 = (ay[c] | 0) * GW + (ax[c] | 0);
+    var v = condF[ci2];
+    if (atip[c]) v += 1;
+    if (agoal[c]) v += 1;           /* streaming: on a bare tube by design */
+    if (traceF[ci2] > 0) v += 0.5;
+    if (v < worst) { worst = v; k = c; }
+  }
+  return k;
+}
+
+/* Cytoplasm streaming into the tube. Best-of-K over random cells for the
+   strongest tube cell nobody is standing on — trail at least TUBE_T, free,
+   not wall — and the idle agent is put there. Aimed at the busiest AGENT it
+   piled the settling culture onto its flakes and let every long tube between
+   them empty and lapse: the plate ended as pads with short bridges between
+   the close pairs and nothing across it. Aimed at the strongest empty tube
+   cell, the tubes the mesh built are kept manned in order of their strength,
+   the weakest lapse first, and a tube between two distant flakes is a tube
+   with cytoplasm in it. Mass is conserved; what moves is where it stands. */
+var TUBE_T = 20;
+
+/* Geodesics over TUBE, for the streaming: from each flake, the distance to
+   every cell along cells that carry at least TUBE_T / 2 of trail, 8-connected.
+   The open-agar geodesic sent streaming agents straight across bare plate,
+   which laid specks and no tube; on the tube network the shortest route
+   between two flakes is a route the mesh already built, and walking it is
+   what keeps it. Rebuilt every TUBE_EVERY steps while a dish settles, so the
+   routes follow the tubes that survive. -1 where no tube reaches. */
+var TUBE_EVERY = 30;
+var tubeDist = [];
+function rebuildTubeGeo(e) {
+  var i, ni, half = TUBE_T * 0.5;
+  for (ni = 0; ni < e.nodes.length; ni++) {
+    var D = tubeDist[ni];
+    if (!D) { D = new Int32Array(NCELL); tubeDist[ni] = D; }
+    D.fill(-1);
+    var nd = e.nodes[ni], head = 0, tail = 0;
+    var x0 = Math.max(0, (nd.x - nd.r) | 0), x1 = Math.min(GW - 1, (nd.x + nd.r) | 0);
+    var y0 = Math.max(0, (nd.y - nd.r) | 0), y1 = Math.min(GH - 1, (nd.y + nd.r) | 0);
+    for (var yy = y0; yy <= y1; yy++) for (var xx = x0; xx <= x1; xx++) {
+      var dx = xx - nd.x, dy = yy - nd.y;
+      if (dx * dx + dy * dy > nd.r * nd.r) continue;
+      var c0 = yy * GW + xx;
+      if (wallM[c0]) continue;
+      D[c0] = 0; connQ[tail++] = c0;
+    }
+    while (head < tail) {
+      var c = connQ[head++], d = D[c] + 1;
+      var cx = c % GW, cy = (c / GW) | 0;
+      for (var oy = -1; oy <= 1; oy++) {
+        var ny = cy + oy; if (ny < 0 || ny >= GH) continue;
+        for (var ox = -1; ox <= 1; ox++) {
+          if (!ox && !oy) continue;
+          var nx = cx + ox; if (nx < 0 || nx >= GW) continue;
+          var nc = ny * GW + nx;
+          if (D[nc] >= 0 || wallM[nc] || trail[nc] < half) continue;
+          D[nc] = d; connQ[tail++] = nc;
+        }
+      }
+    }
+  }
+}
+function drawTube(k) {
+  var best = -1, bestV = TUBE_T;
+  for (var t = 0; t < 16; t++) {
+    var c = (rnd() * NCELL) | 0;
+    if (wallM[c] || occ[c]) continue;
+    var v = trail[c];
+    if (v > bestV) { bestV = v; best = c; }
+  }
+  if (best < 0) return false;
+  var from = (ay[k] | 0) * GW + (ax[k] | 0);
+  if (occ[from]) occ[from]--;
+  occ[best]++;
+  ax[k] = Math.fround((best % GW) + 0.5); ay[k] = Math.fround(((best / GW) | 0) + 0.5);
+  ah[k] = rnd() * Math.PI * 2;
+  atip[k] = 0; astv[k] = 0; aoff[k] = 0; agoal[k] = 0;
+  return true;
 }
 
 /* sample the combined desirability field (nearest cell) */
@@ -3411,6 +3523,9 @@ function step() {
         if (feed > 1) feed = 1;
       }
       if (feed < TIP_MIN) tip = false;  /* come adrift: cytoplasm, not a front */
+      /* a settling culture is not foraging: no new fronts, so the tubes it
+         keeps stop sprouting along their edges */
+      if (tip && S.refineT0 >= 0) tip = false;
     }
     /* On food, and there is still food there. A front that has arrived stops
        being a front: it has found what it was looking for, and what it does
@@ -3425,7 +3540,12 @@ function step() {
     var feeding = fi >= 0 && !S.nodeDone[fi];
     if (feeding) tip = false;
     atip[k] = tip ? 1 : 0;
-    var sd = tip ? TIP_SENS : SENS_D;
+    /* Settling reads further ahead. In the Jones model the sensor offset sets
+       the scale of the network a population of agents settles into — a longer
+       reach, a coarser net — and that, not a faster decay or a cull, is what
+       turns a fine mesh into a few tubes: measured, decay made a haze and a
+       cull made the same mesh fainter. */
+    var sd = tip ? TIP_SENS : ((S.refineT0 >= 0 && e.refine && e.refine.sense) ? SENS_D * e.refine.sense : SENS_D);
     /* A route home is not information a pioneer can use — see the scar term
        in sense(), which this switches off for the three calls below. */
     scarW = tip ? 0 : SCAR_W;
@@ -3470,7 +3590,26 @@ function step() {
        valve: at the flake's own area of agents there is nothing holding
        anything and new arrivals pass straight through, so a covered flake
        stops taking cytoplasm the rest of the dish could be using. */
-    if (feeding) {
+    /* streaming — see the settling block: bound for a flake, down its
+       geodesic, along tube where there is tube to walk */
+    if (agoal[k]) {
+      var gn = agoal[k] - 1, gdm = tubeDist[gn];
+      var ghere = gdm ? gdm[here] : -1;
+      if (ghere < 0 || ghere === 0) agoal[k] = 0;   /* arrived, or the tube went from under it */
+      else {
+        var gbest = -1, gbv = ghere;
+        for (var gd = 0; gd < 8; gd++) {
+          var ga = gd * Math.PI / 4;
+          var gx = (x + Math.cos(ga) * 1.5) | 0, gy = (y + Math.sin(ga) * 1.5) | 0;
+          if (gx < 0 || gy < 0 || gx >= GW || gy >= GH) continue;
+          var gv = gdm[gy * GW + gx];
+          if (gv >= 0 && gv < gbv) { gbv = gv; gbest = gd; }
+        }
+        if (gbest >= 0) h = gbest * Math.PI / 4;
+        else agoal[k] = 0;   /* no downhill tube from here: let it go */
+      }
+    }
+    if (feeding && !agoal[k]) {
       var fnd = e.nodes[fi];
       var fdx = x - fnd.x, fdy = y - fnd.y;
       var fdd = Math.sqrt(fdx * fdx + fdy * fdy);
@@ -3580,7 +3719,7 @@ function step() {
     var kn = knotF[cell];
     var dep = 0;
     if (feeding) dep = stepDeposit * FEED_LAY;
-    else if (!blocked) dep = stepDeposit * (tip ? TIP_LAY : spd / SPEED);
+    else if (!blocked) dep = stepDeposit * ((tip || agoal[k]) ? TIP_LAY : spd / SPEED);
     /* Traffic through a marked junction leaves more of itself there than
        traffic through a tube does, and leaves it whether or not the agent
        found a free cell to step into: an agent stalled in a crossroads is
@@ -3657,7 +3796,7 @@ function step() {
       if (occ[cell]) occ[cell]--;
       nAgents--;
       ax[k] = ax[nAgents]; ay[k] = ay[nAgents]; ah[k] = ah[nAgents];
-      atip[k] = atip[nAgents]; astv[k] = astv[nAgents]; aoff[k] = aoff[nAgents];
+      atip[k] = atip[nAgents]; astv[k] = astv[nAgents]; aoff[k] = aoff[nAgents]; agoal[k] = agoal[nAgents];
       continue;
     }
 
@@ -3690,7 +3829,7 @@ function step() {
         if (occ[cell]) occ[cell]--;
         nAgents--;
         ax[k] = ax[nAgents]; ay[k] = ay[nAgents]; ah[k] = ah[nAgents];
-        atip[k] = atip[nAgents]; astv[k] = astv[nAgents]; aoff[k] = aoff[nAgents];
+        atip[k] = atip[nAgents]; astv[k] = astv[nAgents]; aoff[k] = aoff[nAgents]; agoal[k] = agoal[nAgents];
         continue;
       }
     }
@@ -3783,7 +3922,9 @@ function step() {
   /* --- one body: what is off it is drawn back in — see CONN_T --- */
   recN = -1;   /* the tip list, if a draw below wants it, is this step's */
   if (stepsRun % CONN_EVERY === 0) labelMain();
-  if (mainOK) {
+  /* not while settling: a network drawn thin between its flakes is many
+     pieces by the trail test for a moment at a time, and each is the body */
+  if (mainOK && S.refineT0 < 0) {
     var nOff = 0;
     for (i = 0; i < nAgents; i++) if (aoff[i] >= CONN_GRACE) nOff++;
     if (nOff) {
@@ -3804,11 +3945,58 @@ function step() {
 
   /* --- biomass: fed by engulfed nodes, drained otherwise --- */
   var target = Math.min(S.engulfed * e.sustain, e.cap);
+  var starveRate = e.starve;
+  if (S.refineT0 >= 0 && e.refine) {
+    /* settling: the flakes are eaten, the target comes down from the cap to
+       `keep` of it over `dur`, and the cull runs fast enough to follow it */
+    var rf = Math.min(1, (S.simT - S.refineT0) / e.refine.dur);
+    var settle = Math.round(e.cap * (1 - (1 - e.refine.keep) * rf));
+    if (settle < target) target = settle;
+    var need = e.cap * (1 - e.refine.keep) / e.refine.dur;
+    if (need > starveRate) starveRate = need;
+    /* and the cytoplasm that is kept streams out of wherever it is idle into
+       the strongest tube that has room for it, `flow` agents a second: the
+       lapse and the keeping are the same movement — see drawTube */
+    if (e.refine.flow) {
+      S.flowAcc += e.refine.flow * DT;
+      while (S.flowAcc >= 1 && nAgents > 1) {
+        var idl = pickIdle();
+        if (idl < 0 || !drawTube(idl)) break;
+        S.flowAcc -= 1;
+      }
+      if (S.flowAcc > 4) S.flowAcc = 4;
+    }
+    /* Shuttle streaming. The organism in the dish moves cytoplasm between
+       its flakes through the tubes, and Tero's whole result is that the tubes
+       carrying that traffic thicken and the rest lapse. So `stream` agents a
+       second, standing on a flake, are sent to another flake: each walks the
+       tube network down that flake's geodesic, laying trail as it goes, and
+       the shortest tube between any two flakes is the one that gets walked.
+       Without it the settling kept pads and the short bridges between close
+       pairs and let every tube across the plate go. */
+    if (e.refine.stream && e.nodes.length > 1) {
+      if (stepsRun % TUBE_EVERY === 0 || !tubeDist.length) rebuildTubeGeo(e);
+      S.streamAcc += e.refine.stream * DT;
+      while (S.streamAcc >= 1 && nAgents > 0) {
+        S.streamAcc -= 1;
+        var sk = (rnd() * nAgents) | 0;
+        if (agoal[sk]) continue;
+        var sc = (ay[sk] | 0) * GW + (ax[sk] | 0);
+        var onN = feedAt[sc];
+        if (onN < 0) continue;
+        var to = (rnd() * (e.nodes.length - 1)) | 0;
+        if (to >= onN) to++;
+        if (tubeDist[to][sc] < 0) continue;   /* no tube reaches it: nothing to walk */
+        agoal[sk] = to + 1;
+      }
+      if (S.streamAcc > 4) S.streamAcc = 4;
+    }
+  }
   if (nAgents < target) {
     S.growAcc += (e.grow * DT);
     while (S.growAcc >= 1 && nAgents < target && nAgents < MAXA) { spawnAgent(); S.growAcc -= 1; }
-  } else if (S.simT > e.grace && nAgents > target) {
-    S.starveAcc += (e.starve * DT);
+  } else if ((S.simT > e.grace || S.refineT0 >= 0) && nAgents > target) {
+    S.starveAcc += (starveRate * DT);
     while (S.starveAcc >= 1 && nAgents > 0) {
       killWeakest();
       S.starveAcc -= 1;
@@ -3827,13 +4015,24 @@ function step() {
 
   /* --- end conditions --- */
   if (nAgents <= 0) { finish(false, 'starved'); return; }
-  if (winMet(e)) { finish(true, ''); return; }
+  if (S.refineT0 >= 0) {
+    /* settling: the run ends when the settling does, whatever the win test
+       says on the way — the ninth depot has been taken, the verdict is the
+       network */
+    if (S.simT - S.refineT0 >= e.refine.dur) { finish(true, ''); return; }
+  } else if (winMet(e)) {
+    if (e.refine) {
+      S.refineT0 = S.simT;
+      if (e.refine.text) logLine(e.refine.text, true);
+    } else { finish(true, ''); return; }
+  }
   /* the beat is narrative, not mechanical: the outcome was decided the
      moment the flake went in */
   if (S.dietDoomedT && S.simT >= S.dietDoomedT + 4) { finish(false, 'ratio'); return; }
   /* a clock that runs out during the beat does not change what happened:
      the ratio verdict stands once the plate is past saving */
-  if (e.timeLimit && S.simT >= e.timeLimit) { finish(false, S.dietDoomedT ? 'ratio' : 'timeout'); return; }
+  /* not during settling: the plate is spoken for, the clock has done its job */
+  if (e.timeLimit && S.refineT0 < 0 && S.simT >= e.timeLimit) { finish(false, S.dietDoomedT ? 'ratio' : 'timeout'); return; }
 }
 
 /* What the dish actually asks for. Every dish asks for the food gate and, if
@@ -6400,6 +6599,7 @@ function noteText(e) {
   /* Above the shock warning on purpose. A player who cannot steer needs to be
      told that before being told what to steer away from — and the fix (let go)
      is one word, so it costs the warning almost nothing to wait a beat. */
+  if (S.refineT0 >= 0 && e.refine) return 'settling — ' + Math.max(0, Math.ceil(e.refine.dur - (S.simT - S.refineT0))) + 's · the idle tubes lapse';
   if (cueCapOf(e) && S.cueRes <= 0) return 'reserve spent — release to recover it';
   if (S.shockActive) return 'DRY SHOCK — hold the refuges';
   if (S.shockWarn && S.slow < 0.98) return 'thickening early — the interval has a shape';
@@ -6513,13 +6713,21 @@ function markFor(score) {
    whole run 0 and 28. Monotone, and in the direction the axis is named for —
    which the axis this replaced was not: the parked run scored a PERFECT
    economy for starving its way to the same win. */
+/* The run's clock for the mark and the best time: the settling is a fixed
+   interval the dish imposes after the last node, not time the player spent,
+   so the clock stops where the settling starts. Scoring the settling would
+   have cut EXP-03's best possible mark below marks already saved from runs
+   that ended at the ninth depot. */
+function runClock() { return S.refineT0 >= 0 ? S.refineT0 : S.simT; }
+
 function runScore(e) {
-  var auto = S.simT > 0 ? clamp(1 - S.cueHeld / S.simT, 0, 1) : 1;
+  var rt = runClock();
+  var auto = rt > 0 ? clamp(1 - S.cueHeld / rt, 0, 1) : 1;
   var sum = W_AUTO * auto;
   var wt  = W_AUTO;
   var disp = -1;
   if (e.timeLimit) {
-    disp = clamp(1 - S.simT / e.timeLimit, 0, 1);
+    disp = clamp(1 - rt / e.timeLimit, 0, 1);
     sum += W_DISP * disp;
     wt  += W_DISP;
   }
@@ -6995,8 +7203,9 @@ var GHOST_ENT = 9;
    many draws it takes; PACE changes every dish's clock. */
 /* 4: the tip bar back at 3.0, the body test and reabsorption, recruitment
    gone, PACE 1. Each changes what a step does and how many draws it takes. */
-/* 5: the stalk. It changes the trail under every runner's thread. */
-var SIM_V = 5;
+/* 5: the stalk. It changes the trail under every runner's thread.
+   6: settling — a dish with `refine` runs on past its last node. */
+var SIM_V = 6;
 
 function ghostSig() {
   var h = mix32(SIM_V, Math.round(CUE_CAP * 1000), Math.round(CUE_REGEN * 1000));
@@ -7524,7 +7733,7 @@ function startRun(i, seed, trace) {
   S.engulfed = 0;
   S.hab = 0; S.habPeak = 0; S.habBuilt = -1; S.fused = false;
   S.dietP = 0; S.dietC = 0; S.dietDoomedT = 0;
-  S.growAcc = 0; S.starveAcc = 0; reabCursor = 0; mainOK = false;
+  S.growAcc = 0; S.starveAcc = 0; reabCursor = 0; mainOK = false; S.refineT0 = -1; S.flowAcc = 0; S.streamAcc = 0; tubeDist = [];
   S.shockNext = e.shock ? e.shock.first : 0;
   S.shockPeriod = e.shock ? e.shock.period : 0;
   S.shockActive = false; S.shockWarn = false; S.shocksSurvived = 0;
@@ -7660,7 +7869,8 @@ function finish(won, reason) {
            would have opened anyway. A link to a dish you have reached is just
            a run of it; a link past the gate is a look ahead, not a pass. */
         var prev = save.best[e.code];
-        if (!prev || S.simT < prev) save.best[e.code] = S.simT;
+        var rt2 = runClock();
+        if (!prev || rt2 < prev) save.best[e.code] = rt2;
         save.done[e.code] = true;
         S.logged = true;
         /* The mark, and with it the ghost. They move together on purpose: the
@@ -7729,7 +7939,7 @@ function buildResult(won) {
   }
 
   var rows = [
-    ['Elapsed', fmtTime(S.simT)],
+    ['Elapsed', fmtTime(runClock())],
     ['Peak biomass', fmtNum(S.peak) + ' nuclei'],
     ['Final biomass', fmtNum(nAgents) + ' nuclei'],
     ['Nodes engulfed', S.engulfed + ' / ' + e.nodes.length],
@@ -8514,7 +8724,8 @@ function init() {
         if (l) cnt[l] = (cnt[l] || 0) + 1;
       }
       for (var key in cnt) if (cnt[key] >= 5) n++;
-      return { ok: mainOK, off: off, islands: n };
+      var st = 0; for (i = 0; i < nAgents; i++) if (agoal[i]) st++;
+      return { ok: mainOK, off: off, islands: n, streaming: st };
     },
     /* a copy of the trail field, for measuring the network from outside */
     trail: function () { return Float32Array.prototype.slice.call(trail); },
