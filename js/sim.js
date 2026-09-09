@@ -5783,6 +5783,32 @@ var RIDGE_MIN_LO = RIDGE_MIN * RIDGE_HOLD;
 var RIDGE_K_LO   = RIDGE_K   * RIDGE_HOLD;
 var RIDGE_REL_LO = RIDGE_REL * RIDGE_HOLD;
 var RIDGE_MINPTS = 5;        // a chain shorter than this is speckle
+/* ---- the joins ----
+   A chain ends where the walk finds no next cell: a cell that failed the
+   curvature floor, a flat that ridgeStep's two-cell reach cannot cross, a
+   side branch that stops a few cells short of the trunk it was heading
+   for. The vein under it does not end there; the sheet used to draw the
+   rest, and with the sheet gone every such gap is a break in the line.
+   So each chain end reaches for what it was walking toward: it marches
+   up to JOIN_R cells along its own tangent, one cell either side, and the
+   first cell that belongs to another chain gets a segment from the end to
+   that cell's crest, in the end's own band and tier. rchain says which
+   chain a cell is on (0 for none, or for a chain dropped as speckle), and
+   the endpoint lists are filled as chains are emitted. */
+var JOIN_R = 8;              // cells a chain end reaches, along its tangent
+var EP_CAP = 16384;
+var rchain = new Int32Array(NCELL);
+var epX = new Float32Array(EP_CAP), epY = new Float32Array(EP_CAP);
+var epDX = new Float32Array(EP_CAP), epDY = new Float32Array(EP_CAP);
+var epB = new Uint8Array(EP_CAP), epK = new Uint8Array(EP_CAP), epC = new Int32Array(EP_CAP);
+var epN = 0, chainN = 0;
+function noteEnd(x, y, tx, ty, b, k, c) {
+  if (epN >= EP_CAP) return;
+  var len = Math.sqrt(tx * tx + ty * ty);
+  if (len < 1e-6) return;
+  epX[epN] = x; epY[epN] = y; epDX[epN] = tx / len; epDY[epN] = ty / len;
+  epB[epN] = b; epK[epN] = k; epC[epN] = c; epN++;
+}
 var chx = new Float32Array(4096);
 var chy = new Float32Array(4096);
 var chi = new Int32Array(4096);      // the cell each chain point stands on
@@ -6134,6 +6160,7 @@ function buildVeins() {
      dropped, which is a far better filter for noise than any threshold on a
      single cell. */
   rvis.fill(0);
+  rchain.fill(0); epN = 0; chainN = 0;
   for (y = 2; y < GH - 2; y++) {
     var row2 = y * GW;
     for (x = 2; x < GW - 2; x++) {
@@ -6235,7 +6262,44 @@ function buildVeins() {
       }
       arr[rstart + 1] = n - rq;
       vsegN[b] = w;
+      /* for the joins: the cells this chain owns, and its two ends with the
+         tangent pointing out of the chain, taken over two points so a single
+         cell's wobble does not set it */
+      chainN++;
+      for (var bc = 0; bc < n; bc++) rchain[chi[bc]] = chainN;
+      noteEnd(chx[0], chy[0], chx[0] - chx[2], chy[0] - chy[2], b, envBucket(venv[chi[0]]), chainN);
+      noteEnd(chx[n - 1], chy[n - 1], chx[n - 1] - chx[n - 3], chy[n - 1] - chy[n - 3], b, envBucket(venv[chi[n - 1]]), chainN);
     }
+  }
+
+  /* --- the joins: a chain end reaches for the chain it was walking toward --- */
+  for (var je = 0; je < epN; je++) {
+    var ex = epX[je], ey = epY[je], jdx = epDX[je], jdy = epDY[je];
+    var own = epC[je], hit = -1, blocked = false;
+    for (var js = 1; js <= JOIN_R && hit < 0; js++) {
+      var sx0 = ex + jdx * js, sy0 = ey + jdy * js;
+      for (var jside = 0; jside < 3 && hit < 0; jside++) {
+        var joff = jside === 0 ? 0 : (jside === 1 ? 1 : -1);
+        var jix = Math.round(sx0 - jdy * joff), jiy = Math.round(sy0 + jdx * joff);
+        if (jix < 1 || jiy < 1 || jix >= GW - 1 || jiy >= GH - 1) continue;
+        var cj = jiy * GW + jix;
+        /* a wall ends the reach: a chain on the far side of a closed door
+           is not the chain this end was walking toward, and a join drawn
+           across the door would show the gate as open */
+        if (wallM[cj]) { blocked = true; break; }
+        var rc = rchain[cj];
+        if (rc && rc !== own) hit = cj;
+      }
+      if (blocked) break;
+    }
+    if (hit < 0) continue;
+    var jb = epB[je], ja = vseg[jb], jw = vsegN[jb];
+    if (jw + 6 > VEIN_CAP) continue;
+    var jd = rdir[hit];
+    var jx = (hit % GW) + 0.5 + roff[hit] * RIDGE_DIR[jd].ax;
+    var jy = ((hit / GW) | 0) + 0.5 + roff[hit] * RIDGE_DIR[jd].ay;
+    ja[jw++] = epK[je]; ja[jw++] = 2; ja[jw++] = ex; ja[jw++] = ey; ja[jw++] = jx; ja[jw++] = jy;
+    vsegN[jb] = jw;
   }
 
   /* Bake each band into Path2Ds, in grid coordinates — one per presence tier,
