@@ -6713,13 +6713,21 @@ function markFor(score) {
    whole run 0 and 28. Monotone, and in the direction the axis is named for —
    which the axis this replaced was not: the parked run scored a PERFECT
    economy for starving its way to the same win. */
+/* The run's clock for the mark and the best time: the settling is a fixed
+   interval the dish imposes after the last node, not time the player spent,
+   so the clock stops where the settling starts. Scoring the settling would
+   have cut EXP-03's best possible mark below marks already saved from runs
+   that ended at the ninth depot. */
+function runClock() { return S.refineT0 >= 0 ? S.refineT0 : S.simT; }
+
 function runScore(e) {
-  var auto = S.simT > 0 ? clamp(1 - S.cueHeld / S.simT, 0, 1) : 1;
+  var rt = runClock();
+  var auto = rt > 0 ? clamp(1 - S.cueHeld / rt, 0, 1) : 1;
   var sum = W_AUTO * auto;
   var wt  = W_AUTO;
   var disp = -1;
   if (e.timeLimit) {
-    disp = clamp(1 - S.simT / e.timeLimit, 0, 1);
+    disp = clamp(1 - rt / e.timeLimit, 0, 1);
     sum += W_DISP * disp;
     wt  += W_DISP;
   }
@@ -7861,7 +7869,8 @@ function finish(won, reason) {
            would have opened anyway. A link to a dish you have reached is just
            a run of it; a link past the gate is a look ahead, not a pass. */
         var prev = save.best[e.code];
-        if (!prev || S.simT < prev) save.best[e.code] = S.simT;
+        var rt2 = runClock();
+        if (!prev || rt2 < prev) save.best[e.code] = rt2;
         save.done[e.code] = true;
         S.logged = true;
         /* The mark, and with it the ghost. They move together on purpose: the
@@ -7930,7 +7939,7 @@ function buildResult(won) {
   }
 
   var rows = [
-    ['Elapsed', fmtTime(S.simT)],
+    ['Elapsed', fmtTime(runClock())],
     ['Peak biomass', fmtNum(S.peak) + ' nuclei'],
     ['Final biomass', fmtNum(nAgents) + ' nuclei'],
     ['Nodes engulfed', S.engulfed + ' / ' + e.nodes.length],
