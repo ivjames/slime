@@ -898,7 +898,7 @@ var EXPERIMENTS = [
        keep 0.3 into a few thick tubes between the depots with the plate
        between them bare, which is the paper's second day. The verdict comes
        at the end of the settling, not at the ninth depot. */
-    refine: { dur: 120, keep: 0.3, flow: 160, sense: 3, stream: 100,
+    refine: { dur: 120, keep: 0.2, flow: 60, sense: 3, stream: 250,
               text: 'nine on one network. now the network decides which of itself to keep.' },
     script: [
       { t: 2, hi: true, text: 'nine depots. the dish is the wrong shape for a city and you do not care.' },
@@ -2533,11 +2533,7 @@ function buildFood() {
     /* A spent node keeps a short, shallow pull: enough to hold the plasmodium
        on it as a refuge, not enough to outbid fresh food further away. Giving
        it the full reach made the gradient point back at food already eaten. */
-    /* While a dish settles its flakes are food again at full pull: the
-       organism in the photographs is still feeding on every one of them
-       while it prunes, and that is what anchors the network to the flakes
-       instead of letting it draw up into a clump or two. */
-    var done = S.nodeDone[ni] && S.refineT0 < 0;
+    var done = S.nodeDone[ni];
     var fall = done ? SPENT_FALL : FALL;
     var amp = done ? SPENT_FOOD : 1;
     var core = done ? 0 : e.nodes[ni].r * 2.4;
@@ -3029,6 +3025,48 @@ function pickIdle() {
    the weakest lapse first, and a tube between two distant flakes is a tube
    with cytoplasm in it. Mass is conserved; what moves is where it stands. */
 var TUBE_T = 20;
+
+/* Geodesics over TUBE, for the streaming: from each flake, the distance to
+   every cell along cells that carry at least TUBE_T / 2 of trail, 8-connected.
+   The open-agar geodesic sent streaming agents straight across bare plate,
+   which laid specks and no tube; on the tube network the shortest route
+   between two flakes is a route the mesh already built, and walking it is
+   what keeps it. Rebuilt every TUBE_EVERY steps while a dish settles, so the
+   routes follow the tubes that survive. -1 where no tube reaches. */
+var TUBE_EVERY = 30;
+var tubeDist = [];
+function rebuildTubeGeo(e) {
+  var i, ni, half = TUBE_T * 0.5;
+  for (ni = 0; ni < e.nodes.length; ni++) {
+    var D = tubeDist[ni];
+    if (!D) { D = new Int32Array(NCELL); tubeDist[ni] = D; }
+    D.fill(-1);
+    var nd = e.nodes[ni], head = 0, tail = 0;
+    var x0 = Math.max(0, (nd.x - nd.r) | 0), x1 = Math.min(GW - 1, (nd.x + nd.r) | 0);
+    var y0 = Math.max(0, (nd.y - nd.r) | 0), y1 = Math.min(GH - 1, (nd.y + nd.r) | 0);
+    for (var yy = y0; yy <= y1; yy++) for (var xx = x0; xx <= x1; xx++) {
+      var dx = xx - nd.x, dy = yy - nd.y;
+      if (dx * dx + dy * dy > nd.r * nd.r) continue;
+      var c0 = yy * GW + xx;
+      if (wallM[c0]) continue;
+      D[c0] = 0; connQ[tail++] = c0;
+    }
+    while (head < tail) {
+      var c = connQ[head++], d = D[c] + 1;
+      var cx = c % GW, cy = (c / GW) | 0;
+      for (var oy = -1; oy <= 1; oy++) {
+        var ny = cy + oy; if (ny < 0 || ny >= GH) continue;
+        for (var ox = -1; ox <= 1; ox++) {
+          if (!ox && !oy) continue;
+          var nx = cx + ox; if (nx < 0 || nx >= GW) continue;
+          var nc = ny * GW + nx;
+          if (D[nc] >= 0 || wallM[nc] || trail[nc] < half) continue;
+          D[nc] = d; connQ[tail++] = nc;
+        }
+      }
+    }
+  }
+}
 function drawTube(k) {
   var best = -1, bestV = TUBE_T;
   for (var t = 0; t < 16; t++) {
@@ -3555,22 +3593,20 @@ function step() {
     /* streaming — see the settling block: bound for a flake, down its
        geodesic, along tube where there is tube to walk */
     if (agoal[k]) {
-      var gn = agoal[k] - 1, gdm = nodeDist[gn];
-      if (!gdm || gdm[here] <= e.nodes[gn].r) agoal[k] = 0;
+      var gn = agoal[k] - 1, gdm = tubeDist[gn];
+      var ghere = gdm ? gdm[here] : -1;
+      if (ghere < 0 || ghere === 0) agoal[k] = 0;   /* arrived, or the tube went from under it */
       else {
-        var gbest = -1, gbv = 1e9, gbt = -1, gbtv = 1e9;
+        var gbest = -1, gbv = ghere;
         for (var gd = 0; gd < 8; gd++) {
           var ga = gd * Math.PI / 4;
           var gx = (x + Math.cos(ga) * 1.5) | 0, gy = (y + Math.sin(ga) * 1.5) | 0;
           if (gx < 0 || gy < 0 || gx >= GW || gy >= GH) continue;
-          var gi = gy * GW + gx;
-          if (wallM[gi]) continue;
-          var gv = gdm[gi];
-          if (gv < gbv) { gbv = gv; gbest = gd; }
-          if (trail[gi] >= TUBE_T * 0.5 && gv < gbtv) { gbtv = gv; gbt = gd; }
+          var gv = gdm[gy * GW + gx];
+          if (gv >= 0 && gv < gbv) { gbv = gv; gbest = gd; }
         }
-        var gpick = gbt >= 0 ? gbt : gbest;
-        if (gpick >= 0) h = gpick * Math.PI / 4;
+        if (gbest >= 0) h = gbest * Math.PI / 4;
+        else agoal[k] = 0;   /* no downhill tube from here: let it go */
       }
     }
     if (feeding && !agoal[k]) {
@@ -3939,6 +3975,7 @@ function step() {
        Without it the settling kept pads and the short bridges between close
        pairs and let every tube across the plate go. */
     if (e.refine.stream && e.nodes.length > 1) {
+      if (stepsRun % TUBE_EVERY === 0 || !tubeDist.length) rebuildTubeGeo(e);
       S.streamAcc += e.refine.stream * DT;
       while (S.streamAcc >= 1 && nAgents > 0) {
         S.streamAcc -= 1;
@@ -3949,6 +3986,7 @@ function step() {
         if (onN < 0) continue;
         var to = (rnd() * (e.nodes.length - 1)) | 0;
         if (to >= onN) to++;
+        if (tubeDist[to][sc] < 0) continue;   /* no tube reaches it: nothing to walk */
         agoal[sk] = to + 1;
       }
       if (S.streamAcc > 4) S.streamAcc = 4;
@@ -3985,7 +4023,6 @@ function step() {
   } else if (winMet(e)) {
     if (e.refine) {
       S.refineT0 = S.simT;
-      buildFood();   /* the flakes pull again — see buildFood */
       if (e.refine.text) logLine(e.refine.text, true);
     } else { finish(true, ''); return; }
   }
@@ -7688,7 +7725,7 @@ function startRun(i, seed, trace) {
   S.engulfed = 0;
   S.hab = 0; S.habPeak = 0; S.habBuilt = -1; S.fused = false;
   S.dietP = 0; S.dietC = 0; S.dietDoomedT = 0;
-  S.growAcc = 0; S.starveAcc = 0; reabCursor = 0; mainOK = false; S.refineT0 = -1; S.flowAcc = 0; S.streamAcc = 0;
+  S.growAcc = 0; S.starveAcc = 0; reabCursor = 0; mainOK = false; S.refineT0 = -1; S.flowAcc = 0; S.streamAcc = 0; tubeDist = [];
   S.shockNext = e.shock ? e.shock.first : 0;
   S.shockPeriod = e.shock ? e.shock.period : 0;
   S.shockActive = false; S.shockWarn = false; S.shocksSurvived = 0;
