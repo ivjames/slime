@@ -6441,7 +6441,10 @@ function buildVeins() {
          cleared between them: with the level tolerance the cell just left
          is often the highest neighbour, and a walk allowed back onto it
          would rock between two cells until its steps ran out */
-      jstamp++;
+      /* the stamp lives in an Int32Array: wrapped well short of the sign
+         bit, clearing the array with it, so a tab left running for years
+         does not turn the visited test off */
+      if (++jstamp > 2000000000) { jvis.fill(0); jstamp = 1; }
       jvis[cc] = jstamp;
       for (var st = 0; st < JOIN_CLIMB && hit < 0 && mass < 0; st++) {
         var best = -1, bv = cv * 0.90;   /* rising, or near enough level: a thread's root is a shallow climb */
