@@ -758,9 +758,11 @@ var FEED_SPEED = 0.30; // floor under a feeding agent's speed, so the pad can fi
    by nine tenths in the twenty seconds after the arc closed. Both now run
    down along the same line as progress runs up, from 1 at first contact to
    SPENT_FOOD at done, so nothing jumps at the flag — done is the far end of
-   the curve the flake was already on. The rate a flake is eaten at is not
-   tapered: it is set by the agents present, which the thinner hold reduces
-   on its own, and the dish times were tuned to that. Rebuilding the field is
+   the curve the flake was already on. The hold is not scaled down; the pad
+   it holds is sized down (see FEED_FILL's use in the step), which is the
+   same thinning on a full pad and no loosening at all on a sparse one. The
+   rate a flake is eaten at follows the same size (ENGULF_SOFT's use), so a
+   smaller pad on less food eats it at the pace the full pad ate the whole. Rebuilding the field is
    a pass over the dish per flake, so it happens when a flake's progress
    crosses one of FOOD_Q steps, not every step. */
 var FOOD_Q = 8;        // progress steps between rebuilds of the food field
@@ -3690,11 +3692,20 @@ function step() {
           var frim = fnd.r * FEED_R;
           var fout = (fdd - fnd.r) / (frim - fnd.r);
           if (fout > 1) fout = 1;
-          var froom = 1 - nodeLoad[fi] / (FEED_FILL * Math.PI * fnd.r * fnd.r);
-          /* ...and by how much food is left: the hold runs down to the spent
-             level as the flake goes, so the pad thins instead of collapsing */
-          var fleft = SPENT_FOOD + (1 - SPENT_FOOD) * foodLeft(fi);
-          if (froom > 0) fturn = FEED_HOLD * fout * froom * fleft;
+          /* ...against a pad sized to the food LEFT, not to the flake: what
+             remains of a three-quarters-eaten flake is covered by a quarter
+             of the agents the whole took, so the valve opens at a quarter of
+             the load, and the pad thins as the food goes instead of
+             collapsing when it is gone. Sized, not scaled: scaling the hold
+             itself by the food left loosened it on a pad that was nowhere
+             near full, and on the fire drill, where the shocks leave a
+             hundred agents to finish a flake, the survivors let go of one at
+             nine tenths, the progress ran back down (ENGULF_DECAY) and the
+             culture starved with nothing engulfed. A pad that is under the
+             reduced capacity is held as hard as ever. */
+          var fcap = FEED_FILL * Math.PI * fnd.r * fnd.r * (SPENT_FOOD + (1 - SPENT_FOOD) * foodLeft(fi));
+          var froom = 1 - nodeLoad[fi] / fcap;
+          if (froom > 0) fturn = FEED_HOLD * fout * froom;
           fwant = Math.atan2(-fdy, -fdx);          /* back toward the middle */
         }
         if (fturn > 0) {
