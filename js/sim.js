@@ -3978,6 +3978,10 @@ function step() {
         k = idleCursor;
         idleCursor = (idleCursor + 1 >= nAgents) ? 0 : idleCursor + 1;
         if (aidle[k] < IDLE_GRACE || atip[k] || agoal[k]) continue;
+        /* the clock is from the last labelling, up to ten steps old: an agent
+           that has since walked onto a working tube or a flake is not idle */
+        var ic = (ay[k] | 0) * GW + (ax[k] | 0);
+        if (trail[ic] < ADRIFT_T || condF[ic] >= IDLE_C || feedAt[ic] >= 0) { aidle[k] = 0; continue; }
         if (drawFront(k)) { aidle[k] = 0; iq--; }
         else break;   /* no tip to feed: the branch stays until there is one */
       }
