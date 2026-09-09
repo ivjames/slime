@@ -5549,12 +5549,24 @@ var VEIN_BANDS = [
    a lobe is body, so the shape's own shadow shades it along with everything
    else the mold is made of.
 
-   Drawn as a union of overlapping discs on a two-cell lattice rather than as
-   a fitted outline: the masses are not circles, and a union of discs takes
-   whatever shape the field has while a fitted circle imposes one. */
+   Drawn as the OUTLINE of the marked cells rather than as a disc on each:
+   the marked cells are a mask on the two-cell lattice, the mask's boundary
+   is traced (marching squares, one Chaikin pass to take the corners off),
+   pushed outward by LOBE_OUT so a single row of cells is as wide as the
+   discs it replaces, and filled once. A union of discs took whatever shape
+   the field had, which was the point of it, but its edge was the discs' —
+   scalloped by a quarter of a cell everywhere and beaded wherever the
+   lattice thinned — and with the sheet gone from under it that edge was the
+   picture. A traced outline has the same shape and one edge. */
 var LOBE_MARK = 0.30;  // junction mark at which a lobe is drawn
 var LOBE_PAD  = 24;    // ...and the blurred trail a pad needs to be drawn at all
-var LOBE_DOT  = 1.9;   // radius of each disc in the union, cells
+var LOBE_OUT  = 0.9;   // how far past the mask's boundary a mass is drawn, cells
+/* the mask itself, one slot per lattice cell: the presence tier the cell is
+   drawn at, or -1. Filled from lseg/lbuck at bake, read by the tracer. */
+var LW = GW >> 1, LH = GH >> 1;
+var ltier = new Int8Array(LW * LH);
+var lnext = new Int32Array(LW * LH * 2);  // marching-squares edge links, per trace
+var lseen2 = new Uint8Array(LW * LH * 2);
 /* One slot per cell of the two-cell lattice, so the list cannot overflow and
    there is no cap to test against inside the loop that fills it. */
 var LOBE_CAP  = ((GW >> 1) + 1) * ((GH >> 1) + 1);
@@ -5666,13 +5678,6 @@ var ENV_DN_TAU = 0.18;                // sim-seconds to fall
 /* Three tiers rather than a continuous alpha, because a continuous alpha is a
    Path2D per distinct value: the whole layer stays a handful of draw calls. */
 var BUCK_A  = [0.35, 0.68, 1];        // stroke alpha per tier
-/* Disc radius per tier. It used to scale in with the tier (0.50, 0.78, 1), a
-   mass growing to size as it arrived; under the sheet that read as growth,
-   and on bare agar it reads as beads — a half-radius disc on the two-cell
-   lattice does not reach its neighbour, so an arriving mass was a string
-   of dots until it settled. The alpha tiers carry the arrival on their own;
-   the discs are full size from the first. */
-var LOBE_RK = [1, 1, 1];
 function envBucket(p) { return p < 0.35 ? 0 : (p < 0.75 ? 1 : 2); }
 
 /* The other half of the envelope, and the half the tiers cannot do: FADE-OUT.
@@ -5867,6 +5872,78 @@ function ridgeStep(cx, cy, d, sign) {
 var TIP_WHISK = 2.6;   // cells
 var TIP_STYLE = rgba(mixWhite(PLASMODIUM, 0.42), '0.34');  /* tintVeins owns it */
 var TIP_W = 0.17;
+
+/* The outline of the lattice cells at or above a presence tier, as a Path2D
+   in grid space, pushed outward by `out` cells; null if there is none.
+
+   Marching squares over the lattice: each square of four cells is one of
+   sixteen cases, and each case cuts the square with zero, one or two
+   segments between edge midpoints. The segments are oriented so the mass
+   is always on the same side, which makes every edge midpoint the start of
+   exactly one segment, and the loops are then a walk along those links
+   with no search. The two saddle cases are cut apart rather than joined,
+   so two masses touching at a corner stay two.
+
+   A loop of four points is a lone cell — the one-rebuild blink that used
+   to be a dot beside the network — and is not drawn. The rest are pushed
+   outward along the vertex normal and rounded with one pass of Chaikin's
+   corner cutting, which is what turns a staircase of one-cell cuts into an
+   edge. */
+var MS_FROM  = [-1, 0, 1, 1, 2, 0, 2, 2, 3, 0, 1, 1, 3, 0, 3, -1];
+var MS_TO    = [-1, 3, 0, 3, 1, 3, 0, 3, 2, 2, 0, 2, 1, 1, 0, -1];
+var MS_FROM2 = [-1, -1, -1, -1, -1, 2, -1, -1, -1, -1, 3, -1, -1, -1, -1, -1];
+var MS_TO2   = [-1, -1, -1, -1, -1, 1, -1, -1, -1, -1, 2, -1, -1, -1, -1, -1];
+var msEid = [0, 0, 0, 0];
+function traceMass(minTier, out) {
+  var NE = LW * LH, lx, ly, e;
+  lnext.fill(-1);
+  for (ly = 0; ly < LH - 1; ly++) {
+    for (lx = 0; lx < LW - 1; lx++) {
+      var n = ly * LW + lx;
+      var c = (ltier[n] >= minTier ? 1 : 0) | (ltier[n + 1] >= minTier ? 2 : 0) |
+              (ltier[n + LW + 1] >= minTier ? 4 : 0) | (ltier[n + LW] >= minTier ? 8 : 0);
+      if (c === 0 || c === 15) continue;
+      /* edges: 0 top (H lx,ly), 1 right (V lx+1,ly), 2 bottom (H lx,ly+1), 3 left (V lx,ly) */
+      msEid[0] = n; msEid[1] = NE + n + 1; msEid[2] = n + LW; msEid[3] = NE + n;
+      lnext[msEid[MS_FROM[c]]] = msEid[MS_TO[c]];
+      if (MS_FROM2[c] >= 0) lnext[msEid[MS_FROM2[c]]] = msEid[MS_TO2[c]];
+    }
+  }
+  lseen2.fill(0);
+  var path = null, px = [], py = [];
+  for (e = 0; e < NE * 2; e++) {
+    if (lnext[e] < 0 || lseen2[e]) continue;
+    px.length = 0; py.length = 0;
+    var cur = e, guard = 0;
+    do {
+      lseen2[cur] = 1;
+      if (cur < NE) { px.push(((cur % LW) << 1) + 1.5); py.push((((cur / LW) | 0) << 1) + 0.5); }
+      else { var v = cur - NE; px.push(((v % LW) << 1) + 0.5); py.push((((v / LW) | 0) << 1) + 1.5); }
+      cur = lnext[cur];
+    } while (cur >= 0 && cur !== e && !lseen2[cur] && ++guard < NE * 2);
+    var m = px.length;
+    if (m < 6) continue;
+    if (!path) path = new Path2D();
+    /* push out along the vertex normal — outward is to the right of travel
+       in screen space, by the orientation the table fixes — then cut corners */
+    var ox = new Array(m), oy = new Array(m), k;
+    for (k = 0; k < m; k++) {
+      var kp = k ? k - 1 : m - 1, kn = k + 1 < m ? k + 1 : 0;
+      var dx = px[kn] - px[kp], dy = py[kn] - py[kp];
+      var len = Math.sqrt(dx * dx + dy * dy) || 1;
+      ox[k] = px[k] + dy / len * out; oy[k] = py[k] - dx / len * out;
+    }
+    for (k = 0; k < m; k++) {
+      var kn2 = k + 1 < m ? k + 1 : 0;
+      var qx = ox[k] * 0.75 + ox[kn2] * 0.25, qy = oy[k] * 0.75 + oy[kn2] * 0.25;
+      var rx = ox[k] * 0.25 + ox[kn2] * 0.75, ry = oy[k] * 0.25 + oy[kn2] * 0.75;
+      if (k === 0) path.moveTo(qx, qy); else path.lineTo(qx, qy);
+      path.lineTo(rx, ry);
+    }
+    path.closePath();
+  }
+  return path;
+}
 
 function buildVeins() {
   var b, i, x, y, bestLo = 0, bestHi = 0;
@@ -6171,26 +6248,21 @@ function buildVeins() {
     veinPath[b] = tier;
   }
 
-  /* --- the masses: one disc per marked cell, baked per presence tier ---
-     A mass arrives by growing as well as brightening: the disc radius scales
-     with the tier, so a fresh lobe swells in from six-tenths size instead of
-     stamping on at full — which is the "short scaling animation" version of
-     the same envelope, affordable here because a disc's size is one number. */
+  /* --- the masses: the outline of the marked cells, per presence tier ---
+     Three nested outlines, of the cells at tier 0 and above, 1 and above,
+     and 2: each is filled over the last at its own alpha (with the punch
+     that keeps the alphas from stacking), so a cell shows its own tier and
+     the edge between tiers is a step inside one shape rather than a seam
+     between two. The mask path for the veil's punch is the widest outline a
+     quarter-cell wider still, as the discs' was. */
   if (lsegN) {
-    var lps = [null, null, null];
-    var lmp = new Path2D();
-    var lmr = LOBE_DOT + 0.25;
+    ltier.fill(-1);
     for (i = 0; i < lsegN; i++) {
-      var lk = lbuck[i];
-      var lp = lps[lk] || (lps[lk] = new Path2D());
-      var lr = LOBE_DOT * LOBE_RK[lk];
-      lp.moveTo(lseg[i * 2] + lr, lseg[i * 2 + 1]);
-      lp.arc(lseg[i * 2], lseg[i * 2 + 1], lr, 0, Math.PI * 2);
-      lmp.moveTo(lseg[i * 2] + lmr, lseg[i * 2 + 1]);
-      lmp.arc(lseg[i * 2], lseg[i * 2 + 1], lmr, 0, Math.PI * 2);
+      ltier[(((lseg[i * 2 + 1] - 0.5) | 0) >> 1) * LW + (((lseg[i * 2] - 0.5) | 0) >> 1)] = lbuck[i];
     }
-    lobePath = lps;
-    lobeMaskPath = lmp;
+    var lps = [traceMass(0, LOBE_OUT), traceMass(1, LOBE_OUT), traceMass(2, LOBE_OUT)];
+    lobePath = lps[0] ? lps : null;
+    lobeMaskPath = lps[0] ? traceMass(0, LOBE_OUT + 0.25) : null;
   } else {
     lobePath = null;
     lobeMaskPath = null;
