@@ -2991,6 +2991,7 @@ function killWeakest() {
        the cytoplasm following it in — so the search is protected while there
        is anything genuinely idle to take instead. */
     if (atip[c]) v += 1;
+    if (agoal[c]) v += 1;           /* streaming: on a bare tube by design */
     if (traceF[ci2] > 0) v += 0.5;
     if (v < worst) { worst = v; k = c; }
   }
@@ -3011,6 +3012,7 @@ function pickIdle() {
     var ci2 = (ay[c] | 0) * GW + (ax[c] | 0);
     var v = condF[ci2];
     if (atip[c]) v += 1;
+    if (agoal[c]) v += 1;           /* streaming: on a bare tube by design */
     if (traceF[ci2] > 0) v += 0.5;
     if (v < worst) { worst = v; k = c; }
   }
@@ -3681,7 +3683,7 @@ function step() {
     var kn = knotF[cell];
     var dep = 0;
     if (feeding) dep = stepDeposit * FEED_LAY;
-    else if (!blocked) dep = stepDeposit * (tip ? TIP_LAY : spd / SPEED);
+    else if (!blocked) dep = stepDeposit * ((tip || agoal[k]) ? TIP_LAY : spd / SPEED);
     /* Traffic through a marked junction leaves more of itself there than
        traffic through a tube does, and leaves it whether or not the agent
        found a free cell to step into: an agent stalled in a crossroads is
@@ -8676,7 +8678,8 @@ function init() {
         if (l) cnt[l] = (cnt[l] || 0) + 1;
       }
       for (var key in cnt) if (cnt[key] >= 5) n++;
-      return { ok: mainOK, off: off, islands: n };
+      var st = 0; for (i = 0; i < nAgents; i++) if (agoal[i]) st++;
+      return { ok: mainOK, off: off, islands: n, streaming: st };
     },
     /* a copy of the trail field, for measuring the network from outside */
     trail: function () { return Float32Array.prototype.slice.call(trail); },
