@@ -4277,8 +4277,8 @@ function resizeCanvas() {
   var dpr = Math.min(window.devicePixelRatio || 1, 2);
   var w = Math.max(320, Math.round(wCss * dpr));
   var h = Math.round(w * GH / GW);
-  var want = Math.round(w / GW / 2.5);
-  if (want < 1) want = 1; else if (want > 3) want = 3;
+  var ppc = w / GW;   /* device pixels per cell */
+  var want = ppc >= 4 ? 3 : (ppc >= 2 ? 2 : 1);
   if (want !== SUP) {
     SUP = want;
     allocField();
@@ -4383,10 +4383,11 @@ var shpT = new Float32Array(NCELL);   // scratch for the separable pass
    as coverage rather than re-thresholded, so a one-cell corridor stays
    closed and loses its corners. Costs SUP squared subpixels a cell every
    rebuild — 3 took the x1 step rate from 57 to 47 a second in headless
-   Chromium — so it follows the canvas: 3 where a cell is seven or more
-   device pixels (a tablet at dpr 2), 2 on a laptop, 1 on a phone, where the
-   cells are near the pixels already and the cost buys nothing. Set in
-   resizeCanvas(), which reallocates the field image when it changes. */
+   Chromium — so it follows the canvas: 3 where a cell is four or more
+   device pixels (a tablet or a retina laptop), 2 from two, 1 below that,
+   where the cells are near the pixels already and the cost buys nothing.
+   Set in resizeCanvas(), which reallocates the field image when it
+   changes. */
 var SUP = 1;
 var gndR = new Float32Array(NCELL), gndG = new Float32Array(NCELL), gndB = new Float32Array(NCELL);
 var tF = new Float32Array(NCELL);      // sharpened eased field, per cell
