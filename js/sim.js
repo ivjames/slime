@@ -5910,6 +5910,35 @@ var JOIN_CLIMB = 24;         // cells a chain end climbs the trail
 var JOIN_FLOOR = RIDGE_MIN;  // trail below which there is nothing to climb
 var jcx = new Float32Array(JOIN_CLIMB + 2), jcy = new Float32Array(JOIN_CLIMB + 2);
 var jvis = new Int32Array(NCELL), jstamp = 0;   // cells a climb has stood on, by endpoint
+/* ---- one drawing ----
+   Everything above reaches for a gap it can see from a chain end. This is
+   the guarantee behind it: after the reaches, the drawn pieces — chains,
+   masses, the joins between them — are one graph, and any piece not
+   connected to the main piece is connected to it by the shortest path
+   through the organism's own tissue, found by a breadth-first search from
+   the main piece over the cells the body test counts as body (trail at
+   CONN_T or more, no walls), and drawn as walked, in the piece's band. The
+   simulation keeps the organism one body by that same test, so the path
+   exists for every piece that is body; a piece with no path is an island
+   the simulation is a few steps from reabsorbing, and is counted
+   (veinIslands) rather than drawn to. Chains are entities 1..chainN, drawn
+   lattice cells chainN+1 onward; union-find joins what touches. */
+var OUF_CAP = 16384 + LW * LH;
+var ouf = new Int32Array(OUF_CAP), esz = new Int32Array(OUF_CAP);
+var obest = new Int32Array(OUF_CAP), obd = new Int32Array(OUF_CAP);
+var opar = new Int32Array(NCELL), odist = new Int32Array(NCELL), oq = new Int32Array(NCELL);
+var JP_CAP = 16384;
+var jpA = new Int32Array(JP_CAP), jpB = new Int32Array(JP_CAP), jpN = 0;
+var veinIslands = 0;
+function ufind(a) {
+  while (ouf[a] !== a) { ouf[a] = ouf[ouf[a]]; a = ouf[a]; }
+  return a;
+}
+function uunion(a, b) {
+  var ra = ufind(a), rb = ufind(b);
+  if (ra === rb) return;
+  ouf[ra] = rb; esz[rb] += esz[ra];
+}
 var EP_CAP = 16384;
 var rchain = new Int32Array(NCELL);
 var epX = new Float32Array(EP_CAP), epY = new Float32Array(EP_CAP);
@@ -6288,7 +6317,7 @@ function buildVeins() {
      dropped, which is a far better filter for noise than any threshold on a
      single cell. */
   rvis.fill(0);
-  rchain.fill(0); epN = 0; chainN = 0;
+  rchain.fill(0); epN = 0; chainN = 0; jpN = 0;
   for (y = 2; y < GH - 2; y++) {
     var row2 = y * GW;
     for (x = 2; x < GW - 2; x++) {
@@ -6466,6 +6495,7 @@ function buildVeins() {
       if (hit < 0 && mass < 0) continue;
       var jb2 = epB[je], ja2 = vseg[jb2], jw2 = vsegN[jb2];
       if (jw2 + (nc + 1) * 2 + 2 > VEIN_CAP) continue;
+      if (jpN < JP_CAP) { jpA[jpN] = own; jpB[jpN] = hit >= 0 ? rchain[hit] : chainN + 1 + (((mass / GW) | 0) >> 1) * LW + ((mass % GW) >> 1); jpN++; }
       ja2[jw2++] = epK[je]; ja2[jw2++] = nc + 1; ja2[jw2++] = ex; ja2[jw2++] = ey;
       for (var jq = 0; jq < nc; jq++) { ja2[jw2++] = jcx[jq]; ja2[jw2++] = jcy[jq]; }
       vsegN[jb2] = jw2;
@@ -6482,8 +6512,110 @@ function buildVeins() {
       /* to the mass cell's own lattice centre, which its outline covers */
       jx = (((mass % GW) >> 1) << 1) + 0.5; jy = ((((mass / GW) | 0) >> 1) << 1) + 0.5;
     }
+    if (jpN < JP_CAP) { jpA[jpN] = own; jpB[jpN] = hit >= 0 ? rchain[hit] : chainN + 1 + (((mass / GW) | 0) >> 1) * LW + ((mass % GW) >> 1); jpN++; }
     ja[jw++] = epK[je]; ja[jw++] = 2; ja[jw++] = ex; ja[jw++] = ey; ja[jw++] = jx; ja[jw++] = jy;
     vsegN[jb] = jw;
+  }
+
+  /* --- one drawing: every drawn piece is joined to the main piece --- */
+  veinIslands = 0;
+  var NENT = chainN + 1 + LW * LH;
+  if (NENT <= OUF_CAP && chainN > 0) {
+    var e1, e2, lx1, ly1, ln1;
+    for (i = 0; i < NENT; i++) { ouf[i] = i; esz[i] = 0; obest[i] = -1; }
+    /* sizes: a chain's cells, four per drawn lattice cell */
+    for (ln1 = 0; ln1 < LW * LH; ln1++) if (ldrawn[ln1]) esz[chainN + 1 + ln1] = 4;
+    for (i = 0; i < NCELL; i++) if (rchain[i]) esz[rchain[i]]++;
+    /* what touches: lattice cell to lattice cell, chain to the lattice cell
+       under it, chain to chain across any of the eight neighbours */
+    for (ly1 = 0; ly1 < LH; ly1++) {
+      for (lx1 = 0; lx1 < LW; lx1++) {
+        ln1 = ly1 * LW + lx1;
+        if (!ldrawn[ln1]) continue;
+        e1 = chainN + 1 + ln1;
+        if (lx1 + 1 < LW && ldrawn[ln1 + 1]) uunion(e1, e1 + 1);
+        if (ly1 + 1 < LH && ldrawn[ln1 + LW]) uunion(e1, e1 + LW);
+      }
+    }
+    for (y = 1; y < GH - 1; y++) {
+      for (x = 1; x < GW - 1; x++) {
+        i = y * GW + x;
+        e1 = rchain[i];
+        if (!e1) continue;
+        ln1 = (y >> 1) * LW + (x >> 1);
+        if (ldrawn[ln1]) uunion(e1, chainN + 1 + ln1);
+        e2 = rchain[i + 1]; if (e2 && e2 !== e1) uunion(e1, e2);
+        e2 = rchain[i + GW]; if (e2 && e2 !== e1) uunion(e1, e2);
+        e2 = rchain[i + GW + 1]; if (e2 && e2 !== e1) uunion(e1, e2);
+        e2 = rchain[i + GW - 1]; if (e2 && e2 !== e1) uunion(e1, e2);
+      }
+    }
+    for (i = 0; i < jpN; i++) uunion(jpA[i], jpB[i]);
+    /* the main piece is the largest */
+    var mainE = -1, mainSz = 0;
+    for (i = 1; i < NENT; i++) if (ouf[i] === i && esz[i] > mainSz) { mainSz = esz[i]; mainE = i; }
+    if (mainE >= 0) {
+      /* breadth-first from every cell of the main piece, over body */
+      opar.fill(-1);
+      var qh = 0, qt = 0;
+      for (i = 0; i < NCELL; i++) {
+        if (rchain[i] && ufind(rchain[i]) === mainE) { opar[i] = i; odist[i] = 0; oq[qt++] = i; }
+      }
+      for (ln1 = 0; ln1 < LW * LH; ln1++) {
+        if (!ldrawn[ln1] || ufind(chainN + 1 + ln1) !== mainE) continue;
+        var bx = (ln1 % LW) << 1, by = ((ln1 / LW) | 0) << 1;
+        for (var dy1 = 0; dy1 < 2; dy1++) for (var dx1 = 0; dx1 < 2; dx1++) {
+          var bc = (by + dy1) * GW + bx + dx1;
+          if (bc < NCELL && opar[bc] < 0) { opar[bc] = bc; odist[bc] = 0; oq[qt++] = bc; }
+        }
+      }
+      while (qh < qt) {
+        var qc = oq[qh++], qx = qc % GW, qy = (qc / GW) | 0, qd = odist[qc] + 1;
+        for (var oy1 = -1; oy1 <= 1; oy1++) {
+          var ny1 = qy + oy1;
+          if (ny1 < 1 || ny1 >= GH - 1) continue;
+          for (var ox1 = -1; ox1 <= 1; ox1++) {
+            if (!ox1 && !oy1) continue;
+            var nx1 = qx + ox1;
+            if (nx1 < 1 || nx1 >= GW - 1) continue;
+            var nq = ny1 * GW + nx1;
+            if (opar[nq] >= 0 || wallM[nq] || trail[nq] < CONN_T) continue;
+            opar[nq] = qc; odist[nq] = qd; oq[qt++] = nq;
+          }
+        }
+      }
+      /* each other piece's nearest reached cell */
+      for (i = 0; i < NCELL; i++) {
+        if (opar[i] < 0) continue;
+        e1 = rchain[i];
+        var r1 = -1;
+        if (e1) r1 = ufind(e1);
+        else {
+          ln1 = (((i / GW) | 0) >> 1) * LW + ((i % GW) >> 1);
+          if (ldrawn[ln1]) r1 = ufind(chainN + 1 + ln1);
+        }
+        if (r1 < 0 || r1 === mainE) continue;
+        if (obest[r1] < 0 || odist[i] < obd[r1]) { obest[r1] = i; obd[r1] = odist[i]; }
+      }
+      /* the paths, and the count of pieces with none */
+      for (e1 = 1; e1 < NENT; e1++) {
+        if (ouf[e1] !== e1 || e1 === mainE || esz[e1] === 0) continue;
+        var pc = obest[e1];
+        if (pc < 0) { veinIslands++; continue; }
+        var pb = rchain[pc] ? rband[pc] : 0;
+        if (pb > 4) pb = 0;
+        var pa = vseg[pb], pw = vsegN[pb], pn = 0, pcur = pc;
+        while (pn < 2048 && opar[pcur] !== pcur) { pn++; pcur = opar[pcur]; }
+        if (pn === 0 || pw + (pn + 1) * 2 + 2 > VEIN_CAP) continue;
+        pa[pw++] = 2; pa[pw++] = pn + 1;
+        pcur = pc;
+        for (var pk = 0; pk <= pn; pk++) {
+          pa[pw++] = (pcur % GW) + 0.5; pa[pw++] = ((pcur / GW) | 0) + 0.5;
+          pcur = opar[pcur];
+        }
+        vsegN[pb] = pw;
+      }
+    }
   }
 
   /* Bake each band into Path2Ds, in grid coordinates — one per presence tier,
@@ -9399,6 +9531,7 @@ function init() {
        the ridge walk gets before it loses the vein. These are presence-tier
        RUNS since the envelope split chains at tier boundaries, so the count is
        an upper bound on chains rather than the thing itself. */
+    veinIslands: function () { return veinIslands; },
     veins: function () {
       var ch = 0, pt = 0;
       for (var b = 0; b < vsegN.length; b++) {
