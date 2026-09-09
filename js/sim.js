@@ -6299,11 +6299,12 @@ function buildVeins() {
     ltier[(((lseg[i * 2 + 1] - 0.5) | 0) >> 1) * LW + (((lseg[i * 2] - 0.5) | 0) >> 1)] = lbuck[i];
   }
   ldrawn.fill(0);
+  var ldrawnN = 0;
   for (i = 0; i < lsegN; i++) {
     var ln = (((lseg[i * 2 + 1] - 0.5) | 0) >> 1) * LW + (((lseg[i * 2] - 0.5) | 0) >> 1);
     var lx0 = ln % LW, ly0 = (ln / LW) | 0;
-    if ((lx0 > 0 && ltier[ln - 1] >= 0) || (lx0 < LW - 1 && ltier[ln + 1] >= 0) ||
-        (ly0 > 0 && ltier[ln - LW] >= 0) || (ly0 < LH - 1 && ltier[ln + LW] >= 0)) ldrawn[ln] = 1;
+    if (!ldrawn[ln] && ((lx0 > 0 && ltier[ln - 1] >= 0) || (lx0 < LW - 1 && ltier[ln + 1] >= 0) ||
+        (ly0 > 0 && ltier[ln - LW] >= 0) || (ly0 < LH - 1 && ltier[ln + LW] >= 0))) { ldrawn[ln] = 1; ldrawnN++; }
   }
 
   /* --- pass two: walk each ridge from end to end into a polyline ---
@@ -6520,7 +6521,9 @@ function buildVeins() {
   /* --- one drawing: every drawn piece is joined to the main piece --- */
   veinIslands = 0;
   var NENT = chainN + 1 + LW * LH;
-  if (NENT <= OUF_CAP && chainN > 0) {
+  /* run whenever anything is drawn: a rebuild can hold masses and no chain
+     at all, and two such masses are two pieces like any other */
+  if (NENT <= OUF_CAP && (chainN > 0 || ldrawnN > 0)) {
     var e1, e2, lx1, ly1, ln1;
     for (i = 0; i < NENT; i++) { ouf[i] = i; esz[i] = 0; obest[i] = -1; }
     /* sizes: a chain's cells, four per drawn lattice cell */
