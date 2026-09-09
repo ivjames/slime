@@ -2581,12 +2581,16 @@ function buildFood() {
     var left = foodLeft(ni);
     var fall = SPENT_FALL + (FALL - SPENT_FALL) * left;
     var amp = SPENT_FOOD + (1 - SPENT_FOOD) * left;
-    var core = e.nodes[ni].r * 2.4 * left;
+    /* the core bonus runs down in HEIGHT, not radius: the geodesic is 0 over
+       the whole disc, so a shrinking radius left the bonus at its full 0.85
+       everywhere on the flake until the radius reached zero and it went in
+       one step — the very jump this taper is here to remove */
+    var core = e.nodes[ni].r * 2.4, coreAmp = 0.85 * left;
     for (var i = 0; i < NCELL; i++) {
       var d = dm[i];
       if (d >= fall) continue;
       var v = amp * (1 - d / fall);
-      if (d < core) v += 0.85 * (1 - d / core);
+      if (d < core) v += coreAmp * (1 - d / core);
       if (v > foodF[i]) foodF[i] = v;
     }
     foodBuiltQ[ni] = Math.floor((1 - left) * FOOD_Q);
