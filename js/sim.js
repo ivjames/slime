@@ -5551,16 +5551,23 @@ var VEIN_BANDS = [
 
    Drawn as the OUTLINE of the marked cells rather than as a disc on each:
    the marked cells are a mask on the two-cell lattice, the mask's boundary
-   is traced (marching squares, one Chaikin pass to take the corners off),
+   is traced (marching squares, two Chaikin passes to take the corners off),
    pushed outward by LOBE_OUT so a single row of cells is as wide as the
    discs it replaces, and filled once. A union of discs took whatever shape
    the field had, which was the point of it, but its edge was the discs' —
    scalloped by a quarter of a cell everywhere and beaded wherever the
    lattice thinned — and with the sheet gone from under it that edge was the
    picture. A traced outline has the same shape and one edge. */
-var LOBE_MARK = 0.30;  // junction mark at which a lobe is drawn
+/* Junction mark at which a lobe is drawn. A fork lays 0.70 or more at its
+   centre and a corner up to 1, both falling to nothing over KNOT_SPREAD, so
+   the mark is above 0.30 across most of a dense mesh: measured on First
+   Contact at 40 s, 713 of 7,721 body cells on the lattice were over 0.30
+   and 190 over 0.50, and with the sheet gone the 0.30 layer drew the whole
+   core as a chain of masses four cells wide. At 0.50 a mass is the centre
+   of a fork or a tight corner, and the tube between is the vein's. */
+var LOBE_MARK = 0.50;
 var LOBE_PAD  = 24;    // ...and the blurred trail a pad needs to be drawn at all
-var LOBE_OUT  = 0.9;   // how far past the mask's boundary a mass is drawn, cells
+var LOBE_OUT  = 0.5;   // how far past the mask's boundary a mass is drawn, cells
 /* the mask itself, one slot per lattice cell: the presence tier the cell is
    drawn at, or -1. Filled from lseg/lbuck at bake, read by the tracer. */
 var LW = GW >> 1, LH = GH >> 1;
@@ -5886,7 +5893,7 @@ var TIP_W = 0.17;
 
    A loop of four points is a lone cell — the one-rebuild blink that used
    to be a dot beside the network — and is not drawn. The rest are pushed
-   outward along the vertex normal and rounded with one pass of Chaikin's
+   outward along the vertex normal and rounded with two passes of Chaikin's
    corner cutting, which is what turns a staircase of one-cell cuts into an
    edge. */
 var MS_FROM  = [-1, 0, 1, 1, 2, 0, 2, 2, 3, 0, 1, 1, 3, 0, 3, -1];
@@ -5933,13 +5940,20 @@ function traceMass(minTier, out) {
       var len = Math.sqrt(dx * dx + dy * dy) || 1;
       ox[k] = px[k] + dy / len * out; oy[k] = py[k] - dx / len * out;
     }
-    for (k = 0; k < m; k++) {
-      var kn2 = k + 1 < m ? k + 1 : 0;
-      var qx = ox[k] * 0.75 + ox[kn2] * 0.25, qy = oy[k] * 0.75 + oy[kn2] * 0.25;
-      var rx = ox[k] * 0.25 + ox[kn2] * 0.75, ry = oy[k] * 0.25 + oy[kn2] * 0.75;
-      if (k === 0) path.moveTo(qx, qy); else path.lineTo(qx, qy);
-      path.lineTo(rx, ry);
+    /* two passes of corner cutting: one rounds the corners of the one-cell
+       cuts, the second takes the lattice's own four-cell bulge off the edge */
+    var cx1 = ox, cy1 = oy, pass;
+    for (pass = 0; pass < 2; pass++) {
+      var m1 = cx1.length, cx2 = new Array(m1 * 2), cy2 = new Array(m1 * 2);
+      for (k = 0; k < m1; k++) {
+        var kn2 = k + 1 < m1 ? k + 1 : 0;
+        cx2[k * 2] = cx1[k] * 0.75 + cx1[kn2] * 0.25; cy2[k * 2] = cy1[k] * 0.75 + cy1[kn2] * 0.25;
+        cx2[k * 2 + 1] = cx1[k] * 0.25 + cx1[kn2] * 0.75; cy2[k * 2 + 1] = cy1[k] * 0.25 + cy1[kn2] * 0.75;
+      }
+      cx1 = cx2; cy1 = cy2;
     }
+    path.moveTo(cx1[0], cy1[0]);
+    for (k = 1; k < cx1.length; k++) path.lineTo(cx1[k], cy1[k]);
     path.closePath();
   }
   return path;
