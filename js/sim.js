@@ -2763,6 +2763,14 @@ function drawHome(k, from) {
    every CONN_EVERY steps, so a step pays about a tenth of a pass. */
 var CONN_EVERY = 10;    // steps between labellings
 var CONN_T     = 2.0;   // trail that counts as tube for connectivity
+/* Six seconds, not two. A bead in a corridor is often the stalled train of
+   a runner that turned, and the next runner through picks it up and lays
+   the vein over it — the deployed build got through EXP-06 and EXP-10 that
+   way. At two seconds the beads were gone before that happened: EXP-10
+   unwon at 12000 on two seeds against deployed wins near 10000, EXP-06
+   1.4x slower. At six, EXP-10 9592/9829 against 9795/10182 and EXP-06
+   7547/8755 against 7626/6376, with islands of five or more agents at 0 to
+   3 per sample on EXP-01 and each gone within the six seconds. */
 var CONN_GRACE = 36;    // labellings off the body before a scrap is drawn home (6 s)
 var REAB_BASE  = 1;     // scraps drawn home per step, plus one per 256 off
 var mainC   = new Uint8Array(NCELL);
