@@ -5167,7 +5167,14 @@ function paintField() {
     if (y0 >= GH - 1) y0 = GH - 2;
     var fy = cy - y0; if (fy < 0) fy = 0; else if (fy > 1) fy = 1;
     var row0 = y0 * GW, row1 = row0 + GW;
+    var nrow = ((sy * inv) | 0) * GW;
     for (var sx = 0; sx < W2; sx++, pp += 4) {
+      /* a wall is a wall to the subpixel: the field is not sampled across
+         it, or tissue against a wall bled onto the wall through the
+         interpolation and the coverage ramp — and a wall that has just
+         closed beside tissue would have drawn as tissue */
+      var nci = nrow + ((sx * inv) | 0);
+      if (wallM[nci]) { d[pp] = 46; d[pp + 1] = 50; d[pp + 2] = 40; continue; }
       var cx = sx * inv + half;
       var x0 = cx | 0; if (cx < 0) { x0 = 0; cx = 0; }
       if (x0 >= GW - 1) x0 = GW - 2;
