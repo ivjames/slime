@@ -815,6 +815,12 @@ body.touch .dish{min-height:132px}
   // Deploy stamp: `slime deploy` rewrites this line with the live commit.
   const BUILD = 'dev';
 </script>
-<script src="js/sim.js"></script>
+<!-- The same stamp on the script URL, rewritten by the same deploy. The page
+     itself is served no-cache, but js/sim.js is not, and a browser holding a
+     copy of it from the last visit reuses it for hours without asking — so a
+     fresh page ran the old simulation and reported the new build. A new
+     query string is a new cache key: the first visit after a deploy fetches
+     the script the page was deployed with. -->
+<script src="js/sim.js?v=dev"></script>
 </body>
 </html>

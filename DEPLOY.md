@@ -43,7 +43,18 @@ slime deploy
 
 That is `git fetch` + `git reset --hard origin/main` of the checkout, plus a
 `sed` that stamps the deployed commit into the page's `BUILD` constant if it
-has one. No build, no restart, no reload.
+has one, and the same stamp onto the `js/sim.js?v=` query of the script tag.
+No build, no restart, no reload.
+
+The second stamp is what makes a deploy visible. `index.html` is served
+`no-cache`, but `js/sim.js` is served with no `Cache-Control` at all, so a
+browser applies heuristic freshness (a tenth of the file's age since
+`Last-Modified`) and reuses its cached copy for hours without asking. Before
+the query stamp, a visit after a deploy fetched the new page — new `BUILD`,
+correct in `slime status` — and ran the old simulation under it. A new query
+string is a new cache key, so the first visit after a deploy fetches the
+script that commit ships. A visitor who still sees the old build can force it
+with a hard reload (Ctrl+Shift+R / Cmd+Shift+R).
 
 ## Check it
 

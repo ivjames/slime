@@ -203,6 +203,10 @@ cmd_deploy() {
   # also hits any update-checker regex further down the file and corrupts it.
   if grep -q "^  const BUILD = '" index.html 2>/dev/null; then
     sed -i "s/^  const BUILD = '[^']*';/  const BUILD = '$after';/" index.html
+    # ...and onto the script URL, so a browser that cached js/sim.js on the
+    # last visit (the page is no-cache; the script is not) fetches the one
+    # this commit ships instead of running the old one under the new stamp.
+    sed -i "s|src=\"js/sim.js?v=[^\"]*\"|src=\"js/sim.js?v=$after\"|" index.html
     log "stamped build $after into index.html"
   fi
   log "Done. (Static files serve straight from disk — no reload needed.)"
