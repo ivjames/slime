@@ -8446,6 +8446,20 @@ function init() {
       return { x: sx / c, y: sy / c };
     },
     grid: function () { return { w: GW, h: GH }; },
+    /* harness only: the body test as it last stood — agents off the body,
+       and how many islands of five or more agents are standing off it */
+    body: function () {
+      var off = 0, i, n = 0, cnt = {};
+      for (i = 0; i < nAgents; i++) {
+        var c = (ay[i] | 0) * GW + (ax[i] | 0);
+        if (mainC[c]) continue;
+        off++;
+        var l = connLab[c];
+        if (l) cnt[l] = (cnt[l] || 0) + 1;
+      }
+      for (var key in cnt) if (cnt[key] >= 5) n++;
+      return { ok: mainOK, off: off, islands: n };
+    },
     /* a copy of the trail field, for measuring the network from outside */
     trail: function () { return Float32Array.prototype.slice.call(trail); },
     trailMax: function () { return TRAIL_MAX; },
