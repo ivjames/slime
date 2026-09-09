@@ -4258,12 +4258,17 @@ function initCanvas() {
   veilMask = document.createElement('canvas');
   vmctx = veilMask.getContext('2d');
   off = document.createElement('canvas');
-  off.width = GW; off.height = GH;
   octx = off.getContext('2d', { alpha: false });
-  img = octx.createImageData(GW, GH);
+  allocField();
+  resizeCanvas();
+}
+
+/* the field image at the current SUP — see SUP */
+function allocField() {
+  off.width = GW * SUP; off.height = GH * SUP;
+  img = octx.createImageData(GW * SUP, GH * SUP);
   imgData = img.data;
   for (var p = 3; p < imgData.length; p += 4) imgData[p] = 255;
-  resizeCanvas();
 }
 
 function resizeCanvas() {
@@ -4272,6 +4277,13 @@ function resizeCanvas() {
   var dpr = Math.min(window.devicePixelRatio || 1, 2);
   var w = Math.max(320, Math.round(wCss * dpr));
   var h = Math.round(w * GH / GW);
+  var want = Math.round(w / GW / 2.5);
+  if (want < 1) want = 1; else if (want > 3) want = 3;
+  if (want !== SUP) {
+    SUP = want;
+    allocField();
+    fieldDirty = true; dirtyFrames = REBUILD_EVERY;
+  }
   if (cv.width !== w || cv.height !== h) {
     cv.width = w; cv.height = h;
     /* Sizing clears them, which is right: an accumulator holding strokes at
@@ -4358,6 +4370,28 @@ var shpT = new Float32Array(NCELL);   // scratch for the separable pass
    and not of the field alone: pause and unpause and the veins settle over a
    few frames rather than being identical instantly. That is the trade, and it
    is the whole point of it. */
+/* The field layer is painted at SUP times the grid. The grid is 420 cells
+   across and the canvas five to eight times that, and the body's edge is a
+   threshold on the eased field: thresholded per cell and then scaled up by
+   the browser, every cell on the rim was a soft square, which read as a
+   picture blown up from a smaller one — because it was. So the per-cell pass
+   below now computes the ground colour, the sharpened field value and the
+   inner-shade factor per cell, and a second pass samples those bilinearly at
+   each subpixel and applies the coverage ramp THERE: the threshold is taken
+   on the interpolated field, so the rim follows the field's contour between
+   cells instead of the cells. A bridge corridor's coverage is interpolated
+   as coverage rather than re-thresholded, so a one-cell corridor stays
+   closed and loses its corners. Costs SUP squared subpixels a cell every
+   rebuild — 3 took the x1 step rate from 57 to 47 a second in headless
+   Chromium — so it follows the canvas: 3 where a cell is seven or more
+   device pixels (a tablet at dpr 2), 2 on a laptop, 1 on a phone, where the
+   cells are near the pixels already and the cost buys nothing. Set in
+   resizeCanvas(), which reallocates the field image when it changes. */
+var SUP = 1;
+var gndR = new Float32Array(NCELL), gndG = new Float32Array(NCELL), gndB = new Float32Array(NCELL);
+var tF = new Float32Array(NCELL);      // sharpened eased field, per cell
+var fF = new Float32Array(NCELL);      // inner-shade factor, per cell
+var vB = new Uint8Array(NCELL);        // a bridge cell's own coverage, else 0
 var shpV = new Float32Array(NCELL);   // narrow, low-passed over sim time
 /* The wide field under the same low-pass, so the unsharp difference the
    painter takes (narrow minus wide) compares two fields on the same clock.
@@ -4968,8 +5002,9 @@ function paintField() {
      shpV always has. buildVeins' own call right after finds dt 0 and holds. */
   smoothRidgeField();
   buildBridges();
-  for (var i = 0, p = 0; i < NCELL; i++, p += 4) {
+  for (var i = 0; i < NCELL; i++) {
     var r, g, b;
+    tF[i] = 0; fF[i] = 1; vB[i] = 0;
     if (wallM[i]) {
       r = 46; g = 50; b = 40;
     } else {
@@ -4998,8 +5033,9 @@ function paintField() {
       /* 0 none, 1 routed, 2 fading — see buildBridges; presence is read only
          inside the branches that need it */
       var br = bridge[i];
+      var t = a + SHARP * (a - shpVB[i]);
+      tF[i] = t;
       if (a > 0.004 || br) {
-        var t = a + SHARP * (a - shpVB[i]);
         if (t > BODY_T * 0.5 || br) {
           var gi = (t * GAM_SCALE) | 0;
           if (gi < 0) gi = 0; else if (gi >= GAMN) gi = GAMN - 1;
@@ -5100,13 +5136,11 @@ function paintField() {
              field for a quarter of seed-and-ground pairs, while shading the
              contribution alone clears the floor on all of them, because
              rim and ground then ride on the same base. */
-          var o = vcov * 3;
-          r += LUT[o] * FIELD_GAIN * f;
-          g += LUT[o + 1] * FIELD_GAIN * f;
-          b += LUT[o + 2] * FIELD_GAIN * f;
-          if (r > 255) r = 255;
-          if (g > 255) g = 255;
-          if (b > 255) b = 255;
+          /* not added here: the subpixel pass below adds the organism's
+             contribution from the interpolated field; what this cell hands
+             it is its shade and, for a bridge cell, its own coverage */
+          fF[i] = f;
+          if (br) vB[i] = vcov;
         }
       }
       /* the player's cue reads as a faint warm haze in the agar */
@@ -5121,7 +5155,48 @@ function paintField() {
         if (r > 255) r = 255; if (g > 255) g = 255; if (b > 255) b = 255;
       }
     }
-    d[p] = r; d[p + 1] = g; d[p + 2] = b;
+    gndR[i] = r; gndG[i] = g; gndB[i] = b;
+  }
+  /* --- the subpixel pass — see SUP --- */
+  var W2 = GW * SUP, H2 = GH * SUP, inv = 1 / SUP, half = 0.5 * inv - 0.5;
+  var lutGain = FIELD_GAIN;
+  for (var sy = 0, pp = 0; sy < H2; sy++) {
+    var cy = sy * inv + half;
+    var y0 = cy | 0; if (cy < 0) { y0 = 0; cy = 0; }
+    if (y0 >= GH - 1) y0 = GH - 2;
+    var fy = cy - y0; if (fy < 0) fy = 0; else if (fy > 1) fy = 1;
+    var row0 = y0 * GW, row1 = row0 + GW;
+    for (var sx = 0; sx < W2; sx++, pp += 4) {
+      var cx = sx * inv + half;
+      var x0 = cx | 0; if (cx < 0) { x0 = 0; cx = 0; }
+      if (x0 >= GW - 1) x0 = GW - 2;
+      var fx = cx - x0; if (fx < 0) fx = 0; else if (fx > 1) fx = 1;
+      var i00 = row0 + x0, i01 = i00 + 1, i10 = row1 + x0, i11 = i10 + 1;
+      var w00 = (1 - fx) * (1 - fy), w01 = fx * (1 - fy), w10 = (1 - fx) * fy, w11 = fx * fy;
+      var rr = gndR[i00] * w00 + gndR[i01] * w01 + gndR[i10] * w10 + gndR[i11] * w11;
+      var gg = gndG[i00] * w00 + gndG[i01] * w01 + gndG[i10] * w10 + gndG[i11] * w11;
+      var bb = gndB[i00] * w00 + gndB[i01] * w01 + gndB[i10] * w10 + gndB[i11] * w11;
+      var tt = tF[i00] * w00 + tF[i01] * w01 + tF[i10] * w10 + tF[i11] * w11;
+      var vc = 0;
+      if (tt > BODY_T * 0.5) {
+        var gi2 = (tt * GAM_SCALE) | 0;
+        if (gi2 >= GAMN) gi2 = GAMN - 1;
+        vc = GAM[gi2];
+      }
+      /* a bridge's coverage is interpolated too — coverage, not a
+         threshold, so a one-cell corridor stays closed and loses its
+         corners */
+      var nb = vB[i00] * w00 + vB[i01] * w01 + vB[i10] * w10 + vB[i11] * w11;
+      if (nb > vc) vc = nb | 0;
+      if (vc > 0) {
+        var ff = fF[i00] * w00 + fF[i01] * w01 + fF[i10] * w10 + fF[i11] * w11;
+        var o2 = vc * 3;
+        rr += LUT[o2] * lutGain * ff;
+        gg += LUT[o2 + 1] * lutGain * ff;
+        bb += LUT[o2 + 2] * lutGain * ff;
+      }
+      d[pp] = rr > 255 ? 255 : rr; d[pp + 1] = gg > 255 ? 255 : gg; d[pp + 2] = bb > 255 ? 255 : bb;
+    }
   }
   octx.putImageData(img, 0, 0);
 }
