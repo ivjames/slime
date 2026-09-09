@@ -891,7 +891,7 @@ var EXPERIMENTS = [
        the cap to `keep` of it over `dur` seconds, and the cull takes the
        idlest cytoplasm first — which is the lapse. The verdict comes at the
        end of the settling, not at the ninth depot. */
-    refine: { dur: 60, keep: 0.35,
+    refine: { dur: 60, keep: 0.5, flow: 160,
               text: 'nine on one network. now the network decides which of itself to keep.' },
     script: [
       { t: 2, hi: true, text: 'nine depots. the dish is the wrong shape for a city and you do not care.' },
@@ -1830,6 +1830,7 @@ function paceDish(e) {
   if (e.timeLimit) e.timeLimit *= k;
   if (e.reseal) e.reseal *= k;
   if (e.refine && e.refine.dur) e.refine.dur *= k;
+  if (e.refine && e.refine.flow) e.refine.flow /= k;
   if (e.starve) e.starve /= k;
   if (e.heatDmg != null) e.heatDmg /= k;
   if (e.shock) {
@@ -2289,6 +2290,7 @@ var S = {
   dietP: 0, dietC: 0, dietDoomedT: 0,
   growAcc: 0, starveAcc: 0,
   refineT0: -1,   /* sim time the settling began, or -1 — see EXP-03's refine */
+  flowAcc: 0,
   shockNext: 0, shockActive: false, shockWarn: false, shocksSurvived: 0,
   shockWarned: -1, shockCycle: 0, shockPeriod: 0,
   quinTime: 0, slow: 1, anticipated: false,
@@ -2985,6 +2987,52 @@ function killWeakest() {
   nAgents--;
   ax[k] = ax[nAgents]; ay[k] = ay[nAgents]; ah[k] = ah[nAgents];
   atip[k] = atip[nAgents]; astv[k] = astv[nAgents]; aoff[k] = aoff[nAgents];
+}
+
+/* The idlest agent, by the same reading killWeakest uses, without the kill:
+   who to move when the settling moves cytoplasm rather than losing it. */
+function pickIdle() {
+  var k = -1, worst = 1e9;
+  for (var t = 0; t < KILL_DRAWS; t++) {
+    var c = (rnd() * nAgents) | 0;
+    var ci2 = (ay[c] | 0) * GW + (ax[c] | 0);
+    var v = condF[ci2];
+    if (atip[c]) v += 1;
+    if (traceF[ci2] > 0) v += 0.5;
+    if (v < worst) { worst = v; k = c; }
+  }
+  return k;
+}
+
+/* Cytoplasm streaming into the trunk. Best-of-K over the population for the
+   agent standing on the most CONDUCTIVE cell — the tube carrying the most
+   traffic — and a free cell beside it. The shape of drawHome with the
+   opposite question: not "where is tube" but "where is the tube that is
+   working". Mass is conserved; what moves is where it stands. */
+function drawTrunk(k) {
+  var best = -1, bestV = -1;
+  for (var t = 0; t < ADRIFT_DRAWS; t++) {
+    var c = (rnd() * nAgents) | 0;
+    if (c === k) continue;
+    var v = condF[(ay[c] | 0) * GW + (ax[c] | 0)];
+    if (v > bestV) { bestV = v; best = c; }
+  }
+  if (best < 0) return false;
+  var from = (ay[k] | 0) * GW + (ax[k] | 0);
+  for (var tries = 0; tries < 6; tries++) {
+    var nx = ax[best] + (rnd() - 0.5) * 2 * ADRIFT_R;
+    var ny = ay[best] + (rnd() - 0.5) * 2 * ADRIFT_R;
+    if (nx < 1 || ny < 1 || nx >= GW - 1 || ny >= GH - 1) continue;
+    var ci = (ny | 0) * GW + (nx | 0);
+    if (wallM[ci] || occ[ci]) continue;
+    if (occ[from]) occ[from]--;
+    occ[ci]++;
+    ax[k] = Math.fround(nx); ay[k] = Math.fround(ny);
+    ah[k] = ah[best];
+    atip[k] = 0; astv[k] = 0; aoff[k] = 0;
+    return true;
+  }
+  return false;
 }
 
 /* sample the combined desirability field (nearest cell) */
@@ -3827,6 +3875,18 @@ function step() {
     if (settle < target) target = settle;
     var need = e.cap * (1 - e.refine.keep) / e.refine.dur;
     if (need > starveRate) starveRate = need;
+    /* and the cytoplasm that is kept streams out of the idle tubes into the
+       busy ones, `flow` agents a second: the lapse and the thickening are
+       the same movement, which is what the paper's second day was */
+    if (e.refine.flow) {
+      S.flowAcc += e.refine.flow * DT;
+      while (S.flowAcc >= 1 && nAgents > 1) {
+        var idl = pickIdle();
+        if (idl < 0 || !drawTrunk(idl)) break;
+        S.flowAcc -= 1;
+      }
+      if (S.flowAcc > 4) S.flowAcc = 4;
+    }
   }
   if (nAgents < target) {
     S.growAcc += (e.grow * DT);
@@ -7561,7 +7621,7 @@ function startRun(i, seed, trace) {
   S.engulfed = 0;
   S.hab = 0; S.habPeak = 0; S.habBuilt = -1; S.fused = false;
   S.dietP = 0; S.dietC = 0; S.dietDoomedT = 0;
-  S.growAcc = 0; S.starveAcc = 0; reabCursor = 0; mainOK = false; S.refineT0 = -1;
+  S.growAcc = 0; S.starveAcc = 0; reabCursor = 0; mainOK = false; S.refineT0 = -1; S.flowAcc = 0;
   S.shockNext = e.shock ? e.shock.first : 0;
   S.shockPeriod = e.shock ? e.shock.period : 0;
   S.shockActive = false; S.shockWarn = false; S.shocksSurvived = 0;
