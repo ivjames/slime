@@ -2737,10 +2737,10 @@ function thicken() {
     if (v > bestV) { bestV = v; best = k; }
   }
   if (best < 0) return false;
-  for (var tries = 0; tries < 6; tries++) {
+  for (var tries = 0; tries < 12; tries++) {   /* a pad is dense; six tries stalled growth in it */
     /* within a cell and a half of the parent, which is on tube: new
        cytoplasm arrives ON the line, not in the hole beside it */
-    if (emit(ax[best] + (rnd() - 0.5) * 3, ay[best] + (rnd() - 0.5) * 3, rnd() * Math.PI * 2, 0)) return true;
+    if (emit(ax[best] + (rnd() - 0.5) * 4, ay[best] + (rnd() - 0.5) * 4, rnd() * Math.PI * 2, 0)) return true;
   }
   return false;
 }
@@ -2771,9 +2771,12 @@ function drawHome(k, from) {
     if (v > bestV) { bestV = v; best = c; }
   }
   if (best < 0) return false;
+  /* twice ADRIFT_R: home is beside a trunk, whose core is mostly occupied,
+     and a scrap that finds no free cell in six tries is deleted by the
+     caller — the flank of a trunk is still the line */
   for (var tries = 0; tries < 6; tries++) {
-    var nx = ax[best] + (rnd() - 0.5) * 2 * ADRIFT_R;
-    var ny = ay[best] + (rnd() - 0.5) * 2 * ADRIFT_R;
+    var nx = ax[best] + (rnd() - 0.5) * 4 * ADRIFT_R;
+    var ny = ay[best] + (rnd() - 0.5) * 4 * ADRIFT_R;
     if (nx < 1 || ny < 1 || nx >= GW - 1 || ny >= GH - 1) continue;
     var ci = (ny | 0) * GW + (nx | 0);
     if (wallM[ci] || occ[ci]) continue;
@@ -3720,14 +3723,21 @@ function step() {
        reserving a cell the agent is not standing in */
     var nx = Math.fround(x + Math.cos(h) * spd);
     var ny = Math.fround(y + Math.sin(h) * spd);
-    var idx = -1;
+    var idx = -1, offTube = false;
     var blocked = (nx < 1 || ny < 1 || nx >= GW - 1 || ny >= GH - 1);
     if (!blocked) {
       idx = (ny | 0) * GW + (nx | 0);
       if (wallM[idx] || (idx !== oldIdx && occ[idx])) blocked = true;
-      /* and a follower does not step off the tube onto bare agar — TUBE_LEAVE */
-      else if (!tip && idx !== oldIdx && !feeding && trail[oldIdx] >= ADRIFT_T &&
-               trail[idx] < TUBE_LEAVE && feedAt[idx] < 0) blocked = true;
+      /* and a follower does not step off the tube onto bare agar — TUBE_LEAVE.
+         Read at TUBE_LEAVE on both sides, so a vein's own diffusion ring
+         (about 15 beside a 34 core, about 6 one cell further) is still tube
+         to leave from and the rule is not two steps deep. Fresh food is open,
+         spent food is not — a pad spreads across a flake before it has
+         trail; a spent flake's fan is bare agar again. Not during the
+         settling, which has its own rules and no tips at all. */
+      else if (!tip && idx !== oldIdx && !feeding && S.refineT0 < 0 &&
+               trail[oldIdx] >= TUBE_LEAVE && trail[idx] < TUBE_LEAVE &&
+               !(feedAt[idx] >= 0 && !S.nodeDone[feedAt[idx]])) { blocked = true; offTube = true; }
     }
 
     /* Where this agent ends the step, moved or not. A blocked agent used to
@@ -3741,7 +3751,11 @@ function step() {
        up against walls and inside junctions and fattens them into blobs. */
     var cell;
     if (blocked) {
-      ah[k] = rnd() * Math.PI * 2;
+      /* turned by the tube's edge, it turns ALONG the tube, toward the better
+         flank: a random heading on a one-cell vein points off it three
+         times in four, and a follower re-blocked most steps lays nothing
+         and lets the vein it is confined to lapse */
+      ah[k] = offTube ? h + (L >= R ? -SENS_A : SENS_A) : rnd() * Math.PI * 2;
       cell = oldIdx;
     } else {
       ax[k] = nx; ay[k] = ny; ah[k] = h;
