@@ -2769,7 +2769,6 @@ var mainC   = new Uint8Array(NCELL);
 var connLab = new Int32Array(NCELL);
 var connQ   = new Int32Array(NCELL);
 var aoff    = new Uint16Array(MAXA);   // labellings this agent has spent off the body
-var labTip  = new Uint8Array(NCELL);   // per label: does a tip stand on this piece
 var mainOK  = false;
 var reabCursor = 0;
 
@@ -2802,16 +2801,8 @@ function labelMain() {
   }
   for (i = 0; i < NCELL; i++) mainC[i] = (bestLab && connLab[i] === bestLab) ? 1 : 0;
   mainOK = bestLab > 0 && nAgents > 0 && bestOcc * 2 >= nAgents;
-  /* A piece with a tip on it is a pseudopod in flight — a runner and the
-     cytoplasm following it — and is left to run; measured, drawing its
-     followers home as it went is what starved the long corridors of
-     EXP-04, 06 and 10 of the veins the runners were laying. A piece with no
-     tip is a bead: whatever it was reaching for, it has stopped. */
-  for (i = 0; i <= lab; i++) labTip[i] = 0;
-  for (i = 0; i < nAgents; i++) if (atip[i]) labTip[connLab[(ay[i] | 0) * GW + (ax[i] | 0)]] = 1;
   for (i = 0; i < nAgents; i++) {
-    var lc = connLab[(ay[i] | 0) * GW + (ax[i] | 0)];
-    if (mainC[(ay[i] | 0) * GW + (ax[i] | 0)] || (lc && labTip[lc])) aoff[i] = 0;
+    if (mainC[(ay[i] | 0) * GW + (ax[i] | 0)]) aoff[i] = 0;
     else if (aoff[i] < 65535) aoff[i]++;
   }
 }
