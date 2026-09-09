@@ -2888,9 +2888,23 @@ function drawFront(k) {
   if (recN < 0) listTips();
   if (recN === 0) return false;
   var from = (ay[k] | 0) * GW + (ax[k] | 0);
+  /* The NEAREST of a handful of tips, not any tip. Cytoplasm withdrawn
+     from a dead end flows back down the tube it came out on and into the
+     front nearest it — which in a corridor is the runner still working
+     that corridor, so the vein it is laying is what gets fed. Sent to a
+     random tip anywhere on the plate, the corridor dishes ran slower than
+     the deployed build (EXP-10 unwon at 12000 on two seeds where deployed
+     won near 10000); this is the difference. Best-of-eight is enough to
+     land in the right corridor without being a search. */
   for (var t = 0; t < 4; t++) {
-    var c = recTips[(rnd() * recN) | 0];
-    if (c === k) continue;
+    var c = -1, cd = 1e9;
+    for (var d = 0; d < 8; d++) {
+      var cand = recTips[(rnd() * recN) | 0];
+      if (cand === k) continue;
+      var ddx = ax[cand] - ax[k], ddy = ay[cand] - ay[k], dist = ddx * ddx + ddy * ddy;
+      if (dist < cd) { cd = dist; c = cand; }
+    }
+    if (c < 0) continue;
     for (var tries = 0; tries < ADRIFT_DRAWS; tries++) {
       var nx = ax[c] + (rnd() - 0.5) * 2 * ADRIFT_R;
       var ny = ay[c] + (rnd() - 0.5) * 2 * ADRIFT_R;
