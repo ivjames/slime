@@ -3480,6 +3480,9 @@ function step() {
         if (feed > 1) feed = 1;
       }
       if (feed < TIP_MIN) tip = false;  /* come adrift: cytoplasm, not a front */
+      /* a settling culture is not foraging: no new fronts, so the tubes it
+         keeps stop sprouting along their edges */
+      if (tip && S.refineT0 >= 0) tip = false;
     }
     /* On food, and there is still food there. A front that has arrived stops
        being a front: it has found what it was looking for, and what it does
