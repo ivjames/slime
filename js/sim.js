@@ -886,12 +886,19 @@ var EXPERIMENTS = [
        carrying traffic thickened, the rest lapsed, and what was left was the
        sparse network the paper compared to the rail map. Nothing prunes
        here while the culture sits at cap, measured: 200 s after the ninth
-       depot the mesh still covered nine tenths of the plate. The flakes are
-       finite, so once the last one is taken the sustain target settles from
-       the cap to `keep` of it over `dur` seconds, and the cull takes the
-       idlest cytoplasm first — which is the lapse. The verdict comes at the
-       end of the settling, not at the ninth depot. */
-    refine: { dur: 60, keep: 0.5, flow: 160, sense: 3,
+       depot the mesh still covered nine tenths of the plate. So once the
+       last one is taken: the sustain target settles from the cap to `keep`
+       of it over `dur` seconds, the cull takes the idlest cytoplasm first,
+       `flow` agents a second stream out of idle tubes into the busiest, and
+       the agents read `sense` times further ahead — the sensor offset being
+       what sets the scale of the net a population settles into. Measured on
+       seed 12345: cull alone left the mesh whole and fainter; a faster trail
+       decay made a haze; the reach is what coarsens it, x3 into large holes
+       and broad bands at keep 0.5, x5 into fat lobes, and x3 for 90 s at
+       keep 0.3 into a few thick tubes between the depots with the plate
+       between them bare, which is the paper's second day. The verdict comes
+       at the end of the settling, not at the ninth depot. */
+    refine: { dur: 90, keep: 0.3, flow: 160, sense: 3,
               text: 'nine on one network. now the network decides which of itself to keep.' },
     script: [
       { t: 2, hi: true, text: 'nine depots. the dish is the wrong shape for a city and you do not care.' },
