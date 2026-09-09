@@ -4290,7 +4290,14 @@ var PROF = /(^\?|&)prof(=|&|$)/.test(window.location.search);
 var profStep = 0, profBuild = 0, profComp = 0, profFrames = 0, profSteps = 0, profBuilds = 0, profT0 = 0, profEl = null;
 
 function profTick(now) {
-  if (!profT0) { profT0 = now; return; }
+  if (!profT0) {
+    /* the window opens here, so what the first frame already counted is
+       dropped with it: kept, it would be work with no elapsed time to set
+       it against, and a one-second first frame would read as two */
+    profT0 = now;
+    profStep = profBuild = profComp = 0; profFrames = profSteps = profBuilds = 0;
+    return;
+  }
   var dt = now - profT0;
   if (dt < 1000) return;
   if (!profEl) {
