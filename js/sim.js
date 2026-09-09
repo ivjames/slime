@@ -2763,7 +2763,7 @@ function drawHome(k, from) {
    every CONN_EVERY steps, so a step pays about a tenth of a pass. */
 var CONN_EVERY = 10;    // steps between labellings
 var CONN_T     = 2.0;   // trail that counts as tube for connectivity
-var CONN_GRACE = 12;    // labellings off the body before a scrap is drawn home (2 s)
+var CONN_GRACE = 36;    // labellings off the body before a scrap is drawn home (6 s)
 var REAB_BASE  = 1;     // scraps drawn home per step, plus one per 256 off
 var mainC   = new Uint8Array(NCELL);
 var connLab = new Int32Array(NCELL);
