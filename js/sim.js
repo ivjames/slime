@@ -359,6 +359,14 @@ var TIP_LAY  = 3.0;      // trail a tip lays per step, as a multiple of DEPOSIT
    from under it; then it is drawn home. A hair that shortens and fades
    rather than a hair that snaps. */
 var STALK_HOLD = 0.997;  // per-step decay of the stalk: 36 -> 2 in ~16 s
+/* The floor is a fraction of the stalk, not the stalk. At the full value a
+   runner's thread rendered as fat as a followed vein from the moment it was
+   laid, because the trail under it read 36 whether anything had followed or
+   not. At STALK_W the thread is a faint hairline until cytoplasm follows it
+   and lays trail of its own — the vein is what following makes — and a
+   thread nothing followed fades as the faint line it was. Connectivity is
+   unaffected: 36 x 0.3 is still five times CONN_T for a hundred cells. */
+var STALK_W    = 0.3;
 
 /* ---- branching ----
    New cytoplasm is not sprinkled near the food any more; it is spent FORKING
@@ -2445,7 +2453,7 @@ function applyEvent(e, ev) {
            clock is reabsorbed early or late by up to ADRIFT_TIME on the
            strength of a wall appearing somewhere else in the dish. */
         ax[k] = ax[nAgents]; ay[k] = ay[nAgents]; ah[k] = ah[nAgents];
-        atip[k] = atip[nAgents]; astv[k] = astv[nAgents]; aoff[k] = aoff[nAgents]; agoal[k] = agoal[nAgents];
+        atip[k] = atip[nAgents]; astv[k] = astv[nAgents]; aoff[k] = aoff[nAgents]; aidle[k] = aidle[nAgents]; agoal[k] = agoal[nAgents];
         continue;
       }
       k++;
@@ -2599,7 +2607,7 @@ function inoculate(e) {
       occ[si] = 1;
       ah[nAgents] = rnd() * Math.PI * 2;
       atip[nAgents] = 0;
-      astv[nAgents] = 0; aoff[nAgents] = 0; agoal[nAgents] = 0;
+      astv[nAgents] = 0; aoff[nAgents] = 0; aidle[nAgents] = 0; agoal[nAgents] = 0;
       nAgents++;
     }
     var w = ci - 1, ee = ci + 1, nn = ci - GW, ss2 = ci + GW;
@@ -2631,7 +2639,7 @@ function emit(nx, ny, nh, tip) {
   if (wallM[ci] || occ[ci]) return false;
   ax[nAgents] = Math.fround(nx); ay[nAgents] = Math.fround(ny); ah[nAgents] = nh;
   atip[nAgents] = tip ? 1 : 0;
-  astv[nAgents] = 0; aoff[nAgents] = 0; agoal[nAgents] = 0;
+  astv[nAgents] = 0; aoff[nAgents] = 0; aidle[nAgents] = 0; agoal[nAgents] = 0;
   occ[ci]++;
   nAgents++;
   return true;
@@ -2760,7 +2768,7 @@ function drawHome(k, from) {
     occ[ci]++;
     ax[k] = Math.fround(nx); ay[k] = Math.fround(ny);
     ah[k] = rnd() * Math.PI * 2;
-    atip[k] = 0; astv[k] = 0; aoff[k] = 0; agoal[k] = 0;
+    atip[k] = 0; astv[k] = 0; aoff[k] = 0; aidle[k] = 0; agoal[k] = 0;
     return true;
   }
   return false;
@@ -2819,6 +2827,20 @@ var mainC   = new Uint8Array(NCELL);
 var connLab = new Int32Array(NCELL);
 var connQ   = new Int32Array(NCELL);
 var aoff    = new Uint16Array(MAXA);   // labellings this agent has spent off the body
+/* Withdrawal from a dead end. A filament that found nothing is, in the
+   organism, drawn back through its own tube and the tube collapses behind
+   the cytoplasm; here the followers sat on it for as long as their own
+   deposit kept it a tube, which was indefinitely. Tube is idle when the
+   trail says tube and the conductivity says nothing is moving through it;
+   an agent that has stood on idle tube for IDLE_GRACE labellings, and is
+   not a tip, not feeding and not streaming, is drawn to the nearest tip,
+   rate-limited like the reabsorption. What the branch leaves is its stalk,
+   at STALK_W: the faint line of where the filament went, fading. */
+var IDLE_C     = 0.12;   // conductivity below which tube is idle
+var IDLE_GRACE = 18;     // labellings on idle tube before withdrawal (3 s)
+var IDLE_BASE  = 2;      // withdrawn per step, plus one per 256 idle
+var aidle   = new Uint16Array(MAXA);
+var idleCursor = 0;
 var agoal   = new Int16Array(MAXA);    // streaming: 1 + the node this agent is bound for, or 0
 var mainOK  = false;
 var reabCursor = 0;
@@ -2853,8 +2875,12 @@ function labelMain() {
   for (i = 0; i < NCELL; i++) mainC[i] = (bestLab && connLab[i] === bestLab) ? 1 : 0;
   mainOK = bestLab > 0 && nAgents > 0 && bestOcc * 2 >= nAgents;
   for (i = 0; i < nAgents; i++) {
-    if (mainC[(ay[i] | 0) * GW + (ax[i] | 0)]) aoff[i] = 0;
+    var ac = (ay[i] | 0) * GW + (ax[i] | 0);
+    if (mainC[ac]) aoff[i] = 0;
     else if (aoff[i] < 65535) aoff[i]++;
+    if (trail[ac] >= ADRIFT_T && condF[ac] < IDLE_C && !atip[i] && feedAt[ac] < 0) {
+      if (aidle[i] < 65535) aidle[i]++;
+    } else aidle[i] = 0;
   }
 }
 
@@ -2966,7 +2992,7 @@ function drawFront(k) {
       occ[ci]++;
       ax[k] = Math.fround(nx); ay[k] = Math.fround(ny);
       ah[k] = ah[c];           /* arrives heading the way the front is going */
-      atip[k] = 0; astv[k] = 0; aoff[k] = 0; agoal[k] = 0;
+      atip[k] = 0; astv[k] = 0; aoff[k] = 0; aidle[k] = 0; agoal[k] = 0;
       return true;
     }
   }
@@ -2996,7 +3022,7 @@ function killWeakest() {
   if (occ[ci]) occ[ci]--;          /* every removal path decrements */
   nAgents--;
   ax[k] = ax[nAgents]; ay[k] = ay[nAgents]; ah[k] = ah[nAgents];
-  atip[k] = atip[nAgents]; astv[k] = astv[nAgents]; aoff[k] = aoff[nAgents]; agoal[k] = agoal[nAgents];
+  atip[k] = atip[nAgents]; astv[k] = astv[nAgents]; aoff[k] = aoff[nAgents]; aidle[k] = aidle[nAgents]; agoal[k] = agoal[nAgents];
 }
 
 /* The idlest agent, by the same reading killWeakest uses, without the kill:
@@ -3081,7 +3107,7 @@ function drawTube(k) {
   occ[best]++;
   ax[k] = Math.fround((best % GW) + 0.5); ay[k] = Math.fround(((best / GW) | 0) + 0.5);
   ah[k] = rnd() * Math.PI * 2;
-  atip[k] = 0; astv[k] = 0; aoff[k] = 0; agoal[k] = 0;
+  atip[k] = 0; astv[k] = 0; aoff[k] = 0; aidle[k] = 0; agoal[k] = 0;
   return true;
 }
 
@@ -3182,7 +3208,8 @@ function diffuseTrail() {
         sk *= STALK_HOLD;
         if (sk < 0.05 || wallM[i]) sk = 0;
         stalkF[i] = sk;
-        if (v < sk) v = sk;   /* the stalk is a floor under the trail */
+        var skf = sk * STALK_W;
+        if (v < skf) v = skf;   /* the stalk is a floor under the trail */
       }
       trail[i] = wallM[i] ? 0 : (v < 0.0016 ? 0 : v);
       if (cueF[i] > 0) { var c = cueF[i] * CUE_DECAY; cueF[i] = c < 0.002 ? 0 : c; }
@@ -3796,7 +3823,7 @@ function step() {
       if (occ[cell]) occ[cell]--;
       nAgents--;
       ax[k] = ax[nAgents]; ay[k] = ay[nAgents]; ah[k] = ah[nAgents];
-      atip[k] = atip[nAgents]; astv[k] = astv[nAgents]; aoff[k] = aoff[nAgents]; agoal[k] = agoal[nAgents];
+      atip[k] = atip[nAgents]; astv[k] = astv[nAgents]; aoff[k] = aoff[nAgents]; aidle[k] = aidle[nAgents]; agoal[k] = agoal[nAgents];
       continue;
     }
 
@@ -3829,7 +3856,7 @@ function step() {
         if (occ[cell]) occ[cell]--;
         nAgents--;
         ax[k] = ax[nAgents]; ay[k] = ay[nAgents]; ah[k] = ah[nAgents];
-        atip[k] = atip[nAgents]; astv[k] = astv[nAgents]; aoff[k] = aoff[nAgents]; agoal[k] = agoal[nAgents];
+        atip[k] = atip[nAgents]; astv[k] = astv[nAgents]; aoff[k] = aoff[nAgents]; aidle[k] = aidle[nAgents]; agoal[k] = agoal[nAgents];
         continue;
       }
     }
@@ -3939,6 +3966,20 @@ function step() {
         var from = (ay[k] | 0) * GW + (ax[k] | 0);
         if (drawFront(k) || drawHome(k, from)) { aoff[k] = 0; quota--; }
         else break;   /* nowhere on the body would take it this step */
+      }
+    }
+    /* --- withdrawal from idle tube — see IDLE_C --- */
+    var nIdle = 0;
+    for (i = 0; i < nAgents; i++) if (aidle[i] >= IDLE_GRACE) nIdle++;
+    if (nIdle) {
+      var iq = IDLE_BASE + (nIdle >> 8);
+      if (idleCursor >= nAgents) idleCursor = 0;
+      for (var isc = 0; isc < nAgents && iq > 0; isc++) {
+        k = idleCursor;
+        idleCursor = (idleCursor + 1 >= nAgents) ? 0 : idleCursor + 1;
+        if (aidle[k] < IDLE_GRACE || atip[k] || agoal[k]) continue;
+        if (drawFront(k)) { aidle[k] = 0; iq--; }
+        else break;   /* no tip to feed: the branch stays until there is one */
       }
     }
   }
@@ -7204,8 +7245,9 @@ var GHOST_ENT = 9;
 /* 4: the tip bar back at 3.0, the body test and reabsorption, recruitment
    gone, PACE 1. Each changes what a step does and how many draws it takes. */
 /* 5: the stalk. It changes the trail under every runner's thread.
-   6: settling — a dish with `refine` runs on past its last node. */
-var SIM_V = 6;
+   6: settling — a dish with `refine` runs on past its last node.
+   7: the stalk floors at STALK_W, and idle tube is withdrawn from. */
+var SIM_V = 7;
 
 function ghostSig() {
   var h = mix32(SIM_V, Math.round(CUE_CAP * 1000), Math.round(CUE_REGEN * 1000));
@@ -7733,7 +7775,7 @@ function startRun(i, seed, trace) {
   S.engulfed = 0;
   S.hab = 0; S.habPeak = 0; S.habBuilt = -1; S.fused = false;
   S.dietP = 0; S.dietC = 0; S.dietDoomedT = 0;
-  S.growAcc = 0; S.starveAcc = 0; reabCursor = 0; mainOK = false; S.refineT0 = -1; S.flowAcc = 0; S.streamAcc = 0; tubeDist = [];
+  S.growAcc = 0; S.starveAcc = 0; reabCursor = 0; idleCursor = 0; mainOK = false; S.refineT0 = -1; S.flowAcc = 0; S.streamAcc = 0; tubeDist = [];
   S.shockNext = e.shock ? e.shock.first : 0;
   S.shockPeriod = e.shock ? e.shock.period : 0;
   S.shockActive = false; S.shockWarn = false; S.shocksSurvived = 0;
