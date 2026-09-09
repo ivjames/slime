@@ -669,7 +669,18 @@ var SCAR_REF  = 25.0;      // trail at which a live tube silences its own scar
 var ADRIFT_T     = 18.0;  // trail below which an agent is not standing on tube
 var ADRIFT_TIME  = 2.5;   // seconds of that before the scrap is drawn home
 var ADRIFT_DRAWS = 8;     // draws taken looking for somewhere to put it
-var ADRIFT_R     = 3.0;   // ...and how far from that cell it may land, cells
+var ADRIFT_R     = 1.5;   // ...and how far from that cell it may land, cells
+/* Cytoplasm stays in the tube. Everything the organism does starts on the
+   line and moves outward from it: a tip leaves the tube, and the tube
+   follows the tip. Nothing else leaves. Ordinary cytoplasm standing on tube
+   that would step onto bare agar is turned instead — the same treatment as
+   a wall — so the mass between two veins is never seeded by an agent that
+   wandered off one and laid trail where it stood, which was what the
+   patches in the holes of the lattice were: a stray, its own puddle, and
+   then a bridge to it. The tube it may step onto is anything at TUBE_LEAVE
+   or more, which a stalk is (STALK_W x 36) and bare agar is not; food is
+   always open, since a pad spreads across its flake before it has trail. */
+var TUBE_LEAVE   = 6.0;   // trail below which a cell is bare agar to a follower
 
 var SPENT_FOOD = 0.30; // an engulfed node's remaining pull (a refuge, not a beacon)
 var SPENT_FALL = 34;   // and only over this reach, so spent food cannot outbid fresh
@@ -2726,8 +2737,10 @@ function thicken() {
     if (v > bestV) { bestV = v; best = k; }
   }
   if (best < 0) return false;
-  for (var tries = 0; tries < 6; tries++) {
-    if (emit(ax[best] + (rnd() - 0.5) * 8, ay[best] + (rnd() - 0.5) * 8, rnd() * Math.PI * 2, 0)) return true;
+  for (var tries = 0; tries < 12; tries++) {   /* a pad is dense; six tries stalled growth in it */
+    /* within a cell and a half of the parent, which is on tube: new
+       cytoplasm arrives ON the line, not in the hole beside it */
+    if (emit(ax[best] + (rnd() - 0.5) * 4, ay[best] + (rnd() - 0.5) * 4, rnd() * Math.PI * 2, 0)) return true;
   }
   return false;
 }
@@ -2758,9 +2771,12 @@ function drawHome(k, from) {
     if (v > bestV) { bestV = v; best = c; }
   }
   if (best < 0) return false;
+  /* twice ADRIFT_R: home is beside a trunk, whose core is mostly occupied,
+     and a scrap that finds no free cell in six tries is deleted by the
+     caller — the flank of a trunk is still the line */
   for (var tries = 0; tries < 6; tries++) {
-    var nx = ax[best] + (rnd() - 0.5) * 2 * ADRIFT_R;
-    var ny = ay[best] + (rnd() - 0.5) * 2 * ADRIFT_R;
+    var nx = ax[best] + (rnd() - 0.5) * 4 * ADRIFT_R;
+    var ny = ay[best] + (rnd() - 0.5) * 4 * ADRIFT_R;
     if (nx < 1 || ny < 1 || nx >= GW - 1 || ny >= GH - 1) continue;
     var ci = (ny | 0) * GW + (nx | 0);
     if (wallM[ci] || occ[ci]) continue;
@@ -3707,11 +3723,21 @@ function step() {
        reserving a cell the agent is not standing in */
     var nx = Math.fround(x + Math.cos(h) * spd);
     var ny = Math.fround(y + Math.sin(h) * spd);
-    var idx = -1;
+    var idx = -1, offTube = false;
     var blocked = (nx < 1 || ny < 1 || nx >= GW - 1 || ny >= GH - 1);
     if (!blocked) {
       idx = (ny | 0) * GW + (nx | 0);
       if (wallM[idx] || (idx !== oldIdx && occ[idx])) blocked = true;
+      /* and a follower does not step off the tube onto bare agar — TUBE_LEAVE.
+         Read at TUBE_LEAVE on both sides, so a vein's own diffusion ring
+         (about 15 beside a 34 core, about 6 one cell further) is still tube
+         to leave from and the rule is not two steps deep. Fresh food is open,
+         spent food is not — a pad spreads across a flake before it has
+         trail; a spent flake's fan is bare agar again. Not during the
+         settling, which has its own rules and no tips at all. */
+      else if (!tip && idx !== oldIdx && !feeding && S.refineT0 < 0 &&
+               trail[oldIdx] >= TUBE_LEAVE && trail[idx] < TUBE_LEAVE &&
+               !(feedAt[idx] >= 0 && !S.nodeDone[feedAt[idx]])) { blocked = true; offTube = true; }
     }
 
     /* Where this agent ends the step, moved or not. A blocked agent used to
@@ -3725,7 +3751,11 @@ function step() {
        up against walls and inside junctions and fattens them into blobs. */
     var cell;
     if (blocked) {
-      ah[k] = rnd() * Math.PI * 2;
+      /* turned by the tube's edge, it turns ALONG the tube, toward the better
+         flank: a random heading on a one-cell vein points off it three
+         times in four, and a follower re-blocked most steps lays nothing
+         and lets the vein it is confined to lapse */
+      ah[k] = offTube ? h + (L >= R ? -SENS_A : SENS_A) : rnd() * Math.PI * 2;
       cell = oldIdx;
     } else {
       ax[k] = nx; ay[k] = ny; ah[k] = h;
@@ -7333,8 +7363,9 @@ var GHOST_ENT = 9;
    gone, PACE 1. Each changes what a step does and how many draws it takes. */
 /* 5: the stalk. It changes the trail under every runner's thread.
    6: settling — a dish with `refine` runs on past its last node.
-   7: the stalk floors at STALK_W, and idle tube is withdrawn from. */
-var SIM_V = 7;
+   7: the stalk floors at STALK_W, and idle tube is withdrawn from.
+   8: followers stay in the tube, and new cytoplasm arrives on it. */
+var SIM_V = 8;
 
 function ghostSig() {
   var h = mix32(SIM_V, Math.round(CUE_CAP * 1000), Math.round(CUE_REGEN * 1000));
