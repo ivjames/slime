@@ -898,7 +898,7 @@ var EXPERIMENTS = [
        keep 0.3 into a few thick tubes between the depots with the plate
        between them bare, which is the paper's second day. The verdict comes
        at the end of the settling, not at the ninth depot. */
-    refine: { dur: 90, keep: 0.3, flow: 160, sense: 3,
+    refine: { dur: 120, keep: 0.3, flow: 160, sense: 3, stream: 100,
               text: 'nine on one network. now the network decides which of itself to keep.' },
     script: [
       { t: 2, hi: true, text: 'nine depots. the dish is the wrong shape for a city and you do not care.' },
@@ -1838,6 +1838,7 @@ function paceDish(e) {
   if (e.reseal) e.reseal *= k;
   if (e.refine && e.refine.dur) e.refine.dur *= k;
   if (e.refine && e.refine.flow) e.refine.flow /= k;
+  if (e.refine && e.refine.stream) e.refine.stream /= k;
   if (e.starve) e.starve /= k;
   if (e.heatDmg != null) e.heatDmg /= k;
   if (e.shock) {
@@ -2297,7 +2298,7 @@ var S = {
   dietP: 0, dietC: 0, dietDoomedT: 0,
   growAcc: 0, starveAcc: 0,
   refineT0: -1,   /* sim time the settling began, or -1 — see EXP-03's refine */
-  flowAcc: 0,
+  flowAcc: 0, streamAcc: 0,
   shockNext: 0, shockActive: false, shockWarn: false, shocksSurvived: 0,
   shockWarned: -1, shockCycle: 0, shockPeriod: 0,
   quinTime: 0, slow: 1, anticipated: false,
@@ -2444,7 +2445,7 @@ function applyEvent(e, ev) {
            clock is reabsorbed early or late by up to ADRIFT_TIME on the
            strength of a wall appearing somewhere else in the dish. */
         ax[k] = ax[nAgents]; ay[k] = ay[nAgents]; ah[k] = ah[nAgents];
-        atip[k] = atip[nAgents]; astv[k] = astv[nAgents]; aoff[k] = aoff[nAgents];
+        atip[k] = atip[nAgents]; astv[k] = astv[nAgents]; aoff[k] = aoff[nAgents]; agoal[k] = agoal[nAgents];
         continue;
       }
       k++;
@@ -2602,7 +2603,7 @@ function inoculate(e) {
       occ[si] = 1;
       ah[nAgents] = rnd() * Math.PI * 2;
       atip[nAgents] = 0;
-      astv[nAgents] = 0; aoff[nAgents] = 0;
+      astv[nAgents] = 0; aoff[nAgents] = 0; agoal[nAgents] = 0;
       nAgents++;
     }
     var w = ci - 1, ee = ci + 1, nn = ci - GW, ss2 = ci + GW;
@@ -2634,7 +2635,7 @@ function emit(nx, ny, nh, tip) {
   if (wallM[ci] || occ[ci]) return false;
   ax[nAgents] = Math.fround(nx); ay[nAgents] = Math.fround(ny); ah[nAgents] = nh;
   atip[nAgents] = tip ? 1 : 0;
-  astv[nAgents] = 0; aoff[nAgents] = 0;
+  astv[nAgents] = 0; aoff[nAgents] = 0; agoal[nAgents] = 0;
   occ[ci]++;
   nAgents++;
   return true;
@@ -2763,7 +2764,7 @@ function drawHome(k, from) {
     occ[ci]++;
     ax[k] = Math.fround(nx); ay[k] = Math.fround(ny);
     ah[k] = rnd() * Math.PI * 2;
-    atip[k] = 0; astv[k] = 0; aoff[k] = 0;
+    atip[k] = 0; astv[k] = 0; aoff[k] = 0; agoal[k] = 0;
     return true;
   }
   return false;
@@ -2822,6 +2823,7 @@ var mainC   = new Uint8Array(NCELL);
 var connLab = new Int32Array(NCELL);
 var connQ   = new Int32Array(NCELL);
 var aoff    = new Uint16Array(MAXA);   // labellings this agent has spent off the body
+var agoal   = new Int16Array(MAXA);    // streaming: 1 + the node this agent is bound for, or 0
 var mainOK  = false;
 var reabCursor = 0;
 
@@ -2968,7 +2970,7 @@ function drawFront(k) {
       occ[ci]++;
       ax[k] = Math.fround(nx); ay[k] = Math.fround(ny);
       ah[k] = ah[c];           /* arrives heading the way the front is going */
-      atip[k] = 0; astv[k] = 0; aoff[k] = 0;
+      atip[k] = 0; astv[k] = 0; aoff[k] = 0; agoal[k] = 0;
       return true;
     }
   }
@@ -2997,7 +2999,7 @@ function killWeakest() {
   if (occ[ci]) occ[ci]--;          /* every removal path decrements */
   nAgents--;
   ax[k] = ax[nAgents]; ay[k] = ay[nAgents]; ah[k] = ah[nAgents];
-  atip[k] = atip[nAgents]; astv[k] = astv[nAgents]; aoff[k] = aoff[nAgents];
+  atip[k] = atip[nAgents]; astv[k] = astv[nAgents]; aoff[k] = aoff[nAgents]; agoal[k] = agoal[nAgents];
 }
 
 /* The idlest agent, by the same reading killWeakest uses, without the kill:
@@ -3039,7 +3041,7 @@ function drawTube(k) {
   occ[best]++;
   ax[k] = Math.fround((best % GW) + 0.5); ay[k] = Math.fround(((best / GW) | 0) + 0.5);
   ah[k] = rnd() * Math.PI * 2;
-  atip[k] = 0; astv[k] = 0; aoff[k] = 0;
+  atip[k] = 0; astv[k] = 0; aoff[k] = 0; agoal[k] = 0;
   return true;
 }
 
@@ -3548,7 +3550,28 @@ function step() {
        valve: at the flake's own area of agents there is nothing holding
        anything and new arrivals pass straight through, so a covered flake
        stops taking cytoplasm the rest of the dish could be using. */
-    if (feeding) {
+    /* streaming — see the settling block: bound for a flake, down its
+       geodesic, along tube where there is tube to walk */
+    if (agoal[k]) {
+      var gn = agoal[k] - 1, gdm = nodeDist[gn];
+      if (!gdm || gdm[here] <= e.nodes[gn].r) agoal[k] = 0;
+      else {
+        var gbest = -1, gbv = 1e9, gbt = -1, gbtv = 1e9;
+        for (var gd = 0; gd < 8; gd++) {
+          var ga = gd * Math.PI / 4;
+          var gx = (x + Math.cos(ga) * 1.5) | 0, gy = (y + Math.sin(ga) * 1.5) | 0;
+          if (gx < 0 || gy < 0 || gx >= GW || gy >= GH) continue;
+          var gi = gy * GW + gx;
+          if (wallM[gi]) continue;
+          var gv = gdm[gi];
+          if (gv < gbv) { gbv = gv; gbest = gd; }
+          if (trail[gi] >= TUBE_T * 0.5 && gv < gbtv) { gbtv = gv; gbt = gd; }
+        }
+        var gpick = gbt >= 0 ? gbt : gbest;
+        if (gpick >= 0) h = gpick * Math.PI / 4;
+      }
+    }
+    if (feeding && !agoal[k]) {
       var fnd = e.nodes[fi];
       var fdx = x - fnd.x, fdy = y - fnd.y;
       var fdd = Math.sqrt(fdx * fdx + fdy * fdy);
@@ -3735,7 +3758,7 @@ function step() {
       if (occ[cell]) occ[cell]--;
       nAgents--;
       ax[k] = ax[nAgents]; ay[k] = ay[nAgents]; ah[k] = ah[nAgents];
-      atip[k] = atip[nAgents]; astv[k] = astv[nAgents]; aoff[k] = aoff[nAgents];
+      atip[k] = atip[nAgents]; astv[k] = astv[nAgents]; aoff[k] = aoff[nAgents]; agoal[k] = agoal[nAgents];
       continue;
     }
 
@@ -3768,7 +3791,7 @@ function step() {
         if (occ[cell]) occ[cell]--;
         nAgents--;
         ax[k] = ax[nAgents]; ay[k] = ay[nAgents]; ah[k] = ah[nAgents];
-        atip[k] = atip[nAgents]; astv[k] = astv[nAgents]; aoff[k] = aoff[nAgents];
+        atip[k] = atip[nAgents]; astv[k] = astv[nAgents]; aoff[k] = aoff[nAgents]; agoal[k] = agoal[nAgents];
         continue;
       }
     }
@@ -3904,6 +3927,29 @@ function step() {
         S.flowAcc -= 1;
       }
       if (S.flowAcc > 4) S.flowAcc = 4;
+    }
+    /* Shuttle streaming. The organism in the dish moves cytoplasm between
+       its flakes through the tubes, and Tero's whole result is that the tubes
+       carrying that traffic thicken and the rest lapse. So `stream` agents a
+       second, standing on a flake, are sent to another flake: each walks the
+       tube network down that flake's geodesic, laying trail as it goes, and
+       the shortest tube between any two flakes is the one that gets walked.
+       Without it the settling kept pads and the short bridges between close
+       pairs and let every tube across the plate go. */
+    if (e.refine.stream && e.nodes.length > 1) {
+      S.streamAcc += e.refine.stream * DT;
+      while (S.streamAcc >= 1 && nAgents > 0) {
+        S.streamAcc -= 1;
+        var sk = (rnd() * nAgents) | 0;
+        if (agoal[sk]) continue;
+        var sc = (ay[sk] | 0) * GW + (ax[sk] | 0);
+        var onN = feedAt[sc];
+        if (onN < 0) continue;
+        var to = (rnd() * (e.nodes.length - 1)) | 0;
+        if (to >= onN) to++;
+        agoal[sk] = to + 1;
+      }
+      if (S.streamAcc > 4) S.streamAcc = 4;
     }
   }
   if (nAgents < target) {
@@ -7640,7 +7686,7 @@ function startRun(i, seed, trace) {
   S.engulfed = 0;
   S.hab = 0; S.habPeak = 0; S.habBuilt = -1; S.fused = false;
   S.dietP = 0; S.dietC = 0; S.dietDoomedT = 0;
-  S.growAcc = 0; S.starveAcc = 0; reabCursor = 0; mainOK = false; S.refineT0 = -1; S.flowAcc = 0;
+  S.growAcc = 0; S.starveAcc = 0; reabCursor = 0; mainOK = false; S.refineT0 = -1; S.flowAcc = 0; S.streamAcc = 0;
   S.shockNext = e.shock ? e.shock.first : 0;
   S.shockPeriod = e.shock ? e.shock.period : 0;
   S.shockActive = false; S.shockWarn = false; S.shocksSurvived = 0;
