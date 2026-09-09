@@ -342,6 +342,23 @@ var TIP_MIN  = 0.25;     // ...and the fraction of it below which this is no tip
    the grey wash because it is gated on being a tip at all, and the supply test
    above denies that to anything that has come adrift. */
 var TIP_LAY  = 3.0;      // trail a tip lays per step, as a multiple of DEPOSIT
+/* The stalk. A tip's tube is a pseudopod, and a pseudopod has a stalk: the
+   thread runs back from the tip to the body for as long as the tip is out,
+   and in the organism it is cytoplasm, so it does not fade behind the tip
+   the way a pheromone does. Here the trail IS a pheromone, and decayed at
+   DECAY a runner's thread went below anything the eye or the body test could
+   see about thirty cells behind it — so a runner two hundred cells out was a
+   hair with a bead on the end and nothing between it and the body, which is
+   the picture of a break. So what a tip lays is laid a second time into
+   stalkF, which does not diffuse and decays at STALK_HOLD, and the trail is
+   floored at the stalk: a runner's thread stays trail, and so stays drawn,
+   stays followed and stays part of the body, for about sixteen seconds
+   behind the tip — the width of the plate at a runner's speed. When the
+   runner stops, its stalk fades over the same sixteen seconds, and the
+   cytoplasm that followed it is off the body only once the thread has gone
+   from under it; then it is drawn home. A hair that shortens and fades
+   rather than a hair that snaps. */
+var STALK_HOLD = 0.997;  // per-step decay of the stalk: 36 -> 2 in ~16 s
 
 /* ---- branching ----
    New cytoplasm is not sprinkled near the food any more; it is spent FORKING
@@ -1833,6 +1850,7 @@ var bfsQ  = new Int32Array(NCELL + 1); // ring buffer, one slot per cell + 1
 var inQ   = new Uint8Array(NCELL);
 var nodeDist = [];                     // per node: geodesic distance, built once
 var tmpF  = new Float32Array(NCELL);
+var stalkF = new Float32Array(NCELL);  // see STALK_HOLD
 var foodF = new Float32Array(NCELL);
 var statF = new Float32Array(NCELL);   // food*FOODW - hazard repel + wall penalty
 var cueF  = new Float32Array(NCELL);
@@ -2327,7 +2345,7 @@ function buildDish(e) {
   fieldDirty = true;
   dirtyFrames = REBUILD_EVERY;
   resetVeinTemporal();
-  trail.fill(0); tmpF.fill(0); foodF.fill(0);
+  trail.fill(0); tmpF.fill(0); stalkF.fill(0); foodF.fill(0);
   cueF.fill(0); retF.fill(0); slimeF.fill(0); knotF.fill(0); traceF.fill(0);
   flowF.fill(0); condF.fill(0); scarF.fill(0);
   nodeAt.fill(-1);
@@ -3047,6 +3065,13 @@ function diffuseTrail() {
       var v = (sw * tmpF[up + x] + cw * tmpF[i] + sw * tmpF[dn + x]) * DECAY;
       var cd = condF[i];
       if (cd > 0) { var hold = COND_LEVEL * cd; if (v < hold) v = hold; }
+      var sk = stalkF[i];
+      if (sk > 0) {
+        sk *= STALK_HOLD;
+        if (sk < 0.05 || wallM[i]) sk = 0;
+        stalkF[i] = sk;
+        if (v < sk) v = sk;   /* the stalk is a floor under the trail */
+      }
       trail[i] = wallM[i] ? 0 : (v < 0.0016 ? 0 : v);
       if (cueF[i] > 0) { var c = cueF[i] * CUE_DECAY; cueF[i] = c < 0.002 ? 0 : c; }
       if (retF[i] > 0) { var q = retF[i] * CUE_DECAY; retF[i] = q < 0.002 ? 0 : q; }
@@ -3565,6 +3590,7 @@ function step() {
     if (dep > 0) {
       var tv = trail[cell];
       if (tv < TRAIL_MAX) trail[cell] = tv + dep > TRAIL_MAX ? TRAIL_MAX : tv + dep;
+      if (tip) { var sk0 = stalkF[cell] + dep; stalkF[cell] = sk0 > TRAIL_MAX ? TRAIL_MAX : sk0; }
       /* The same number is the flux. What a cell's traffic delivers IS its
          deposit — that is what the constant is defined as — so the flow
          accumulator is one add here rather than a second measurement of the
@@ -6096,6 +6122,7 @@ function paintBrush(gx, gy, mode) {
       if (mode === 2) {
         if (retF[i] < want) retF[i] = want;
         trail[i] *= (1 - 0.16 * fall);
+        stalkF[i] *= (1 - 0.16 * fall);   /* or the floor puts it straight back */
       } else {
         if (cueF[i] < want) cueF[i] = want;
       }
@@ -6968,7 +6995,8 @@ var GHOST_ENT = 9;
    many draws it takes; PACE changes every dish's clock. */
 /* 4: the tip bar back at 3.0, the body test and reabsorption, recruitment
    gone, PACE 1. Each changes what a step does and how many draws it takes. */
-var SIM_V = 4;
+/* 5: the stalk. It changes the trail under every runner's thread. */
+var SIM_V = 5;
 
 function ghostSig() {
   var h = mix32(SIM_V, Math.round(CUE_CAP * 1000), Math.round(CUE_REGEN * 1000));
