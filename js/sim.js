@@ -4703,13 +4703,18 @@ function restoreVeinTemporal(fs) {
 function smoothRidgeField() {
   var dt = S.simT - veinT;
   veinT = S.simT;
-  if (!veinPrimed) { shpV.set(shpA); shpVB.set(shpB); veinPrimed = true; return; }
+  if (!veinPrimed) { shpV.set(shpA); shpVB.set(shpB); bodyV.set(shpA); bodyRim(); veinPrimed = true; return; }
   /* A dish that did not advance has nothing to average: holding shpV is both
      cheaper and more correct than folding the same field into itself, which
      would only walk the average toward a value it is already at. Backwards is
      a teleport that got past resetVeinTemporal, and takes the field as given. */
-  if (dt <= 0) { if (dt < 0) { shpV.set(shpA); shpVB.set(shpB); } return; }
+  if (dt <= 0) { if (dt < 0) { shpV.set(shpA); shpVB.set(shpB); bodyV.set(shpA); bodyRim(); } return; }
   var k = 1 - Math.exp(-dt / VEIN_TAU);
+  /* the body's slower ease; zero under a wall, where the average would
+     otherwise remember the tube a wall has just come down on */
+  var kb = 1 - Math.exp(-dt / BODY_TAU);
+  for (var ib = 0; ib < NCELL; ib++) bodyV[ib] = wallM[ib] ? 0 : bodyV[ib] + (shpA[ib] - bodyV[ib]) * kb;
+  bodyRim();
   if (k >= 0.999) { shpV.set(shpA); shpVB.set(shpB); return; }
   /* Swept whole. Skipping the cells where shpA and shpV already agree is exact
      — the update is a no-op there — and measured as worth nothing, because
@@ -4720,6 +4725,17 @@ function smoothRidgeField() {
     shpV[i] += (shpA[i] - shpV[i]) * k;
     shpVB[i] += (shpB[i] - shpVB[i]) * k;
   }
+}
+
+/* The body field is zero on the outermost ring of cells, so every outline
+   the tracer follows closes inside the grid: a level that ran off the edge
+   of the plate was an open chain, and an open chain closed by its chord
+   filled a wedge of the plate. The ring is a cell wide and under the
+   plate's rim. */
+function bodyRim() {
+  var x, y;
+  for (x = 0; x < GW; x++) { bodyV[x] = 0; bodyV[(GH - 1) * GW + x] = 0; }
+  for (y = 0; y < GH; y++) { bodyV[y * GW] = 0; bodyV[y * GW + GW - 1] = 0; }
 }
 
 /* one separable 1-2-1 pass, src -> dst, via shpT */
@@ -5627,6 +5643,64 @@ var lobePath = null;
    survives as a fading halo around the smaller new one. */
 var lobeMaskPath = null;
 var LOBE_STYLE = '';
+/* ---- the body: the tissue itself, as filled bands ----
+   The line layer draws crests and the mass layer draws junctions, and
+   between them the picture was a web of hairlines on dark: the organism's
+   tubes are wide, soft-edged and continuous, and a crest is a line a cell
+   wide that the trace re-finds every rebuild. Measured a second apart on
+   First Contact, less than half the drawn crest cells were still crest and
+   a fifth were more than a cell from any — the network drawn as lines
+   re-routes on the second, and at thirty rebuilds a second that reads as
+   lightning. The eased trail, drawn as a picture, does not: it is the same
+   mesh of wide bands the plate shows through a microscope, and its ISO
+   masks a second apart keep four fifths of their cells raw and nineteen
+   twentieths under a 1.5-second ease, against the crests' half.
+
+   So the body is drawn as what it is: the iso-bands of the eased trail,
+   each level traced as a closed outline (marching squares with the crossing
+   interpolated along the edge, so the edge slides with the field rather
+   than stepping a cell at a time) and filled, outer to inner, from a
+   translucent film at the edge of tissue to the lamp-lit core. Vector, like
+   the lines were — a handful of Path2D fills a rebuild, nothing rasterised.
+
+   The line layer is not drawn while this is, and not built: a crest is a
+   line re-found every rebuild, and it cannot be kept where it is, because
+   the ridge it marks moves. Pinning was tried — a settled run laid down at
+   its coordinates for good, later traces within two cells of it treated as
+   the same vein and not drawn — and the record it left was a scatter of
+   dashes: a tube several cells wide collects two or three parallel
+   fragments pinned at different moments, and the crests end at every
+   junction, so there is no one line per vein to pin. The bands are the
+   vectors that hold still, and the tubes they draw are the veins. The
+   masses are not drawn either: a junction is body, and the body is drawn.
+   The line machinery stays under the flag, for the day it is wanted. */
+var BODY = true;
+/* Its own ease, longer than the crests' VEIN_TAU: an outline that lags the
+   tissue by a second is a tube swelling and thinning, where a crest that
+   lagged by a second would be drawn a cell off the tube it marks. */
+var BODY_TAU = 1.5;                     // sim-seconds of memory
+var bodyV = new Float32Array(NCELL);
+/* The levels, in trail: the film below BODY_T where tissue begins, the tube
+   at TIP_FEED where a filament counts as supplied, and three above it up to
+   the packed core. hot walks each toward the lamp as the vein bands do. */
+var BODY_LEVELS = [6, 12, 20, 32, 50];
+var BODY_HOT    = [0.00, 0.00, 0.18, 0.30, 0.44];
+var BODY_ALPHA  = [0.32, 0.85, 1, 1, 1];
+var BODY_STYLE  = [];
+var bodyPath = [null, null, null, null, null];
+var ISO_MINPTS = 8;                     // a loop shorter than this is speckle, or a pinhole
+/* the tracer's working set: per cell, the least and greatest of its four
+   corners, so a level tests two numbers per cell rather than four loads;
+   per edge, where the level crosses it and which edge the outline continues
+   to, stamped per level rather than cleared */
+var isoMin = new Float32Array(NCELL), isoMax = new Float32Array(NCELL);
+var isoX = new Float32Array(NCELL * 2), isoY = new Float32Array(NCELL * 2);
+var isoNext = new Int32Array(NCELL * 2);
+var isoMark = new Int32Array(NCELL * 2), isoSeen = new Int32Array(NCELL * 2), isoStamp = 0;
+var isoList = new Int32Array(NCELL * 2), isoListN = 0;
+/* a loop can be at most every edge once, so the point buffers cannot overflow */
+var ISO_LOOP_CAP = NCELL * 2;
+var isoPX = new Float32Array(ISO_LOOP_CAP), isoPY = new Float32Array(ISO_LOOP_CAP);
 
 function tintVeins(vein) {
   for (var i = 0; i < VEIN_BANDS.length; i++) {
@@ -5658,6 +5732,10 @@ function tintVeins(vein) {
      BRIGHTEST thing on the plate while the comment went on claiming they
      matched. Derived, it cannot drift from what it says it is. */
   LOBE_STYLE = rgba(mixLamp(vein, VEIN_BANDS[3].hot), '1');
+  for (var kb = 0; kb < BODY_LEVELS.length; kb++) {
+    BODY_STYLE[kb] = rgba(mixLamp(vein, BODY_HOT[kb]), '' + BODY_ALPHA[kb]);
+  }
+  REC_STYLE = rgba(vein, '1');
 }
 var VEIN_CAP = 200000;                 /* floats held per band per rebuild */
 /* Each band's array holds RUNS now, not whole chains: [bucket, count, x0,y0,
@@ -5766,6 +5844,22 @@ var veilAcc = null, vactx = null;     // the running max
    vein, or a wall poured over one, covers it, as it covers the agar. */
 var ink = null, ictx = null;
 var INK_A = 0.30;                     // how much of the live vein's brightness the record keeps
+/* With the body drawn, the record is the TUBE FOOTPRINT rather than the
+   lines: every rebuild fills the supplied-tube level of the body into the
+   ink, opaque and in the tissue tone, so the ink is the union of every
+   place a tube has stood, no brighter for standing longer, and it is
+   composited under the live body at INK_A — the ghost of routes the
+   organism has withdrawn from, as an agar plate shows them. */
+var REC_LEVEL = 1;                    // index into BODY_LEVELS: the tube
+var REC_STYLE = '';
+function recordBody(tc, sx, sy) {
+  if (!bodyPath[REC_LEVEL]) return;
+  tc.save();
+  tc.setTransform(sx, 0, 0, sy, 0, 0);
+  tc.fillStyle = REC_STYLE;
+  tc.fill(bodyPath[REC_LEVEL], 'evenodd');
+  tc.restore();
+}
 /* Which cells the record already holds. A settled run is inked only where it
    passes through a cell not yet inked, and each such piece is stroked into
    the ink exactly once: that is what makes the record idempotent. Stroking
@@ -6179,6 +6273,71 @@ function traceMass(minTier, out) {
   return path;
 }
 
+/* The body's outline at one level, as a Path2D of closed loops, or null.
+   Marching squares over the full grid with the crossing point interpolated
+   along each edge; the corner-bit tables are traceMass's, on the same edge
+   numbering. Only cells the level actually crosses are visited — those
+   whose corners straddle it, which isoMin/isoMax answer in two compares —
+   and only the edges the crossing entered are walked, from the list the
+   sweep collected, so the cost is the outline's length, not the plate's. */
+function traceIso(lv) {
+  var NE = NCELL, x, y, n, e;
+  /* stamps rather than clears, one per level per rebuild; wrapped long
+     before the integer runs out, with the one clear that then costs */
+  if (isoStamp >= 2000000000) { isoStamp = 0; isoMark.fill(0); isoSeen.fill(0); }
+  var stamp = ++isoStamp;
+  isoListN = 0;
+  for (y = 0; y < GH - 1; y++) {
+    var row = y * GW;
+    for (x = 0; x < GW - 1; x++) {
+      n = row + x;
+      if (isoMin[n] >= lv || isoMax[n] < lv) continue;
+      var a = bodyV[n], b = bodyV[n + 1], c = bodyV[n + GW + 1], d = bodyV[n + GW];
+      var ai = a >= lv, bi = b >= lv, ci = c >= lv, di = d >= lv;
+      var cs = (ai ? 1 : 0) | (bi ? 2 : 0) | (ci ? 4 : 0) | (di ? 8 : 0);
+      /* edges: 0 top (H n), 1 right (V n+1), 2 bottom (H n+GW), 3 left (V n) */
+      msEid[0] = n; msEid[1] = NE + n + 1; msEid[2] = n + GW; msEid[3] = NE + n;
+      if (ai !== bi) { isoX[n] = x + 0.5 + (lv - a) / (b - a); isoY[n] = y + 0.5; }
+      if (bi !== ci) { isoX[NE + n + 1] = x + 1.5; isoY[NE + n + 1] = y + 0.5 + (lv - b) / (c - b); }
+      if (di !== ci) { isoX[n + GW] = x + 0.5 + (lv - d) / (c - d); isoY[n + GW] = y + 1.5; }
+      if (ai !== di) { isoX[NE + n] = x + 0.5; isoY[NE + n] = y + 0.5 + (lv - a) / (d - a); }
+      e = msEid[MS_FROM[cs]];
+      isoNext[e] = msEid[MS_TO[cs]]; isoMark[e] = stamp; isoList[isoListN++] = e;
+      if (MS_FROM2[cs] >= 0) {
+        e = msEid[MS_FROM2[cs]];
+        isoNext[e] = msEid[MS_TO2[cs]]; isoMark[e] = stamp; isoList[isoListN++] = e;
+      }
+    }
+  }
+  var path = null, li;
+  for (li = 0; li < isoListN; li++) {
+    e = isoList[li];
+    if (isoSeen[e] === stamp) continue;
+    var m = 0, cur = e;
+    do {
+      isoSeen[cur] = stamp;
+      isoPX[m] = isoX[cur]; isoPY[m] = isoY[cur]; m++;
+      cur = isoNext[cur];
+    } while (cur >= 0 && cur !== e && isoMark[cur] === stamp && isoSeen[cur] !== stamp && m < ISO_LOOP_CAP);
+    if (m < ISO_MINPTS) continue;
+    if (!path) path = new Path2D();
+    /* quadratics through the midpoints, every second crossing point as the
+       control: the outline passes between them, the cell-scale zigzag of a
+       diagonal edge is not drawn, and half the curve calls are not made —
+       the crossings are a cell apart and the body has no feature that
+       fine. An odd loop takes its last point as a control on its own. */
+    var m2 = m & ~1, mp = m2 < m ? m - 1 : m - 2;   /* the control before point 0 */
+    path.moveTo((isoPX[mp] + isoPX[0]) * 0.5, (isoPY[mp] + isoPY[0]) * 0.5);
+    for (var k = 0; k < m2; k += 2) {
+      var kn = k + 2 < m ? k + 2 : 0;
+      path.quadraticCurveTo(isoPX[k], isoPY[k], (isoPX[k] + isoPX[kn]) * 0.5, (isoPY[k] + isoPY[kn]) * 0.5);
+    }
+    if (m2 < m) path.quadraticCurveTo(isoPX[m - 1], isoPY[m - 1], (isoPX[m - 1] + isoPX[0]) * 0.5, (isoPY[m - 1] + isoPY[0]) * 0.5);
+    path.closePath();
+  }
+  return path;
+}
+
 function buildVeins() {
   var b, i, x, y, bestLo = 0, bestHi = 0;
   for (b = 0; b < VEIN_BANDS.length; b++) vsegN[b] = 0;
@@ -6205,6 +6364,32 @@ function buildVeins() {
      from gone, and a verdict that cannot be put back is the worse artifact. */
   veilDn = (dtE > 0 && S.running) ? Math.exp(-dtE / ENV_DN_TAU) : 0;
   veinFresh = true;
+  /* --- the body ---
+     With the body drawn, this is the whole of the rebuild: the crests,
+     joins, masses and connecting paths below are the line layer, which is
+     not drawn while the body is (see BODY), so none of it is built. The
+     front's whiskers are built either way. */
+  if (BODY) {
+    for (y = 0; y < GH - 1; y++) {
+      var rowB = y * GW;
+      for (x = 0; x < GW - 1; x++) {
+        i = rowB + x;
+        var ba = bodyV[i], bb = bodyV[i + 1], bc = bodyV[i + GW + 1], bd = bodyV[i + GW];
+        var bmin = ba, bmax = ba;
+        if (bb < bmin) bmin = bb; else if (bb > bmax) bmax = bb;
+        if (bc < bmin) bmin = bc; else if (bc > bmax) bmax = bc;
+        if (bd < bmin) bmin = bd; else if (bd > bmax) bmax = bd;
+        isoMin[i] = bmin; isoMax[i] = bmax;
+      }
+    }
+    for (b = 0; b < BODY_LEVELS.length; b++) bodyPath[b] = traceIso(BODY_LEVELS[b]);
+    for (b = 0; b < VEIN_BANDS.length; b++) veinPath[b] = null;
+    lobePath = null; lobeMaskPath = null;
+    veinIslands = 0;
+    buildWhiskers();
+    return;
+  }
+
   /* last rebuild's maps become this one's memory by swapping the pairs, which
      costs a pointer where copying 106,000 bytes costs 106,000 bytes */
   var rswap = rprev; rprev = rdir; rdir = rswap;
@@ -6779,7 +6964,11 @@ function buildVeins() {
     lobeMaskPath = null;
   }
 
-  /* --- the front: one whisker per tip --- */
+  buildWhiskers();
+}
+
+/* --- the front: one whisker per tip --- */
+function buildWhiskers() {
   var wp = new Path2D(), any = false;
   for (var k = 0; k < nAgents; k++) {
     if (!atip[k]) continue;
@@ -6809,10 +6998,9 @@ function strokeVeins(tc, sx, sy, mono) {
      mask, so the mono pass stays a single flat sweep. */
   var k, b;
   if (mono) {
-    if (lobeMaskPath) {
-      ctx.fillStyle = '#fff';
-      ctx.fill(lobeMaskPath);
-    }
+    ctx.fillStyle = '#fff';
+    if (BODY) { for (k = 0; k < BODY_LEVELS.length; k++) if (bodyPath[k]) ctx.fill(bodyPath[k], 'evenodd'); }
+    else if (lobeMaskPath) ctx.fill(lobeMaskPath);
     for (b = VEIN_BANDS.length - 1; b >= 0; b--) {
       if (!veinPath[b]) continue;
       ctx.lineWidth = VEIN_BANDS[b].w + 0.5;
@@ -6850,7 +7038,16 @@ function strokeVeins(tc, sx, sy, mono) {
     else { ctx.strokeStyle = style; ctx.stroke(path); }
     ctx.globalAlpha = 1;
   };
-  if (lobePath) {
+  /* the body first, outer level to inner, each covering the last; the
+     lines land on it as the crests of its tubes */
+  if (BODY) {
+    for (k = 0; k < BODY_LEVELS.length; k++) {
+      if (!bodyPath[k]) continue;
+      ctx.fillStyle = BODY_STYLE[k];
+      ctx.fill(bodyPath[k], 'evenodd');
+    }
+  }
+  if (lobePath && !BODY) {
     ctx.fillStyle = LOBE_STYLE;
     if (lobePath[0]) { ctx.globalAlpha = BUCK_A[0]; ctx.fill(lobePath[0]); ctx.globalAlpha = 1; }
     if (lobePath[1]) punchThen(lobePath[1], true, LOBE_STYLE, BUCK_A[1]);
@@ -7172,7 +7369,7 @@ function render() {
     vlctx.setTransform(1, 0, 0, 1, 0, 0);
     vlctx.clearRect(0, 0, veil.width, veil.height);
     strokeVeins(vlctx, sx, sy, false);
-    inkFresh(ictx, sx, sy);
+    if (BODY) recordBody(ictx, sx, sy); else inkFresh(ictx, sx, sy);
     vmctx.setTransform(1, 0, 0, 1, 0, 0);
     vmctx.clearRect(0, 0, veilMask.width, veilMask.height);
     strokeVeins(vmctx, sx, sy, true);
