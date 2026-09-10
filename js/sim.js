@@ -243,8 +243,73 @@ var DT = 1 / 60;                           // fixed sim timestep
    is reached at the speed the culture grows. Dividing growth by PACE doubled
    the time to win EXP-03 at PACE 2 and left it unwon at 18000 steps at PACE
    3. The clocks that punish the organism are stretched; the one that feeds
-   it is left alone. */
-var PACE = 1;
+   it is left alone.
+
+   At 3 now, and the reason is the feeding calibration below rather than the
+   supply test this block was first written for. An engulf that took a median
+   29 dish-seconds across the twenty dishes takes 95 once the rate is set from
+   the hours a real flake takes — three times as long to do the one thing every
+   dish is scored on, which is this constant's definition exactly. So every
+   clock that was set against how fast food went down moves with it: grace,
+   the time limit, the shock schedule and its damage, starvation, habituation,
+   the cue reserve, the scripted beats. Left alone, as ever: growth, motion per
+   step, and eating itself, which is now derived from the plate rather than
+   paced against it.
+
+   Measured, this is the whole rebalance. On the same seed every dish reaches
+   the same verdict it reached before the calibration — nineteen autonomous
+   wins and the diet dish losing on its ratio, which is the dish doing its
+   job. */
+var PACE = 3;
+
+/* ---- the dish's scale ----
+   Two numbers say what a cell and a dish-second are worth outside the dish.
+   Everything below with a real-world referent is DERIVED from them rather
+   than chosen alongside them, which is the whole point: a constant picked to
+   make a dish feel right and a constant computed from a plate are different
+   kinds of number, and the file should not read as though they were the same
+   kind.
+
+   MM_CELL is read off the plate the dishes are already drawn on. EXP-01's
+   lose text has said "food eleven centimetres away in four directions" since
+   the dish was written, and its flakes sit sqrt(176^2 + 94^2) = 199.5 cells
+   from the inoculation. 110mm over 199.5 cells is 0.551mm a cell, which makes
+   the grid a 231 x 143mm plate — the size of tray the maze and network
+   results this game reproduces were actually run on. The prose and the
+   geometry were already agreeing with each other; nothing here is a
+   back-formation from one line of flavour text.
+
+   REAL_X is measured. A plasmodium foraging on non-nutrient agar at 25C
+   advances its front at 2-3 cm/h, and the foraging band is the right one for
+   these dishes: bare agar with flakes sitting on it, not a nutrient film.
+   (Carlile 1978 is worth reading the right way round — it finds the organism
+   moving SLOWER once there are nutrients under it, so a dish of clean agar is
+   the fast case, not the slow one.) The model's own front, measured on EXP-01
+   with no cue at all, stands at 125 cells from the inoculation at 12.6s and
+   209 at 29.2s: 5.0 cells a dish-second, which at MM_CELL is 9.9 metres an
+   hour. Against 25mm/h that is 400 times life.
+
+   It was 100 before — a round number written next to a caption, never
+   checked, and wrong by a factor of four. The correction matters now in a way
+   it did not then, because REAL_X has stopped being decorative: the feeding
+   rate is derived through it, so the dish clock is load-bearing and an
+   estimate that is off by 4x is off by 4x in the model rather than only in a
+   tooltip. */
+var MM_CELL      = 0.551;   // mm per grid cell — EXP-01's 11cm over 199.5 cells
+var REAL_MM_H    = 25;      // real front speed, mm/h, foraging on bare agar
+var SIM_CELLS_S  = 5.0;     // measured model front speed, cells per dish-second
+/* Estimated real-time factor of the dish clock: x1 is about REAL_X times life.
+   Stated in the controls so a multiplier means something outside the dish, and
+   now also read by the feeding rate, which is the one place in the simulation
+   that has any business knowing how long a real hour is.
+
+   No PACE divisor, deliberately, and it is worth being explicit because there
+   used to be one. PACE stretches the dish's SCHEDULES and slows its per-second
+   rates; it does not touch what an agent does in a step, and the pace block
+   says so. SIM_CELLS_S was measured off the front at PACE 1 and would measure
+   the same at any other PACE, so dividing here would report a dish clock the
+   organism is not running on. */
+var REAL_X = SIM_CELLS_S * MM_CELL * 3600 / REAL_MM_H;
 
 /* Motion + trail are the Jones (2010) lattice-forming regime, in grid cells:
    a 45 deg rotation toward the better sensor, one cell of travel per step, a
@@ -831,23 +896,90 @@ var TUBE_LEAVE   = 6.0;   // trail below which a cell is bare agar to a follower
 
 var SPENT_FOOD = 0.30; // an engulfed node's remaining pull (a refuge, not a beacon)
 var SPENT_FALL = 34;   // and only over this reach, so spent food cannot outbid fresh
-/* Not paced. Eating is the organism's own flow, like growth: a front in
-   contact with a node consumes it at the speed cytoplasm arrives, and a
-   dish's far food is reached by eating the near food first. Paced, this
-   added 3.3 s x (PACE - 1) per node to every multi-node dish for nothing the
-   dish was asking. */
-var MAX_ENGULF_RATE = 1 / 200; // a node takes >= 3.3s to consume however big the front
-/* Half-rate front, as a fraction of the node's own area. Blocked agents count
-   as contact, which roughly doubled the hits a jammed front reports — but
-   simply doubling this to compensate is wrong, and measurably so. A cued front
-   is dense and jams, an idle one is sparse and is limited by how long it takes
-   to arrive at all, so this constant prices ACTIVE play almost alone: at 0.26
-   EXP-01 ran 100s led against 114s untouched, erasing the point of the
-   controls, where at 0.13 it is nearer 70s against 105s. The two dishes that
-   came out genuinely too quick are corrected by their own `engulf` multiplier
-   instead, which is the knob meant for per-dish pacing. */
-var ENGULF_SOFT = 0.42;
-var ENGULF_DECAY = 0.0022 / PACE; // an abandoned node re-forms: commit, or lose the ground (paced)
+/* ---- how long a flake takes ----
+   Absorption happens across the contact area and nowhere else, so the rate a
+   flake goes down at is set by how much of it the pad is standing on. That
+   shape was always right here. What was missing was any number tying the
+   shape to a plate: the cap and the half-rate coverage were both picked by
+   watching solve times, and a per-dish `engulf` multiplier spanning 1.2 to
+   12.0 sat on top of them doing the rest of the work.
+
+   The literature gives one figure, and for once it is the figure the model
+   actually needs. A plasmodium offered an oat flake colonises it in 6 to 24
+   hours — fully covered after about a day — and a maintained culture is
+   re-flaked daily because a day is roughly how long a flake lasts. Through
+   REAL_X that band is 54 to 216 dish-seconds. The cap was 3.3.
+
+   Two constants carry it and they do different jobs. ENGULF_HOURS is the
+   asymptote: a pad in full contact with a fresh flake, which is the fast end
+   of the band. ENGULF_SOFT is the coverage at which the rate is half of that,
+   which is what maps the range of coverage the model actually reaches onto
+   the range of hours the organism actually takes.
+
+   Both are set against a MEASURED coverage, and measuring it is what moved
+   them. Backing c out of the progress curve on EXP-01 with no cue at all, the
+   pad on a flake averages 0.05 of the flake's own area across the engulf. It
+   is worth saying why that is not the 0.19-to-0.34 quoted at FEED_FILL: that
+   is the PEAK load, reached at the end, and the average that does the eating
+   is four times lower. EXP-03's nine small flakes run far denser, up past
+   0.5. So ENGULF_SOFT is set to put 0.05 at twice the cap — 12 hours, the
+   middle of the band — which leaves a dense pad near 6 hours and a thin one
+   out past 24, and that is the published band spanned by coverage alone,
+   which is what a saturating curve is for.
+
+   That is also what retires the per-dish `engulf` multiplier, rather than
+   merely relabelling it. It existed to drag dishes off a cap sixteen times
+   too fast, and EXP-03 needed 12x of it to stop nine small flakes going down
+   at the ceiling. With the cap where the hours put it, no dish needs any of
+   it: EXP-03's dense pads land at 6.5 hours a flake and EXP-01's thin ones at
+   12, which is the difference the multiplier was faking. A knob that priced
+   nine dishes differently for no stated reason is gone.
+
+   Not paced, for the reason eating never was: it is the organism's own flow,
+   like growth, and a dish's far food is reached by eating the near food
+   first. */
+var ENGULF_HOURS = 6;   // colonisation at full contact — the fast end of 6-24h
+var MAX_ENGULF_RATE = DT / (ENGULF_HOURS * 3600 / REAL_X);
+/* Coverage at half the cap, as a share of the flake's own area. 0.05 is the
+   measured average pad on EXP-01; setting the half-rate there is what puts an
+   ordinary uncued engulf at 2x the cap, i.e. the middle of the band. Blocked
+   agents still count as contact, which inflates a jammed front's hits — that
+   argues for reading the constant as "coverage that reports as 0.077", not
+   for correcting it, since the same inflation is in the 0.05 it was fitted
+   against. */
+var ENGULF_SOFT = 0.077;
+/* Progress does not run backwards. A flake the pad walks away from is not
+   re-formed by anything — an eaten oat flake is eaten, and agar does not
+   close over one — so leaving a flake half-taken costs the time already spent
+   on it and nothing more. What made the dishes that asked for commitment work
+   was never the food regrowing; see HOLD_FILL for what actually carries them. */
+
+/* ---- holding a flake ----
+   Three dishes ask the culture to HOLD ground rather than merely reach it,
+   and they used to get that by having the food grow back: leave a taken flake
+   alone for `reseal` seconds and it re-formed, to be eaten a second time.
+   Nothing does that. An eaten oat flake is eaten, and agar does not close over
+   one, so the mechanic was a timer wearing a biology costume.
+
+   What those dishes are about survives the correction intact, because the
+   flake was never the thing doing the work. A plasmodium has one finite pool
+   of cytoplasm: standing on six stations at once costs six pads' worth of it,
+   and a network that tours cannot be in six places. "Hold all six at once" is
+   a claim about where the ORGANISM is, not about what the agar is doing, so
+   that is what the gate reads now — a station counts while a taken flake has a
+   pad on it, and stops counting when the pad leaves. The dish still cannot be
+   won by touring, the objective text still means what it says, and nothing has
+   to regrow for it to be true.
+
+   HOLD_FILL is the coverage that counts as standing on it, as a share of the
+   flake's own area. It is well under the 0.05 an actively feeding pad averages
+   (see ENGULF_SOFT), because holding ground whose food is gone is a thinner
+   business than eating it: what is left on a spent flake is the refuge
+   SPENT_FOOD describes, not a feeding fan. HOLD_DROP is the grace before a
+   station is given up, so a pad that thins for a moment on its way past does
+   not drop one, and the log line does not chatter. */
+var HOLD_FILL = 0.012;  // share of a flake's area, in agents, that counts as held
+var HOLD_DROP = 1.5;    // seconds under that before the station is let go
 
 /* ---- the fan on a flake ----
    A plasmodium that reaches food does not file past it. It stops advancing
@@ -974,7 +1106,23 @@ var KNOT_GAIN = 2.60;   // extra deposit a marked cell takes, as a multiple
 
 /* ------------------------------------------------------------
    2. the five experiments
-   ------------------------------------------------------------ */
+   ------------------------------------------------------------
+   Every number below is written at PACE 1 — the organism the dishes were
+   tuned against — and paceDish() stretches the clocks and slows the rates once
+   at load. That is why `grace: 40` and `timeLimit: 700` read here as they
+   always did even though the feeding calibration made every flake three times
+   slower: the factor lives in PACE, in one place, instead of being multiplied
+   through eighty literals where the next change would have to find them all
+   again.
+
+   The hazard schedules go with them, and it is worth saying why, since the
+   first attempt at this left them alone on the grounds that a dish's rhythm
+   IS its experiment. That was wrong. What the missed beat and the syncopation
+   are about is the interval measured against how far the organism gets inside
+   it, so holding the interval fixed while the organism slows is not preserving
+   the experiment, it is silently making it a harder one. Measured, it is not
+   even subtle: the fire drill, left on its old schedule, took three times the
+   shocks before its first flake and starved on every seed. */
 var BORDER = [[0, 0, GW, 8], [0, GH - 8, GW, 8], [0, 0, 8, GH], [GW - 8, 0, 8, GH]];
 
 var EXPERIMENTS = [
@@ -992,7 +1140,7 @@ var EXPERIMENTS = [
       { x: 386, y: 224, r: 13, label: 'flake d' }
     ],
     walls: [], hazards: [],
-    start: 4500, cap: 11000, sustain: 3200, grow: 300, starve: 40, grace: 40, engulf: 1.6,
+    start: 4500, cap: 11000, sustain: 3200, grow: 300, starve: 40, grace: 40,
     /* the one dish with no cue reserve. It is where a player finds out what a
        cue does at all, and finding that out while being rationed teaches the
        ration instead of the cue. Every dish after this one runs the default. */
@@ -1029,7 +1177,7 @@ var EXPERIMENTS = [
       [98, 100, 44, 7], [258, 170, 54, 7]
     ]),
     hazards: [],
-    start: 5000, cap: 11000, sustain: 5800, grow: 320, starve: 11, grace: 260, reach: 260, engulf: 1.7,
+    start: 5000, cap: 11000, sustain: 5800, grow: 320, starve: 11, grace: 260, reach: 260,
     timeLimit: 700, hab: false, shocks: false,
     script: [
       { t: 2, hi: true, text: 'walls. the agar has been cut into corridors.' },
@@ -1064,7 +1212,7 @@ var EXPERIMENTS = [
       { x: 46, y: 84, r: 10, label: 'kofu' }
     ],
     walls: [], hazards: [],
-    start: 4200, cap: 12000, sustain: 1500, grow: 340, starve: 44, grace: 45, engulf: 12.0,
+    start: 4200, cap: 12000, sustain: 1500, grow: 340, starve: 44, grace: 45,
     timeLimit: 340, hab: false, shocks: false,
     /* The experiment's second half. Tero's plasmodium covered the plate in a
        fine mesh in eight hours and spent the next day pruning it: the tubes
@@ -1186,7 +1334,7 @@ var EXPERIMENTS = [
       [150, 184, 110, 8]
     ],
     hazards: [],
-    start: 5000, cap: 11000, sustain: 5000, grow: 320, starve: 16, grace: 180, reach: 280, engulf: 1.7,
+    start: 5000, cap: 11000, sustain: 5000, grow: 320, starve: 16, grace: 180, reach: 280,
     timeLimit: 620, hab: false, shocks: false,
     slimeAvoid: 2.5,
     preSlime: [[98, 76, 50, 108]],
@@ -1228,7 +1376,7 @@ var EXPERIMENTS = [
     hazards: [
       { type: 'l', x: 130, y: 84, w: 200, h: 40 }
     ],
-    start: 5000, cap: 11000, sustain: 5600, grow: 320, starve: 12, grace: 250, reach: 250, engulf: 1.6,
+    start: 5000, cap: 11000, sustain: 5600, grow: 320, starve: 12, grace: 250, reach: 250,
     timeLimit: 650, hab: false, shocks: false,
     heatDmg: 0.004,
     script: [
@@ -1265,7 +1413,7 @@ var EXPERIMENTS = [
     ],
     walls: [],
     hazards: [],
-    start: 4200, cap: 11000, sustain: 2200, grow: 310, starve: 40, grace: 45, engulf: 2.5,
+    start: 4200, cap: 11000, sustain: 2200, grow: 310, starve: 40, grace: 45,
     timeLimit: 420, hab: false, shocks: false,
     holdWin: 4,
     diet: { target: 2, tol: 0.4, min: 4 },
@@ -1298,7 +1446,7 @@ var EXPERIMENTS = [
     ],
     walls: [],
     hazards: [],
-    start: 4500, cap: 11000, sustain: 3200, grow: 300, starve: 40, grace: 150, reach: 260, engulf: 1.5,
+    start: 4500, cap: 11000, sustain: 3200, grow: 300, starve: 40, grace: 150, reach: 260,
     timeLimit: 480, hab: false, shocks: false,
     required: [1, 2],
     script: [
@@ -1372,7 +1520,7 @@ var EXPERIMENTS = [
       { type: 'h', x: 206, y: 37, w: 26, h: 222 },
       { type: 'h', x: 322, y: 1, w: 26, h: 222 }
     ],
-    start: 4800, cap: 11500, sustain: 3400, grow: 310, starve: 20, grace: 110, reach: 280, engulf: 1.3,
+    start: 4800, cap: 11500, sustain: 3400, grow: 310, starve: 20, grace: 110, reach: 280,
     timeLimit: 640, hab: false, shocks: false,
     script: [
       { t: 1.5, hi: true, text: 'the warm patches are not walls. cross them and you pay for it in cytoplasm.' },
@@ -1558,10 +1706,10 @@ var EXPERIMENTS = [
 
   {
     code: 'EXP-15', name: 'THE TIDE',
-    blurb: 'Six stations in a ring, and ground that reverts the moment you look away.',
-    obj: 'Hold all six stations engulfed at the same time.',
+    blurb: 'Six stations in a ring, and not enough of you to be at all six by accident.',
+    obj: 'Hold all six stations at the same time.',
     objShort: 'HELD',
-    chips: [['', 'ground reseals'], ['ok', 'six stations'], ['', 'hold, don\'t tour']],
+    chips: [['', 'presence, not visits'], ['ok', 'six stations'], ['', 'hold, don\'t tour']],
     inoc: { x: 210, y: 130 },
     nodes: [
       { x: 210, y: 35, r: 12, label: 'shore n' },
@@ -1573,22 +1721,22 @@ var EXPERIMENTS = [
     ],
     walls: [],
     hazards: [],
-    start: 4800, cap: 10000, sustain: 1700, grow: 310, starve: 32, grace: 70, reach: 200, engulf: 1.2,
+    start: 4800, cap: 10000, sustain: 1700, grow: 310, starve: 32, grace: 70, reach: 200,
     timeLimit: 520, hab: false, shocks: false,
-    reseal: 16,
+    holdAtOnce: 6,
     script: [
-      { t: 2, hi: true, text: 'six stations, no walls, and ground you leave alone stops being yours.' },
-      { t: 16, hi: true, text: 'the first one you touched and left is already thinking about reverting.' },
+      { t: 2, hi: true, text: 'six stations, no walls, and one cytoplasm to be in six places with.' },
+      { t: 16, hi: true, text: 'the first one you took is bare again. eaten is not the same as held.' },
       { t: 40, text: 'a network that only visits is not the same as a network that stays.' }
     ],
     ambient: [
-      'agar is not grateful. agar is only recently touched, or not.',
+      'the flakes are not going anywhere. you are, constantly.',
       'the tide is not water. the tide is you, elsewhere.',
-      'every station you are not touching is quietly reconsidering.',
+      'every station you are not standing on is a station you do not have.',
       'six mouths, one cytoplasm, and nowhere it can afford to stop.'
     ],
-    win: 'All six stations held at once, the network finally still instead of touring. The observer notes that holding is a different verb from finding, and a harder one. Nothing in the dish reverted while the note was being written.',
-    lose: 'Something was always mid-reversion. The observer counts five held, one skinning over, and writes down that six is not five plus patience.'
+    win: 'All six stations held at once — six pads standing at the same moment, out of one pool of cytoplasm. The observer notes that holding is a different verb from finding, and a harder one. Nothing was being toured while the note was written.',
+    lose: 'Something was always bare. The observer counts five pads and one flake nobody was standing on, and writes down that six is not five plus patience.'
   },
 
   {
@@ -1596,7 +1744,7 @@ var EXPERIMENTS = [
     blurb: 'Eight flakes, and enough of you for six. Choose which two you were never going to keep.',
     obj: 'Hold six of the eight stations at once.',
     objShort: 'FLAKES',
-    chips: [['', 'hold 6 of 8'], ['', 'idle ground reseals'], ['ok', 'no hazards']],
+    chips: [['', 'hold 6 of 8'], ['', 'presence, not visits'], ['ok', 'no hazards']],
     inoc: { x: 210, y: 130 },
     nodes: [
       { x: 210, y: 50, r: 11, label: 'flake n' },
@@ -1612,20 +1760,20 @@ var EXPERIMENTS = [
     hazards: [],
     start: 4800, cap: 10500, sustain: 1500, grow: 320, starve: 24, grace: 85, reach: 240,
     timeLimit: 520, hab: false, shocks: false,
-    reseal: 15, holdWin: 6,
+    holdAtOnce: 6,
     script: [
       { t: 2, hi: true, text: 'eight stations. tending is not the same as holding.' },
-      { t: 9, hi: true, text: 'ground you leave alone for too long seals back over. it does not ask first.' },
+      { t: 9, hi: true, text: 'a flake you walked off is still eaten. it is not still yours to count.' },
       { t: 22, text: 'there is not enough of you for all eight. six will have to be the whole answer.' }
     ],
     ambient: [
       'six is not a compromise. six is the number that was always available.',
       'the far bench costs more just to remember it exists.',
-      'a flake left alone does not starve. it simply stops being yours.',
+      'a flake left alone does not starve. you simply are not on it.',
       'nothing is being sacrificed here. two things are simply not being reached.'
     ],
     win: 'Stations enough held at once, and whatever could not be kept was let go early and without ceremony. The observer notes the concession was always the correct answer, not a shortfall met halfway. Holding everything was never on offer.',
-    lose: 'The network spread thin across all eight, held none of them long enough, and watched the reseal timers win every argument at once. Ambition, on this agar, is just starvation with better publicity.'
+    lose: 'The network spread thin across all eight and was never standing on more than four at once. Ambition, on this agar, is just starvation with better publicity.'
   },
 
   {
@@ -1673,7 +1821,7 @@ var EXPERIMENTS = [
         [280, 52, 8, 200]
       ], note: 'a second pour. the shortcut that saved you the first time is gone.', hi: true }
     ],
-    start: 5000, cap: 11000, sustain: 5800, grow: 320, starve: 10, grace: 260, reach: 280, engulf: 1.7,
+    start: 5000, cap: 11000, sustain: 5800, grow: 320, starve: 10, grace: 260, reach: 280,
     timeLimit: 820, hab: false, shocks: false,
     script: [
       { t: 2, hi: true, text: 'a labyrinth again. this one is not finished being cut.' },
@@ -1987,12 +2135,12 @@ var EXPERIMENTS = [
       ], note: 'the near door is shutting. the far one was never locked, only walled — until now.', hi: true }
     ],
     shock: { first: 34, period: 34, warn: 7, dur: 6, dmg: 0.0011, accel: 0.93, minPeriod: 15 },
-    start: 5000, cap: 13500, sustain: 2500, grow: 320, starve: 14, grace: 200, reach: 280, engulf: 1.8,
+    start: 5000, cap: 13500, sustain: 2500, grow: 320, starve: 14, grace: 200, reach: 280,
     timeLimit: 900, hab: false, shocks: true,
-    minShocks: 6, reseal: 20,
+    minShocks: 6, holdAtOnce: 5,
     script: [
       { t: 2, hi: true, text: 'five stations. holding one is not the same as having held it.' },
-      { t: 10, text: 'ground you leave alone for long enough remembers that you left.' },
+      { t: 10, text: 'a flake you are not standing on is not a station you have.' },
       { t: 20, hi: true, text: 'the southeast corner is warm on purpose. go in anyway.' },
       { t: 35, text: 'the dry cycles are not on the same clock twice. each one arrives sooner.' }
     ],
@@ -2003,13 +2151,13 @@ var EXPERIMENTS = [
       'the schedule does not slow down because you are tired. neither have you, which nobody planned for.'
     ],
     win: 'All five stations held at the moment the sixth cycle closed, the network still standing in the southeast corner it was never going to like. The wall came down where the notes said it would, and the culture went around it anyway. The observer writes the date, closes the notebook, and — this once — does not immediately open a new one.',
-    lose: 'One station skinned over while the culture held the other four, and the sixth cycle never came. The dish is logged, the lamp switched off, and the notebook left open to a page that was not quite finished.'
+    lose: 'One station stood bare while the culture held the other four, and the sixth cycle never came. The dish is logged, the lamp switched off, and the notebook left open to a page that was not quite finished.'
   }
 ];
 
 /* Stretch a dish's schedule and slow its rates by PACE — see the pace block
    in section 1. Idempotent by construction only because it runs once, here,
-   over the literal above. Times: grace, time limit, reseal, the shock
+   over the literal above. Times: grace, time limit, the shock
    schedule, every scripted line and every wall or hazard event. Rates per
    dish-second: starvation, and not growth — see the pace block for why.
    Per-step probabilities: a dish's own heat damage and the shock's damage,
@@ -2020,7 +2168,6 @@ function paceDish(e) {
   if (k === 1) return;
   if (e.grace) e.grace *= k;
   if (e.timeLimit) e.timeLimit *= k;
-  if (e.reseal) e.reseal *= k;
   if (e.refine && e.refine.dur) e.refine.dur *= k;
   if (e.refine && e.refine.flow) e.refine.flow /= k;
   if (e.refine && e.refine.stream) e.refine.stream /= k;
@@ -2495,7 +2642,7 @@ var S = {
      heading, which used to announce "Result logged" for every win including
      the ones deliberately not logged */
   logged: false,
-  nodeProg: null, nodeDone: null, nodeIdle: null, engulfed: 0,
+  nodeProg: null, nodeDone: null, nodeIdle: null, nodeHeld: null, engulfed: 0,
   hab: 0, habPeak: 0, habBuilt: -1, fused: false,
   dietP: 0, dietC: 0, dietDoomedT: 0,
   growAcc: 0, starveAcc: 0,
@@ -4089,9 +4236,11 @@ function step() {
              itself by the food left loosened it on a pad that was nowhere
              near full, and on the fire drill, where the shocks leave a
              hundred agents to finish a flake, the survivors let go of one at
-             nine tenths, the progress ran back down (ENGULF_DECAY) and the
-             culture starved with nothing engulfed. A pad that is under the
-             reduced capacity is held as hard as ever. */
+             nine tenths and the culture starved with nothing engulfed. That
+             was worse still when progress could run back down; it no longer
+             can, but a pad that lets go at nine tenths is a pad that is not
+             eating, which is reason enough. A pad that is under the reduced
+             capacity is held as hard as ever. */
           var fcap = FEED_FILL * Math.PI * fnd.r * fnd.r * (SPENT_FOOD + (1 - SPENT_FOOD) * foodLeft(fi));
           var froom = 1 - nodeLoad[fi] / fcap;
           if (froom > 0) fturn = FEED_HOLD * fout * froom;
@@ -4380,36 +4529,33 @@ function step() {
   }
 
   /* --- node engulfment --- */
-  var resealT = e.reseal || 0;
   for (i = 0; i < e.nodes.length; i++) {
     if (S.nodeDone[i]) {
-      /* A taken node is not taken for good: leave it and the flake skins over.
-         The dish that asks for this is asking the culture to HOLD ground, which
-         is a different problem from reaching it. */
-      if (resealT > 0) {
-        if (nodeHits[i] > 0) {
+      /* A taken node stays taken — the food does not come back. What can be
+         lost is the culture's PRESENCE on it, which is what the hold dishes
+         are actually asking about: nodeHeld tracks whether there is still a
+         pad standing here, with HOLD_DROP of grace so a pad thinning for a
+         step does not drop the station. */
+      var hnd = e.nodes[i];
+      var hfloor = HOLD_FILL * Math.PI * hnd.r * hnd.r;
+      if (nodeHits[i] >= hfloor) {
+        S.nodeIdle[i] = 0;
+        if (!S.nodeHeld[i]) { S.nodeHeld[i] = true; refreshNodeRows(); }
+      } else if (S.nodeHeld[i]) {
+        S.nodeIdle[i] += DT;
+        if (S.nodeIdle[i] >= HOLD_DROP) {
           S.nodeIdle[i] = 0;
-        } else {
-          S.nodeIdle[i] += DT;
-          if (S.nodeIdle[i] >= resealT) {
-            S.nodeIdle[i] = 0;
-            S.nodeDone[i] = false;
-            S.nodeProg[i] = 0.35;
-            S.engulfed--;
-            buildFood();
-            onReseal(i);
-          }
+          S.nodeHeld[i] = false;
+          onHoldLost(i);
         }
       }
       continue;
     }
-    S.nodeIdle[i] = 0;
     var hits = nodeHits[i];
-    if (hits === 0) {
-      /* abandoned ground is lost again: commit to a flake or leave it alone */
-      if (S.nodeProg[i] > 0) S.nodeProg[i] = clamp(S.nodeProg[i] - ENGULF_DECAY, 0, 1);
-      continue;
-    }
+    /* Nothing to do without contact, and nothing to undo either: absorption
+       needs the pad on the flake, so progress simply stops. It does not run
+       back down — see the note under ENGULF_SOFT. */
+    if (hits === 0) continue;
     var nd = e.nodes[i];
     /* One saturating curve, scaled to the flake's own area: a front covering
        most of it engulfs at the cap, a thin one crawls, a stray handful barely
@@ -4417,7 +4563,7 @@ function step() {
        corridor-width front on a big flake take a minute and a half — an
        exploring lattice delivers fewer agents per cell than the old single
        blob did, and the maze became unwinnable on that alone. */
-    var soft = ENGULF_SOFT * Math.PI * nd.r * nd.r * (e.engulf || 1);
+    var soft = ENGULF_SOFT * Math.PI * nd.r * nd.r;
     /* What is left of a flake is covered by fewer agents than the whole was,
        and the hold thins the pad on it by the same measure (see FOOD_Q): the
        curve's knee follows the food down, so a flake three quarters gone is
@@ -4430,13 +4576,17 @@ function step() {
     S.nodeProg[i] = clamp(S.nodeProg[i] + gain, 0, 1);
     if (S.nodeProg[i] >= 1) {
       S.nodeDone[i] = true;
+      /* taken with the pad still on it, so it starts held */
+      S.nodeHeld[i] = 1;
+      S.nodeIdle[i] = 0;
       S.engulfed++;
       buildFood();
       onEngulf(i);
     }
   }
-  /* The field follows progress in FOOD_Q steps, up as a flake is eaten and
-     back down as an abandoned one re-forms. Done flakes were rebuilt above. */
+  /* The field follows progress in FOOD_Q steps as a flake is eaten. Progress
+     only ever rises now, so this only ever runs the field down. Done flakes
+     were rebuilt above. */
   for (i = 0; i < e.nodes.length; i++) {
     if (!S.nodeDone[i] && Math.floor(S.nodeProg[i] * FOOD_Q) !== foodBuiltQ[i]) { buildFood(); break; }
   }
@@ -4583,8 +4733,26 @@ function engulfGate(e) {
     for (var i = 0; i < e.required.length; i++) if (!S.nodeDone[e.required[i]]) return false;
     return true;
   }
+  /* Two different asks, and they are not the same key. holdAtOnce counts where
+     the culture IS: a taken flake with no pad on it does not count toward six,
+     so reaching them one at a time can never win one of these. That is an ask
+     about finite cytoplasm rather than about agar that grows back, which is
+     what it used to be an ask about.
+
+     holdWin is the older, weaker one — how many nodes have been eaten at all,
+     regardless of what is standing on them now — and the diet dish means
+     exactly that by it: four blends composed, not four blends occupied. */
+  if (e.holdAtOnce) return heldCount() >= e.holdAtOnce;
   if (e.holdWin) return S.engulfed >= e.holdWin;
   return S.engulfed >= e.nodes.length;
+}
+
+/* Taken flakes with a pad still standing on them. */
+function heldCount() {
+  var n = 0;
+  if (!S.nodeHeld) return 0;
+  for (var i = 0; i < S.nodeHeld.length; i++) if (S.nodeDone[i] && S.nodeHeld[i]) n++;
+  return n;
 }
 
 /* Protein against carbohydrate. A plasmodium offered a choice of foods does
@@ -4605,11 +4773,11 @@ function dietMet(e) {
    lose text has promised this ending ('the ratio drifted past saving') since
    the dish was written; without this check the only implemented loss was the
    clock, and a run that ate itself unwinnable sat in limbo until timeout.
-   A resealing dish is exempt: its flakes return and can be eaten again, so
-   the ratio can still be pulled — no subset argument holds there. */
+   Nothing is exempt from it now: with the food no longer re-forming, an eaten
+   flake is eaten on every dish, so the subset argument holds everywhere. */
 function dietDoomed(e) {
   var d = e.diet;
-  if (!d || e.reseal) return false;
+  if (!d) return false;
   var remP = [], remC = [], reqM = 0, i;
   for (i = 0; i < e.nodes.length; i++) if (!S.nodeDone[i]) {
     var nut = e.nodes[i].nut;
@@ -4619,6 +4787,9 @@ function dietDoomed(e) {
   var n = remP.length;
   if (n > 16) return false; // too much left to enumerate; call it winnable
   var lo = d.target - d.tol, hi = d.target + d.tol;
+  /* holdWin counts eaten nodes, which is what a subset argument is over. No
+     diet dish uses holdAtOnce, and a concurrency gate would not be decidable
+     from the totals anyway. */
   var needK = Math.max(d.min | 0, e.required ? 0 : ((e.holdWin | 0) || e.nodes.length));
   for (var m = (1 << n) - 1; m >= 0; m--) {
     if ((m & reqM) !== reqM) continue;
@@ -9685,8 +9856,9 @@ var MARK_CYTO = '#7fd1b9';
    arc and go cyan, which over tissue left a ring 21% heavier than a pending
    one and nothing else. It draws a COMPLETE dial instead: the dial fills as
    the objective is met and stays filled, so pending-at-zero, part-met and met
-   are three different pictures rather than two colours and an absence. A dish
-   that reseals runs it backwards, which is what the number does too.
+   are three different pictures rather than two colours and an absence. A hold
+   dish runs it backwards when a station is let go, which is what the number
+   does too.
 
    0.66 sits the dial clear of both its neighbours — the core disc plus casing
    ends at 0.34r + markCase/2 and the ring's casing starts at
@@ -9942,7 +10114,13 @@ function render() {
     casedRing(ctx, nd.x, nd.y, nd.r, done ? 1.8 : 1.2, MARK_OBJ);
 
     if (prog >= 1) {
-      casedRing(ctx, nd.x, nd.y, nd.r * MARK_DIAL_R, 2.2, MARK_CYTO);
+      /* Cytoplasm colour means the culture is standing here. On a hold dish a
+         station it has walked off keeps its complete dial — the flake IS
+         eaten, and nothing has undone that — but drops back to bone, which is
+         the same sentence the readout is making. */
+      var heldHere = !e.holdAtOnce || (S.nodeHeld && S.nodeHeld[i]);
+      casedRing(ctx, nd.x, nd.y, nd.r * MARK_DIAL_R, 2.2,
+                heldHere ? MARK_CYTO : MARK_DIAL);
     } else if (prog > 0.01) {
       casedArc(ctx, nd.x, nd.y, nd.r * MARK_DIAL_R, -Math.PI / 2,
                -Math.PI / 2 + Math.PI * 2 * prog, 2.2, MARK_DIAL);
@@ -10103,12 +10281,16 @@ function onEngulf(i) {
   refreshNodeRows();
 }
 
-function onReseal(i) {
+/* A station whose pad has gone. The flake is still eaten — nothing has come
+   back — but the culture is no longer standing on it, and on a dish that asks
+   for six at once that is the thing that costs. */
+function onHoldLost(i) {
   var nd = S.exp.nodes[i];
+  if (!S.exp.holdAtOnce) { refreshNodeRows(); return; }
   var lines = [
-    nd.label + ' skins over. you stopped holding it and the agar closed.',
-    'the flake at ' + nd.label + ' re-forms. ground is only yours while you are standing on it.',
-    nd.label + ' seals again — not lost, but to be taken a second time.'
+    'the pad on ' + nd.label + ' thins out. the flake is still yours; you are no longer on it.',
+    'you have left ' + nd.label + '. holding six means standing on six.',
+    nd.label + ' is bare again — eaten, but not held.'
   ];
   logLine(pick(lines), true);
   refreshNodeRows();
@@ -10152,11 +10334,20 @@ function refreshNodeRows() {
     var el = nodeEls[i];
     var lbl = S.exp.nodes[i].label;
     if (S.nodeDone[i]) {
-      if (el.className.indexOf('hit') < 0) el.className = 'n hit';
-      el.textContent = lbl + ' ●';
+      /* On a hold dish the row says whether the culture is STILL here: a taken
+         flake nobody is standing on reads as a hollow mark, not a filled one. */
+      var held = !S.exp.holdAtOnce || (S.nodeHeld && S.nodeHeld[i]);
+      if (held) {
+        if (el.className.indexOf('hit') < 0) el.className = 'n hit';
+        el.textContent = lbl + ' ●';
+      } else {
+        if (el.className.indexOf('hit') >= 0) el.className = 'n';
+        el.textContent = lbl + ' ○';
+      }
     } else {
-      /* a node can go back the other way where a dish reseals, so the row has
-         to be able to un-light rather than only ever lighting up once */
+      /* the row still has to be able to un-light rather than only ever
+         lighting up once: progress no longer runs backwards, but a hold dish
+         can let a taken station go — see refreshNodeRows' held branch */
       if (el.className.indexOf('hit') >= 0) el.className = 'n';
       el.textContent = lbl + ' ' + Math.floor(S.nodeProg[i] * 100) + '%';
     }
@@ -10253,6 +10444,10 @@ function objText(e) {
     d = 0;
     for (i = 0; i < e.required.length; i++) if (S.nodeDone[e.required[i]]) d++;
     s = e.objShort + ' ' + d + ' / ' + e.required.length;
+  } else if (e.holdAtOnce) {
+    /* what is standing right now, so the readout falls when a station is let
+       go — the number the dish is actually gated on */
+    s = e.objShort + ' ' + heldCount() + ' / ' + e.holdAtOnce;
   } else if (e.holdWin) {
     s = e.objShort + ' ' + S.engulfed + ' / ' + e.holdWin;
   } else {
@@ -10646,15 +10841,16 @@ var raf = 0, lastTs = 0, acc = 0;
 
    ×1 is the DISH clock, and the dish clock was never real time. A Physarum
    network that takes the better part of a day in a real plate is built here in
-   a couple of sim minutes, so the reference this ladder hangs off already runs
-   at something like a hundred times life — REAL_X below, an estimate, and
-   labelled as one wherever it is shown.
+   a few sim minutes, so the reference this ladder hangs off already runs at
+   about REAL_X times life — measured against the organism's own front speed
+   in section 1, and still an estimate, since the band it is measured against
+   is itself a band.
 
    That is what the bottom half of the ladder is for. Stops below ×1 are not
    slow motion of an organism; they are slow motion of the MODEL, and at ×1/16
-   the dish is still moving at roughly six times life. Nothing this control can
-   reach runs slower than the mould does, which is the honest thing to say
-   about a dial whose lowest stop is still a time-lapse.
+   the dish is still moving at some twenty-five times life. Nothing this
+   control can reach runs slower than the mould does, which is the honest
+   thing to say about a dial whose lowest stop is still a time-lapse.
 
    Powers of two either side of the reference: every stop is exactly
    representable, indexOf on the array is therefore exact, and a stop and its
@@ -10664,11 +10860,9 @@ var SPEEDS = [1 / 16, 1 / 8, 1 / 4, 1 / 2, 1, 2, 4, 8, 16];
 var TURBO_MIN = SPEEDS[0];
 var TURBO_MAX = 24;
 
-/* Estimated real-time factor of the dish clock: ×1 is about REAL_X times life.
-   It is stated in the controls so a multiplier means something outside the
-   dish, and it is read NOWHERE in the simulation — no step, rate, schedule or
-   score has ever heard of it. Changing it changes captions and nothing else. */
-var REAL_X = 100 / PACE;
+/* REAL_X itself is derived in section 1, next to the plate scale it is
+   measured against — it has to exist before the feeding rate, which is now
+   computed through it. Changing it no longer changes only captions. */
 function realX(t) { return fmtNum(t * REAL_X); }
 
 /* The verdict screen offers three stops rather than all nine. It is a row of
@@ -11412,6 +11606,7 @@ function startRun(i, seed, trace) {
   S.cueRes = cueCapOf(e); S.cueHeld = 0;
   S.nodeProg = new Float32Array(e.nodes.length);
   S.nodeIdle = new Float32Array(e.nodes.length);
+  S.nodeHeld = new Uint8Array(e.nodes.length);
   S.nodeDone = new Array(e.nodes.length);
   for (var q = 0; q < e.nodes.length; q++) S.nodeDone[q] = false;
   if (nodeHits.length < e.nodes.length) nodeHits = new Int32Array(e.nodes.length);

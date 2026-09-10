@@ -52,8 +52,8 @@ follow-ups on the same machinery.
   beat is withheld — the anticipation probe run from the inside.
 - **EXP-14 — THE SYNCOPATION.** Dry shocks on a contracting interval; build
   refuges while the rhythm still leaves room.
-- **EXP-15 — THE TIDE.** Engulfed ground reverts when left unattended; hold
-  six stations at once or watch them seal over.
+- **EXP-15 — THE TIDE.** Six stations and one pool of cytoplasm: be standing
+  on all six at the same moment, which touring them cannot do.
 - **EXP-16 — THE TRIAGE.** Eight flakes, resources for six. Choose what to
   hold and concede the rest.
 - **EXP-17 — THE REVISION.** The labyrinth is re-cut twice mid-run; the
@@ -62,9 +62,9 @@ follow-ups on the same machinery.
   at a time, on a schedule. Time the crossing.
 - **EXP-19 — THE FIRE DRILL.** Each dry shock also floods the open plain with
   heat: anticipate, contract to the refuges, re-expand.
-- **EXP-20 — THE LONG NIGHT.** The capstone: resealing ground, accelerating
-  shocks, a heat moat, and one wall that moves. Everything the schedule
-  taught, at once.
+- **EXP-20 — THE LONG NIGHT.** The capstone: five stations held at once,
+  accelerating shocks, a heat moat, and one wall that moves. Everything the
+  schedule taught, at once.
 
 Every run's 24-bit seed is printed on the result screen as a specimen line
 (`#a3f2c1`) and reproduces that dish cell for cell — `SLIME.start(idx, seed)`
@@ -91,11 +91,22 @@ seed might name is still there, now as a guard on that one palette.
 The time-lapse ladder is nine stops — ×1/16, ×1/8, ×1/4, ×1/2, ×1, ×2, ×4, ×8,
 ×16 — and ×1 is the dish's own clock rather than real time. A *Physarum*
 network that takes the better part of a day in a real plate is built here in a
-couple of sim minutes, so ×1 is already something like a hundred times life;
-the figure is an estimate and the interface says "about". What that buys the
+few sim minutes, so ×1 is already about **400 times life**. What that buys the
 bottom half of the ladder is worth stating plainly: ×1/16 is slow motion of the
-*model*, not of the organism, and still runs at roughly six times life. Nothing
-this control can reach is slower than the mould.
+*model*, not of the organism, and still runs at some twenty-five times life.
+Nothing this control can reach is slower than the mould.
+
+That 400 is measured rather than asserted, which it was not always. The plate
+scale comes off the dishes themselves — EXP-01's flakes sit 199.5 cells from
+the inoculation and its text has always called that eleven centimetres, so a
+cell is 0.551 mm and the grid is a 231 × 143 mm tray. The model's own front,
+running uncued on EXP-01, covers 125 cells by 12.6 s and 209 by 29.2 s: 5.0
+cells a dish-second, or 9.9 m/h. A real plasmodium foraging on non-nutrient
+agar at 25 °C manages 2–3 cm/h. The ratio is the number.
+
+It matters more than a caption because the feeding rate is now derived through
+it (see below), so the dish clock is load-bearing. It read "about a hundred"
+for a long time, and a hundred was a guess.
 
 The multiplier scales sim time, not playback: the dish clock, the shock
 schedule and every rate in the model move together, so a run watched at ×1/4 is
@@ -239,6 +250,32 @@ front — the chain still breaks for filaments nothing follows, which is the
 pruning, but no longer for want of being noticed. It's a real, if modest,
 implementation of that model, not a hand-scripted imitation of one; don't
 expect anything close to a research-grade solver.
+
+### Eating a flake
+
+The rate a flake goes down at is set by how much of it the pad is standing on —
+absorption happens across the contact area and nowhere else — and that rate is
+now calibrated rather than tuned. A plasmodium offered an oat flake colonises
+it in **6–24 hours**, which is why a maintained culture is re-flaked daily;
+through the dish clock above, that band is 54–216 dish-seconds. Full contact
+with a fresh flake sits at the 6-hour end, and the coverage the model actually
+reaches does the rest: measured off the progress curve, an uncued pad on
+EXP-01 averages 0.05 of the flake's own area and lands at 12 hours, a dense
+one on EXP-03's small flakes at about 6.5, a thin one past 21. The whole
+published band, spanned by coverage alone.
+
+Two things went with that calibration. The cap used to be 3.3 dish-seconds —
+sixteen times faster than the fastest real colonisation — and every dish
+carried a private `engulf` multiplier, from 1.2 to 12.0, whose only job was to
+drag it back off that ceiling. With the cap where the hours put it, none of
+them is needed, and the knob is gone rather than renamed.
+
+Nor does food come back. A flake that had been eaten used to re-form if the
+culture wandered off it, and half-eaten progress used to run backwards; agar
+does not do either. The three dishes that were built on the timer are built on
+presence instead — a station counts while there is still a pad standing on it —
+which is what "hold all six at once" was always claiming to be about, and is a
+constraint on finite cytoplasm rather than on regenerating agar.
 
 ## Run locally
 
