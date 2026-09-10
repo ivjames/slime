@@ -4182,6 +4182,14 @@ function step() {
       ah[k] = offTube ? h + (L >= R ? -SENS_A : SENS_A) : rnd() * Math.PI * 2;
       cell = oldIdx;
     } else {
+      /* only a tip out ahead of the stalks: one standing in a cell the
+         tree already covers is inside the body, and its wandering there
+         is not exploration */
+      if (atip[k] && VEIN_TREE && exN < EX_CAP && !tcov[idx]) {
+        var exi = exN * 4;
+        exSeg[exi] = ax[k]; exSeg[exi + 1] = ay[k]; exSeg[exi + 2] = nx; exSeg[exi + 3] = ny;
+        exN++;
+      }
       ax[k] = nx; ay[k] = ny; ah[k] = h;
       if (idx !== oldIdx) { occ[oldIdx]--; occ[idx]++; }
       cell = idx;
@@ -4839,6 +4847,8 @@ function initCanvas() {
   vmctx = veilMask.getContext('2d');
   ink = document.createElement('canvas');
   ictx = ink.getContext('2d');
+  exc = document.createElement('canvas');
+  exctx = exc.getContext('2d');
   off = document.createElement('canvas');
   octx = off.getContext('2d', { alpha: false });
   allocField();
@@ -4902,6 +4912,14 @@ function resizeCanvas() {
       ink.width = w; ink.height = h;
       ictx.drawImage(keep, 0, 0, w, h);
     } else if (ink) { ink.width = w; ink.height = h; }
+    /* the explorers' record likewise: a resize must not empty it */
+    if (exc && exc.width && exc.height) {
+      var keepX = document.createElement('canvas');
+      keepX.width = exc.width; keepX.height = exc.height;
+      keepX.getContext('2d').drawImage(exc, 0, 0);
+      exc.width = w; exc.height = h;
+      exctx.drawImage(keepX, 0, 0, w, h);
+    } else if (exc) { exc.width = w; exc.height = h; }
   }
 }
 
@@ -5037,6 +5055,8 @@ function resetVeinTemporal() {
   envT = S.simT;
   if (vactx && veilAcc.width) vactx.clearRect(0, 0, veilAcc.width, veilAcc.height);
   if (ictx && ink.width) ictx.clearRect(0, 0, ink.width, ink.height);   /* a new dish has no record */
+  if (exctx && exc.width) exctx.clearRect(0, 0, exc.width, exc.height);
+  exN = 0;
   inked.fill(0);
   recV.fill(0); recPath = null;
   resetVeinGraph();
@@ -5151,6 +5171,8 @@ function restoreVeinTemporal(fs) {
      it. */
   if (ictx && ink.width) ictx.clearRect(0, 0, ink.width, ink.height);
   inked.fill(0);
+  if (exctx && exc.width) exctx.clearRect(0, 0, exc.width, exc.height);
+  exN = 0;
 }
 
 function smoothRidgeField() {
@@ -6837,6 +6859,20 @@ var RET_IDLE  = 5.0;          /* seconds a tip stands unpulled before it retract
 var RET_DT    = 0.25;         /* seconds between one node's retraction and its parent's */
 var TREE_GHOST_A = 0.34;      /* a ghost's alpha */
 var TREE_GHOST_W = 0.5;       /* cells: a ghost's width, at most */
+/* ---- the explorers' trails ----
+   The tips are the detached bits out ahead of the stalks, and the
+   whiskers show only where each one is this frame. In the dish the
+   path an explorer took stays: the fine lace behind the front IS those
+   paths. So every step a tip takes is recorded, on the sim's clock, and
+   stroked once onto a record canvas as a ghost line that is never
+   erased. Segments are buffered in step() and flushed by the next
+   render; a tip that jumps (a relocation, not a step) is not drawn. */
+var EX_CAP = 262144;                  /* segments the buffer holds between renders */
+var EX_JUMP = 3.0;                    /* cells: further than this in one step is a jump */
+var EX_A = 0.16;                      /* a trail's alpha: faint, since a well-walked cell is stroked many times */
+var EX_W = 0.34;                      /* cells: a trail's width */
+var exSeg = new Float32Array(EX_CAP * 4), exN = 0;
+var exc = null, exctx = null;         /* the record canvas */
 var TREE_REPAINT = 0.2;       /* seconds between repaints while running */
 var TREE_WQ   = 4;            /* width quantisation, steps a cell */
 /* ---- anastomosis and flow ----
@@ -9739,6 +9775,29 @@ function render() {
   ctx.globalAlpha = 1;
   if (!SHEET) paintWalls(ctx, cv.width / GW, cv.height / GH);
   ctx.drawImage(veilAcc, 0, 0);
+  /* the explorers' trails: the steps the tips took since the last frame,
+     stroked once onto their record, and the record laid under the tree */
+  if (VEIN_TREE && exc) {
+    if (exc.width !== cv.width || exc.height !== cv.height) { exc.width = cv.width; exc.height = cv.height; }
+    if (exN) {
+      var exp = new Path2D(), exq;
+      for (exq = 0; exq < exN; exq++) {
+        var exb = exq * 4, exdx = exSeg[exb + 2] - exSeg[exb], exdy = exSeg[exb + 3] - exSeg[exb + 1];
+        if (exdx * exdx + exdy * exdy > EX_JUMP * EX_JUMP) continue;
+        exp.moveTo(exSeg[exb], exSeg[exb + 1]); exp.lineTo(exSeg[exb + 2], exSeg[exb + 3]);
+      }
+      exN = 0;
+      exctx.save();
+      exctx.setTransform(exc.width / GW, 0, 0, exc.height / GH, 0, 0);
+      exctx.lineCap = 'butt';
+      exctx.globalAlpha = EX_A;
+      exctx.lineWidth = EX_W;
+      exctx.strokeStyle = VEIN_BANDS[0].style;
+      exctx.stroke(exp);
+      exctx.restore();
+    }
+    ctx.drawImage(exc, 0, 0);
+  }
   /* the pinned graph, whole, over the veil: opaque where it is drawn and
      laid once per frame onto a frame that is cleared, so nothing
      accumulates */
