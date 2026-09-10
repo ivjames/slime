@@ -7061,8 +7061,17 @@ function treeGrow() {
     if (treeAdd(nx, ny, n) < 0) break;
     grown++;
   }
+  /* --- a wall poured across a join's middle severs it, BEFORE the flow
+     walk, which would otherwise route through it and leave the carry it
+     gave on nodes the wall has cut off until the next walk --- */
+  var severed = 0;
+  for (i = 1; i < tN; i++) {
+    if (!tstate[i] || tjoin[i] < 0) continue;
+    if (!treeClear(tx[i], ty[i], tx[tjoin[i]], ty[tjoin[i]])) { tjoin[i] = -1; severed++; }
+  }
+  if (severed) treeDirty = true;
   /* --- the flow: which nodes carry a flake pair --- */
-  if (++treePassN % TREE_FLOW_EVERY === 0) treeFlow();
+  if (++treePassN % TREE_FLOW_EVERY === 0 || severed) treeFlow();
 
   /* --- the widths: leaves under each node, children before parents --- */
   for (i = 0; i < tN; i++) tleaf[i] = (tstate[i] && tkids[i] === 0) ? 1 : 0;
@@ -7077,13 +7086,12 @@ function treeGrow() {
   }
 
   /* --- the retraction: an idle tip not on food or the fed corridor;
-     and any node a wall has come down on, tip or not, at once. A wall
-     poured across a join's middle severs the join: the tip is a plain
-     tip again and idles out like one --- */
+     and any node a wall has come down on, tip or not, at once. A tip
+     whose join was severed above is a plain tip again and idles out
+     like one --- */
   var retracted = 0;
   for (i = tN - 1; i > 0; i--) {
     if (!tstate[i]) continue;
-    if (tjoin[i] >= 0 && !treeClear(tx[i], ty[i], tx[tjoin[i]], ty[tjoin[i]])) { tjoin[i] = -1; treeDirty = true; }
     c = (ty[i] | 0) * GW + (tx[i] | 0);
     if (!wallM[c]) {
       if (tkids[i] !== 0 || tidle[i] < RET_IDLE) continue;
