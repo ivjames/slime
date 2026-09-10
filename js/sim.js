@@ -6857,6 +6857,12 @@ function reachFreeEnds() {
           if (q < 0) continue;
           var qv = veinOfPoint(q);
           if (qv === v) continue;
+          /* only a point that is drawn live: the map keeps record points
+             too, and a connector to one of those is a record at birth,
+             with the end marked attached and never looking again — the
+             live line stays cut. A free end near nothing live stays
+             free, and looks again next rebuild. */
+          if (!vState[qv] || !vpLive[q]) continue;
           var ddx = vpx[q] - px, ddy = vpy[q] - py, d2 = ddx * ddx + ddy * ddy;
           if (d2 < bd && d2 > 0.04) { bd = d2; best = q; }
         }
