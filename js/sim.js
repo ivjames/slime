@@ -5683,12 +5683,22 @@ var bodyV = new Float32Array(NCELL);
 /* The levels, in trail: the film below BODY_T where tissue begins, the tube
    at TIP_FEED where a filament counts as supplied, and three above it up to
    the packed core. hot walks each toward the lamp as the vein bands do. */
-var BODY_LEVELS = [6, 12, 20, 32, 50];
-var BODY_HOT    = [0.00, 0.00, 0.18, 0.30, 0.44];
-var BODY_ALPHA  = [0.32, 0.85, 1, 1, 1];
+/* Ten of them, graded closely, so a tube shades from its edge to its crest
+   rather than stepping through a contour map: five levels read as
+   posterised. The film — the first level — is milky, the front's tone
+   (mixWhite, as TIP_STYLE), because tissue that thin lets the plate
+   through and is pale, not the tissue tone at a third alpha, which drew a
+   dark olive halo round every tube. */
+var BODY_LEVELS = [6, 9, 12, 16, 20, 26, 32, 40, 52, 66];
+var BODY_HOT    = [0.00, 0.00, 0.04, 0.10, 0.16, 0.22, 0.28, 0.34, 0.42, 0.50];
+var BODY_ALPHA  = [0.30, 0.60, 0.90, 1, 1, 1, 1, 1, 1, 1];
 var BODY_STYLE  = [];
-var bodyPath = [null, null, null, null, null];
-var ISO_MINPTS = 8;                     // a loop shorter than this is speckle, or a pinhole
+var bodyPath = [];
+(function () { for (var i = 0; i < BODY_LEVELS.length; i++) bodyPath.push(null); })();
+/* a loop shorter than this is speckle or a pinhole: at 16 crossings it is
+   a blob under four cells across, which drawn was a droplet beside the
+   tube it fell off */
+var ISO_MINPTS = 16;
 /* the tracer's working set: per cell, the least and greatest of its four
    corners, so a level tests two numbers per cell rather than four loads;
    per edge, where the level crosses it and which edge the outline continues
@@ -5733,7 +5743,7 @@ function tintVeins(vein) {
      matched. Derived, it cannot drift from what it says it is. */
   LOBE_STYLE = rgba(mixLamp(vein, VEIN_BANDS[3].hot), '1');
   for (var kb = 0; kb < BODY_LEVELS.length; kb++) {
-    BODY_STYLE[kb] = rgba(mixLamp(vein, BODY_HOT[kb]), '' + BODY_ALPHA[kb]);
+    BODY_STYLE[kb] = rgba(kb === 0 ? mixWhite(vein, 0.42) : mixLamp(vein, BODY_HOT[kb]), '' + BODY_ALPHA[kb]);
   }
   REC_STYLE = rgba(vein, '1');
 }
@@ -5850,7 +5860,7 @@ var INK_A = 0.30;                     // how much of the live vein's brightness 
    place a tube has stood, no brighter for standing longer, and it is
    composited under the live body at INK_A — the ghost of routes the
    organism has withdrawn from, as an agar plate shows them. */
-var REC_LEVEL = 1;                    // index into BODY_LEVELS: the tube
+var REC_LEVEL = 2;                    // index into BODY_LEVELS: the tube, trail 12
 var REC_STYLE = '';
 function recordBody(tc, sx, sy) {
   if (!bodyPath[REC_LEVEL]) return;
