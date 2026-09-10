@@ -4696,6 +4696,7 @@ function snapshotVeinTemporal(fs) {
   fs.vBand = vBand.slice(0, veinN); fs.vFlow = vFlow.slice(0, veinN);
   fs.vBorn = vBorn.slice(0, veinN); fs.vState = vState.slice(0, veinN);
   fs.vAtt = vAtt.slice(0, veinN * 4);
+  fs.vNext = vNext.slice(0, veinN); fs.vPrev = vPrev.slice(0, veinN);
 }
 
 /* The graph out of a snapshot; a snapshot without one (taken before the
@@ -4711,6 +4712,10 @@ function restoreVeinGraph(fs) {
   vBand.set(fs.vBand); vFlow.set(fs.vFlow);
   vBorn.set(fs.vBorn); vState.set(fs.vState);
   vAtt.set(fs.vAtt);
+  if (fs.vNext) { vNext.set(fs.vNext); vPrev.set(fs.vPrev); }
+  else { vNext.fill(-1, 0, veinN); vPrev.fill(-1, 0, veinN); }
+  /* every point live until the next width pass reads the body under it */
+  vpLive.fill(1, 0, vpN);
   for (var p = 0; p < vpN; p++) coverPoint(p);
   if (fs.rage) rage.set(fs.rage);
 }
@@ -5876,6 +5881,29 @@ var VEIN_SPUR = 1.5;
    level is what makes it a record, so the lines live exactly where the
    body is drawn and are ghosts exactly where it is not. */
 var VEIN_ATTACH = 0;
+/* The level the distance field is taken of, index into BODY_LEVELS: one
+   above the attachment level. The medial axis of the film at trail 6
+   is the middle of the FILM, and where a tube's film skirt is wider on
+   one side than the other — every tube at the edge of a sheet — that
+   ran a cell or two off the tube's crest, along the skirt. The mask at
+   9, where the sim counts tissue as begun, hugs the tubes. Attachment
+   stays at 6: a line may end on film. */
+var VEIN_MASK = 1;
+/* A branch — a stretch that meets a vein anywhere but straight into its
+   end — has to be longer than a bump's spur could be, and a spur's
+   length is the trunk's half-width and a little more; and it has to END
+   somewhere: at the mask's edge, a tip, or on another vein. A branch
+   that stops inside the body having reached nothing is the medial axis
+   of a bump, whatever its length. Measured on First Contact at 40
+   seconds with the spur test alone, 2 to 6 cell barbs stood off every
+   trunk. */
+var VEIN_BRANCH_MIN = 6;                     /* points, whatever the trunk */
+var VEIN_BRANCH_K = 2.5;                     /* times the half-width at the root... */
+var VEIN_BRANCH_PAD = 4;                     /* ...plus this */
+/* the box the mask occupies, for pass one and two to sweep instead of the
+   plate — set by bodyMask, inclusive, with a two-cell margin inside the
+   rim */
+var bmX0 = 2, bmY0 = 2, bmX1 = GW - 3, bmY1 = GH - 3;
 /* ---- the field the ridges are read from ----
    Not the body itself. The ridge test asks for a strict maximum across
    the vein with a drop of RIDGE_REL per cell either side, which is what
@@ -5945,8 +5973,21 @@ var VEIN_HOLE_L = VEIN_HOLE >> 2;
    mask. Values in holeL while it runs: 0 open and unknown, 1 tissue, 2
    outside, 3 a hole being measured. */
 function bodyMask() {
-  var lv = BODY_LEVELS[VEIN_ATTACH], i, x, y, lx, ly, qh, qt, c, n;
-  for (i = 0; i < NCELL; i++) bodyM[i] = bodyV[i] >= lv ? 1 : 0;
+  var lv = BODY_LEVELS[VEIN_MASK], i, x, y, lx, ly, qh, qt, c, n;
+  var x0 = GW, y0 = GH, x1 = -1, y1 = -1;
+  for (y = 0; y < GH; y++) {
+    i = y * GW;
+    for (x = 0; x < GW; x++) {
+      if (bodyV[i + x] >= lv) {
+        bodyM[i + x] = 1;
+        if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y;
+      } else bodyM[i + x] = 0;
+    }
+  }
+  /* the box, a cell either side of the mask so the ridge test can read
+     its neighbours; an empty mask gives an empty box */
+  bmX0 = x0 - 1 < 2 ? 2 : x0 - 1; bmY0 = y0 - 1 < 2 ? 2 : y0 - 1;
+  bmX1 = x1 + 1 > GW - 3 ? GW - 3 : x1 + 1; bmY1 = y1 + 1 > GH - 3 ? GH - 3 : y1 + 1;
   for (ly = 0; ly < LH; ly++) {
     for (lx = 0; lx < LW; lx++) {
       i = (ly << 1) * GW + (lx << 1);
@@ -6047,6 +6088,17 @@ var vState = new Uint8Array(VEIN_MAX);     // 1 live, 0 record
    for the core (point -1). Kept for the harness, which checks that no
    vein was ever pinned adrift. */
 var vAtt = new Int32Array(VEIN_MAX * 4);
+/* the continuation chain: the vein whose first point continues this
+   one's last, and the reverse, -1 for none; the painter draws a chain
+   as one smoothed line */
+var vNext = new Int32Array(VEIN_MAX), vPrev = new Int32Array(VEIN_MAX);
+/* per point, whether the body under it is there: a vein's state is one
+   thing (its width band is read from the mean), but a vein that crosses
+   a hole must not draw bright across the hole, so each SEGMENT is drawn
+   live only when both its points are, and into the record otherwise.
+   Held with the band margin so a point on the film's edge does not
+   flicker the picture. */
+var vpLive = new Uint8Array(VEIN_PTS_CAP);
 var veinN = 0;
 /* the coverage: 1 within VEIN_R of any pinned point; and the index of a
    pinned point standing in each cell, -1 for none, which is what the snap
@@ -6176,6 +6228,39 @@ function continuesVein(p, u, i, hx, hy) {
   return l2 > 0 && d < 0 && d * d >= VEIN_CONT_COS * VEIN_CONT_COS * l2;
 }
 
+/* Whether a stretch's free end at (x, y), heading outward along (hx, hy),
+   is a tip: the mask ends within two cells past it. A stretch cut short
+   by coverage or by unsettled cells stops inside the body, and so does
+   the spur of a bump. */
+function tipEnd(x, y, hx, hy) {
+  var l = Math.sqrt(hx * hx + hy * hy);
+  if (l === 0) return false;
+  var nx = Math.round(x + hx / l * 2), ny = Math.round(y + hy / l * 2);
+  if (nx < 0 || ny < 0 || nx >= GW || ny >= GH) return true;
+  return bodyM[ny * GW + nx] === 0;
+}
+
+/* Fold the first three points of a continuation onto the line of the end
+   it continues: point i of vein u is the end, k the stretch's first
+   point (chx/chy) and dir which way the stretch runs from it. */
+function foldOnto(p, u, i, k, dir) {
+  var n = vCount[u], st = vStart[u], tx, ty;
+  if (n < 2) return;
+  if (i <= 0) { tx = vpx[st] - vpx[st + 1]; ty = vpy[st] - vpy[st + 1]; }
+  else { tx = vpx[st + n - 1] - vpx[st + n - 2]; ty = vpy[st + n - 1] - vpy[st + n - 2]; }
+  var tl = Math.sqrt(tx * tx + ty * ty);
+  if (tl === 0) return;
+  tx /= tl; ty /= tl;
+  for (var j = 0; j < 2; j++) {
+    var q = k + dir * j;
+    var dx = chx[q] - vpx[p], dy = chy[q] - vpy[p];
+    var along = dx * tx + dy * ty;
+    var ox = dx - along * tx, oy = dy - along * ty;   /* the lateral offset */
+    var keep = (j + 1) / 3;
+    chx[q] -= ox * (1 - keep); chy[q] -= oy * (1 - keep);
+  }
+}
+
 /* Which vein a point index belongs to. Veins are laid down in order, so
    their starts are sorted and this is a binary search. */
 function veinOfPoint(p) {
@@ -6260,16 +6345,38 @@ function pinChain(n) {
          And a stretch that leaves a vein and comes back to it within the
          snap's reach is a loop beside it, and is nothing. */
       var loopy = p0 >= 0 && p1 >= 0 && ax0 === ax1 && Math.abs(ap0 - ap1) <= VEIN_SNAP * 2;
-      var cont = (p0 >= 0 && continuesVein(p0, ax0, ap0, chx[s] - chx[s2], chy[s] - chy[s2])) ||
-                 (p1 >= 0 && continuesVein(p1, ax1, ap1, chx[e - 1] - chx[e2], chy[e - 1] - chy[e2]));
+      var cont0 = p0 >= 0 && continuesVein(p0, ax0, ap0, chx[s] - chx[s2], chy[s] - chy[s2]);
+      var cont1 = p1 >= 0 && continuesVein(p1, ax1, ap1, chx[e - 1] - chx[e2], chy[e - 1] - chy[e2]);
       var ok;
       if (loopy) ok = false;
-      else if (cont) ok = true;
-      else if (p0 >= 0 || p1 >= 0) ok = !spurLen;
+      else if (cont0 || cont1) ok = true;
+      else if (p0 >= 0 || p1 >= 0) {
+        /* a branch: longer than a spur by the trunk's half-width, and
+           ending somewhere — on another vein, or at the mask's edge with
+           the tube it marks, which is what tipEnd reads two cells past
+           the end. Snapped at both ends onto two veins it is a rung, and
+           the length alone is asked of it. */
+        var bl = dHi * VEIN_BRANCH_K + VEIN_BRANCH_PAD;
+        if (bl < VEIN_BRANCH_MIN) bl = VEIN_BRANCH_MIN;
+        var ends = (p0 >= 0 && p1 >= 0) ||
+                   (p0 >= 0 ? tipEnd(chx[e - 1], chy[e - 1], chx[e - 1] - chx[e2], chy[e - 1] - chy[e2])
+                            : tipEnd(chx[s], chy[s], chx[s] - chx[s2], chy[s] - chy[s2]));
+        ok = e - s > bl && ends;
+      }
       else ok = e - s >= VEIN_MINLEN && !(spurLen && dLo < dHi - 0.5);
       if ((ax0 !== -1 || ax1 !== -1) && ok) {
         var v = veinN++, sum = 0;
         vStart[v] = vpN;
+        /* A continuation's first points are folded onto the line of the
+           end it continues: the axis of a thin tube stands a cell or two
+           to one side of where it stood when the last piece was pinned,
+           and pieces that each began with that offset drew the tube as a
+           sawtooth. The lateral offset from the end's tangent is taken
+           off by two thirds at the first point and a third at the
+           second, so it is gone over three points; done here, before
+           the points are frozen, so nothing ever moves afterwards. */
+        if (cont0) foldOnto(p0, ax0, ap0, s, 1);
+        if (cont1) foldOnto(p1, ax1, ap1, e - 1, -1);
         /* the snapped point goes on the end, so the stretch keeps every
            crest it found and the hop to the vein it joins is one short
            segment; both hops are inside VEIN_SNAP by construction */
@@ -6285,7 +6392,12 @@ function pinChain(n) {
         vBorn[v] = S.simT;
         vState[v] = 1;
         vAtt[v * 4] = ax0; vAtt[v * 4 + 1] = ap0; vAtt[v * 4 + 2] = ax1; vAtt[v * 4 + 3] = ap1;
-        for (k = vStart[v]; k < vpN; k++) coverPoint(k);
+        /* the continuation links, for the painter's chains: at most one
+           successor and one predecessor each, first come */
+        vNext[v] = -1; vPrev[v] = -1;
+        if (cont0 && ap0 === vCount[ax0] - 1 && vNext[ax0] < 0) { vNext[ax0] = v; vPrev[v] = ax0; vRepaint = true; }
+        if (cont1 && ap1 === 0 && vPrev[ax1] < 0) { vPrev[ax1] = v; vNext[v] = ax1; vRepaint = true; }
+        for (k = vStart[v]; k < vpN; k++) { coverPoint(k); vpLive[k] = 1; }
       }
     }
     s = e;
@@ -6302,9 +6414,15 @@ function veinWidths() {
   veinWT = S.simT;
   if (dt < 0) dt = 0;
   var kw = dt > 0 ? 1 - Math.exp(-dt / VEIN_W_TAU) : 0;
+  var lvOn = BODY_LEVELS[0] * (1 + BAND_HYST), lvOff = BODY_LEVELS[0];
   for (var v = 0; v < veinN; v++) {
     var st = vStart[v], en = st + vCount[v], sum = 0;
-    for (var p = st; p < en; p++) sum += bodyV[(vpy[p] | 0) * GW + (vpx[p] | 0)];
+    for (var p = st; p < en; p++) {
+      var bp = bodyV[(vpy[p] | 0) * GW + (vpx[p] | 0)];
+      sum += bp;
+      var pl = vpLive[p] ? (bp >= lvOff ? 1 : 0) : (bp >= lvOn ? 1 : 0);
+      if (pl !== vpLive[p]) { vpLive[p] = pl; vRepaint = true; }
+    }
     var f = vFlow[v] + (sum / (en - st) - vFlow[v]) * kw;
     vFlow[v] = f;
     var live = vState[v] ? (f >= BODY_LEVELS[0] ? 1 : 0) : (f >= BODY_LEVELS[0] * (1 + BAND_HYST) ? 1 : 0);
@@ -6314,63 +6432,128 @@ function veinWidths() {
   }
 }
 
-/* One vein as a subpath: quadratics through the midpoints, as the old
-   bake drew a chain, so the walk's 45-degree steps are not a staircase;
-   the ends are hit exactly, which is where the snap put them. */
-function veinSubpath(path, v) {
-  var st = vStart[v], cnt = vCount[v];
-  path.moveTo(vpx[st], vpy[st]);
-  if (cnt === 2) { path.lineTo(vpx[st + 1], vpy[st + 1]); return; }
-  for (var q = 1; q < cnt - 1; q++) {
-    var px = vpx[st + q], py = vpy[st + q];
-    path.quadraticCurveTo(px, py, (px + vpx[st + q + 1]) * 0.5, (py + vpy[st + q + 1]) * 0.5);
+/* ---- drawing a chain ----
+   A chain is a vein and the continuations hung on its end, walked
+   through vNext; it is drawn as one line. The stored points are never
+   touched: the chain's points are copied out, the copy is smoothed with
+   two passes of a 1-2-1 average with the chain's two ends held (they
+   are attachment points, and a join has to stay exact), and the smooth
+   copy is what the quadratics are laid through. Each point still knows
+   its vein, for the band, and whether the body is under it, for the
+   record: a segment goes into its vein's band path when both its
+   points are live and the vein is, and into the record path otherwise,
+   so a vein that crosses a hole is bright to the hole's edge and a
+   ghost across it. */
+var VEIN_CHAIN_CAP = 65536;
+var vcx = new Float32Array(VEIN_CHAIN_CAP), vcy = new Float32Array(VEIN_CHAIN_CAP);
+var vcx2 = new Float32Array(VEIN_CHAIN_CAP), vcy2 = new Float32Array(VEIN_CHAIN_CAP);
+var vcOwn = new Int32Array(VEIN_CHAIN_CAP), vcLive = new Uint8Array(VEIN_CHAIN_CAP);
+var vcN = 0;
+var vChainSeen = new Uint8Array(VEIN_MAX);   /* veins already drawn this pass */
+
+/* gather the chain from vein v0 onward; single: this vein alone */
+function gatherChain(v0, single) {
+  var v = v0, n = 0, first = true;
+  while (v >= 0 && !vChainSeen[v]) {
+    var st = vStart[v], cnt = vCount[v];
+    if (n + cnt > VEIN_CHAIN_CAP) break;
+    vChainSeen[v] = 1;
+    /* the joint point is the last of the vein before and the first of
+       this one; keep the one copy, owned by the vein before */
+    for (var q = first ? 0 : 1; q < cnt; q++) {
+      vcx[n] = vpx[st + q]; vcy[n] = vpy[st + q];
+      vcOwn[n] = v; vcLive[n] = vpLive[st + q]; n++;
+    }
+    first = false;
+    if (single) break;
+    v = vNext[v];
   }
-  path.lineTo(vpx[st + cnt - 1], vpy[st + cnt - 1]);
+  vcN = n;
 }
 
-/* The records' path, remade only when a vein changed state. */
-function bakeVeinGraph() {
-  if (!vRecDirty) return;
-  vRecDirty = false;
-  var path = null;
-  for (var v = 0; v < veinN; v++) {
-    if (vState[v]) continue;
-    if (!path) path = new Path2D();
-    veinSubpath(path, v);
+/* two 1-2-1 passes over the chain's copy, the ends held */
+function smoothChain() {
+  var n = vcN, k, pass;
+  if (n < 3) return;
+  for (pass = 0; pass < 2; pass++) {
+    vcx2[0] = vcx[0]; vcy2[0] = vcy[0]; vcx2[n - 1] = vcx[n - 1]; vcy2[n - 1] = vcy[n - 1];
+    for (k = 1; k < n - 1; k++) {
+      vcx2[k] = (vcx[k - 1] + 2 * vcx[k] + vcx[k + 1]) * 0.25;
+      vcy2[k] = (vcy[k - 1] + 2 * vcy[k] + vcy[k + 1]) * 0.25;
+    }
+    for (k = 0; k < n; k++) { vcx[k] = vcx2[k]; vcy[k] = vcy2[k]; }
   }
-  vRecPath = path;
+}
+
+/* one run of the chain, points a..b inclusive, as a subpath: quadratics
+   through the midpoints, so the walk's 45-degree steps are not a
+   staircase; the ends are hit exactly */
+function runSubpath(path, a, b) {
+  path.moveTo(vcx[a], vcy[a]);
+  if (b - a === 1) { path.lineTo(vcx[b], vcy[b]); return; }
+  for (var q = a + 1; q < b; q++) {
+    path.quadraticCurveTo(vcx[q], vcy[q], (vcx[q] + vcx[q + 1]) * 0.5, (vcy[q] + vcy[q + 1]) * 0.5);
+  }
+  path.lineTo(vcx[b], vcy[b]);
+}
+
+/* the chain's runs into the band paths and the record path: a segment
+   k..k+1 belongs to the vein of point k+1 (the joint point is the
+   earlier vein's, so the segment after it is the later's), and is live
+   when both points are and that vein is */
+function emitChain(bandPaths, rec) {
+  var n = vcN, k = 0;
+  while (k < n - 1) {
+    var own = vcOwn[k + 1];
+    var live = vState[own] && vcLive[k] && vcLive[k + 1];
+    var band = vBand[own], a = k;
+    while (k < n - 1 && vcOwn[k + 1] === own && (vState[own] && vcLive[k] && vcLive[k + 1]) === live) k++;
+    /* the run is a..k; if the next segment continues in another vein
+       with the same fate, the join point is shared anyway */
+    if (live) { if (!bandPaths[band]) bandPaths[band] = new Path2D(); runSubpath(bandPaths[band], a, k); }
+    else { if (!rec.path) rec.path = new Path2D(); runSubpath(rec.path, a, k); }
+  }
 }
 
 /* The live graph's canvas, brought up to date: sized to the veil (a
-   resize repaints), painted whole if a band or state changed and the
-   last whole painting is VEIN_REPAINT behind, else appended with the
-   veins pinned since. Called from the veil's colour pass, so the
-   canvas it hands over is always the size of the one it goes into. */
+   resize repaints), painted whole if anything in the picture changed —
+   a band, a state, a point's body, a continuation pinned — and the last
+   whole painting is VEIN_REPAINT behind, else appended with the veins
+   pinned since, each drawn on its own until the next whole painting
+   folds it into its chain. The record path is remade with the whole
+   painting. Called from the veil's colour pass, so the canvas it hands
+   over is always the size of the one it goes into. */
 function paintVeinGraph() {
   if (!veil || !veil.width) return;
   if (!vgc) { vgc = document.createElement('canvas'); vgctx = vgc.getContext('2d'); }
   var full = vRepaint && S.simT - vPaintT >= VEIN_REPAINT;
   if (vgc.width !== veil.width || vgc.height !== veil.height) { vgc.width = veil.width; vgc.height = veil.height; full = true; }
   if (!full && vDrawn === veinN) return;
-  var sx = vgc.width / GW, sy = vgc.height / GH, from = vDrawn, b, v, path;
+  var sx = vgc.width / GW, sy = vgc.height / GH, from = vDrawn, b, v;
+  var bandPaths = [], rec = { path: null };
+  for (b = 0; b < VEIN_BANDS.length; b++) bandPaths.push(null);
+  if (full) {
+    vChainSeen.fill(0);
+    /* chains from their heads first, so a whole chain is one smooth
+       line; whatever is left is a loop or a stray and is drawn alone */
+    for (v = 0; v < veinN; v++) { if (vPrev[v] < 0 && !vChainSeen[v]) { gatherChain(v, false); smoothChain(); emitChain(bandPaths, rec); } }
+    for (v = 0; v < veinN; v++) { if (!vChainSeen[v]) { gatherChain(v, true); smoothChain(); emitChain(bandPaths, rec); } }
+    vRecPath = rec.path;
+  } else {
+    for (v = from; v < veinN; v++) { vChainSeen[v] = 0; gatherChain(v, true); smoothChain(); emitChain(bandPaths, rec); }
+  }
   vgctx.save();
   vgctx.setTransform(1, 0, 0, 1, 0, 0);
-  if (full) { vgctx.clearRect(0, 0, vgc.width, vgc.height); vRepaint = false; vPaintT = S.simT; from = 0; }
+  if (full) { vgctx.clearRect(0, 0, vgc.width, vgc.height); vRepaint = false; vPaintT = S.simT; }
   vgctx.setTransform(sx, 0, 0, sy, 0, 0);
   vgctx.lineCap = 'round';
   vgctx.lineJoin = 'round';
   /* widest first, so the hairlines land on top of the trunks they join */
   for (b = VEIN_BANDS.length - 1; b >= 0; b--) {
-    path = null;
-    for (v = from; v < veinN; v++) {
-      if (!vState[v] || vBand[v] !== b) continue;
-      if (!path) path = new Path2D();
-      veinSubpath(path, v);
-    }
-    if (!path) continue;
+    if (!bandPaths[b]) continue;
     vgctx.lineWidth = VEIN_BANDS[b].w;
     vgctx.strokeStyle = VEIN_BANDS[b].style;
-    vgctx.stroke(path);
+    vgctx.stroke(bandPaths[b]);
   }
   vgctx.restore();
   vDrawn = veinN;
@@ -7125,9 +7308,12 @@ function buildVeins() {
   rswap = rbandP; rbandP = rband; rband = rswap;
   rdir.fill(255);
   rband.fill(255);
-  for (y = 2; y < GH - 2; y++) {
+  /* under the body, the sweep is the mask's box and not the plate: the
+     field is zero outside it by construction */
+  var swX0 = BODY ? bmX0 : 2, swY0 = BODY ? bmY0 : 2, swX1 = BODY ? bmX1 : GW - 3, swY1 = BODY ? bmY1 : GH - 3;
+  for (y = swY0; y <= swY1; y++) {
     var row = y * GW;
-    for (x = 2; x < GW - 2; x++) {
+    for (x = swX0; x <= swX1; x++) {
       i = row + x;
       var v = rf[i];
       /* Every floor here is two floors: the one a cell must clear to BECOME a
@@ -7315,9 +7501,9 @@ function buildVeins() {
   rvis.fill(0);
   if (!BODY) rchain.fill(0);   /* the joins' map; the graph has no joins */
   epN = 0; chainN = 0; jpN = 0;
-  for (y = 2; y < GH - 2; y++) {
+  for (y = swY0; y <= swY1; y++) {
     var row2 = y * GW;
-    for (x = 2; x < GW - 2; x++) {
+    for (x = swX0; x <= swX1; x++) {
       i = row2 + x;
       if (rdir[i] === 255 || rvis[i]) continue;
 
@@ -7433,9 +7619,7 @@ function buildVeins() {
   if (BODY) {
     if (PROF) pvMark(3);
     veinWidths();
-    if (PROF) pvMark(4);
-    bakeVeinGraph();
-    if (PROF) { pvMark(5); profVeinN++; }
+    if (PROF) { pvMark(4); profVeinN++; }
     buildWhiskers();
     return;
   }
