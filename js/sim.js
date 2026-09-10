@@ -5089,7 +5089,7 @@ function snapshotVeinTemporal(fs) {
   fs.vpN = vpN; fs.veinN = veinN;
   fs.vpx = vpx.slice(0, vpN); fs.vpy = vpy.slice(0, vpN);
   fs.vStart = vStart.slice(0, veinN); fs.vCount = vCount.slice(0, veinN);
-  fs.vBand = vBand.slice(0, veinN); fs.vFlow = vFlow.slice(0, veinN);
+  fs.vBand = vBand.slice(0, veinN); fs.vFlow = vFlow.slice(0, veinN); fs.vRoot = vRoot.slice(0, veinN);
   fs.vBorn = vBorn.slice(0, veinN); fs.vState = vState.slice(0, veinN);
   fs.vAtt = vAtt.slice(0, veinN * 4);
   fs.vNext = vNext.slice(0, veinN); fs.vPrev = vPrev.slice(0, veinN);
@@ -5106,6 +5106,7 @@ function restoreVeinGraph(fs) {
   vpx.set(fs.vpx); vpy.set(fs.vpy);
   vStart.set(fs.vStart); vCount.set(fs.vCount);
   vBand.set(fs.vBand); vFlow.set(fs.vFlow);
+  if (fs.vRoot) vRoot.set(fs.vRoot); else vRoot.fill(0, 0, veinN);
   /* the widths under the points are re-read from the body on the next
      rebuild; seeded here so the first paint is not a hairline */
   for (var wp = 0; wp < vpN; wp++) vpW[wp] = bodyD[(vpy[wp] | 0) * GW + (vpx[wp] | 0)];
@@ -6203,17 +6204,60 @@ function tubeKey(d) {
    for one rebuild after its first vein — a blink no one sees. */
 function bodyOutlines() {
   var p, i;
-  for (i = 0; i <= compN; i++) compVein[i] = 0;
+  for (i = 0; i <= compN; i++) { compVein[i] = 0; compPts[i] = 0; }
   for (p = 0; p < vpN; p++) {
     var lc = ((vpy[p] | 0) >> 1) * LW + ((vpx[p] | 0) >> 1);
-    if (lc >= 0 && lc < LW * LH && compL[lc]) compVein[compL[lc]] = 1;
+    if (lc >= 0 && lc < LW * LH && compL[lc]) { compVein[compL[lc]] = 1; compPts[compL[lc]]++; }
   }
+  rootLab = 0;
+  if (S.exp && S.exp.inoc) {
+    var rl = ((S.exp.inoc.y | 0) >> 1) * LW + ((S.exp.inoc.x | 0) >> 1);
+    if (rl >= 0 && rl < LW * LH) rootLab = compL[rl];
+  }
+  rootLoopN = 0;
   outlinePath = compN ? traceIso(bodyV, BODY_LEVELS[VEIN_MASK], false, outlineKeep) : null;
+  if (rootLoopN && rootLab && !compVein[rootLab] && S.simT - rootT0 >= ROOT_DELAY) { pinRootLoop(); outlinePath = null; }
 }
-function outlineKeep(cell) {
+/* ...and only a loop long enough to be the piece's edge: the holes the
+   drop opens as it empties in the middle traced as bright rings inside
+   the outline, and a hole is not an edge anyone needs drawn */
+var OUTLINE_MINPTS = 60;
+function outlineKeep(cell, m) {
+  if (m < OUTLINE_MINPTS) return false;
   var lc = (((cell / GW) | 0) >> 1) * LW + ((cell % GW) >> 1);
   var lab = compL[lc];
-  return lab > 0 && !compVein[lab] && compSize[lab] >= OUTLINE_MIN_L;
+  var ok = lab > 0 && !compVein[lab] && compSize[lab] >= OUTLINE_MIN_L;
+  /* the root piece's longest loop is kept aside: it may become the first
+     vein (the loop's points stand in isoPX/isoPY while keep is called) */
+  if (ok && lab === rootLab && m > rootLoopN && m <= 4096) {
+    for (var q = 0; q < m; q++) { rootLoopX[q] = isoPX[q]; rootLoopY[q] = isoPY[q]; }
+    rootLoopN = m;
+  }
+  return ok;
+}
+/* the drop's edge as a vein: every second crossing (they are a cell
+   apart), closed by its first point, attached to itself */
+function pinRootLoop() {
+  var n = rootLoopN >> 1;
+  if (n < 8 || veinN >= VEIN_MAX || vpN + n + 1 > VEIN_PTS_CAP) return;
+  var v = veinN++, sum = 0, k;
+  vStart[v] = vpN;
+  for (k = 0; k < rootLoopN; k += 2) {
+    var c = (rootLoopY[k] | 0) * GW + (rootLoopX[k] | 0);
+    vpx[vpN] = rootLoopX[k]; vpy[vpN] = rootLoopY[k]; vpW[vpN] = bodyD[c]; vpLive[vpN] = 1; vpN++;
+    sum += bodyV[c];
+  }
+  vpx[vpN] = vpx[vStart[v]]; vpy[vpN] = vpy[vStart[v]]; vpW[vpN] = vpW[vStart[v]]; vpLive[vpN] = 1; vpN++;
+  vCount[v] = vpN - vStart[v];
+  vFlow[v] = sum / n;
+  vBand[v] = veinBand(vFlow[v], 255);
+  vBorn[v] = S.simT;
+  vState[v] = 1;
+  vRoot[v] = 1;
+  vAtt[v * 4] = v; vAtt[v * 4 + 1] = 0; vAtt[v * 4 + 2] = v; vAtt[v * 4 + 3] = 0;
+  vNext[v] = -1; vPrev[v] = -1;
+  for (k = vStart[v]; k < vpN; k++) coverPoint(k);
+  vRepaint = true;
 }
 
 /* one chain of n points into the tube paths: the half-widths under its
@@ -6496,7 +6540,29 @@ var compL = new Int16Array(LW * LH);         /* piece label per lattice cell, 0 
 var COMP_MAX = 4096;
 var compVein = new Uint8Array(COMP_MAX);     /* a pinned vein stands in this piece */
 var compSize = new Int32Array(COMP_MAX);     /* lattice cells in the piece */
+var compPts = new Int32Array(COMP_MAX);      /* pinned points standing in the piece */
 var compN = 0;
+var rootLab = 0;                             /* the piece the inoculation point stands in, 0 none */
+/* The root is the drop. A line may begin on the drop's own piece — a
+   settled ridge standing on it, attached to nothing — until the piece
+   carries ROOT_PTS pinned points; from then on every line grows from
+   the end of another. A disc round the inoculation point was tried as
+   the root and seeded nothing for the first ten seconds: the drop
+   empties in the middle before its ridges settle, so the ridges stood
+   outside the disc. */
+var ROOT_PTS = 80;
+/* ...and the drop's edge is the FIRST vein. Seeds on the drop were each
+   a line of their own, and with the drop's middle empty and undrawn
+   they grew into separate trees — several organisms, to the eye. So
+   the first thing pinned is the drop's outline itself, as a closed vein
+   a ROOT_DELAY after inoculation, and every seed attaches to it: one
+   drawing from the first second, everything descending from the edge
+   of the drop. A root vein may be attached to at any point, not only
+   its ends — a ring has none. */
+var ROOT_DELAY = 0.5;                        /* sim-seconds after the dish starts */
+var rootT0 = 0;                              /* S.simT at the dish's start */
+var rootLoopX = new Float32Array(4096), rootLoopY = new Float32Array(4096), rootLoopN = 0;
+var vRoot = new Uint8Array(VEIN_MAX);        /* a root vein: attach anywhere on it */
 /* Only a piece the size of a drop is outlined. The lattice counts a cell
    only when its whole block is tissue, so a network of thin tubes breaks
    into hundreds of pieces a few cells each, and every one that happened
@@ -6709,6 +6775,7 @@ function pvMark(k) { var t = performance.now(); profVein[k] += t - pvT; pvT = t;
 /* Forget the graph: a new dish. */
 function resetVeinGraph() {
   vpN = 0; veinN = 0;
+  rootT0 = S.simT; rootLoopN = 0;
   vcov.fill(0); vpAt.fill(-1);
   rage.fill(0);
   vDrawn = 0; vRepaint = true; vPaintT = -1e9;
@@ -6878,6 +6945,7 @@ function reachFreeEnds() {
       vBand[c] = vBand[v] < vBand[bv] ? vBand[v] : vBand[bv];
       vBorn[c] = S.simT;
       vState[c] = 1;
+      vRoot[c] = 0;
       vAtt[c * 4] = v; vAtt[c * 4 + 1] = p - vStart[v];
       vAtt[c * 4 + 2] = bv; vAtt[c * 4 + 3] = best - vStart[bv];
       vNext[c] = -1; vPrev[c] = -1;
@@ -6888,13 +6956,54 @@ function reachFreeEnds() {
   }
 }
 
-/* within ROOT_R cells of the inoculation point: where the first lines
-   may begin on the drop itself */
-var ROOT_R = 16;
-function rootNear(x, y) {
-  var e = S.exp; if (!e || !e.inoc) return false;
-  var dx = x - e.inoc.x, dy = y - e.inoc.y;
-  return dx * dx + dy * dy <= ROOT_R * ROOT_R;
+/* ---- growth reaches through tissue ----
+   A stretch snapped only onto a vein within VEIN_SNAP of it, five cells,
+   and a settled ridge stands further than that from the last vein's end
+   within seconds of it being pinned: the tissue outruns the lines, and
+   a line that must start within five cells of another can never catch
+   up. In one run a few spokes attached to the root ring before the
+   annulus widened past the snap; in another none did, and the plate
+   showed the ring alone for a minute. So a stretch that snaps onto
+   nothing looks further: the nearest END point of a vein (or any point
+   of a root vein) within GROW_REACH whose straight line to the
+   stretch's start runs through tissue the whole way, and the hop is
+   pinned as the new vein's first segment. Growth still begins only at
+   a vein's end; it may begin some way from it, through the body. */
+var GROW_REACH = 12;
+function tissueBetween(x0, y0, x1, y1) {
+  var dx = x1 - x0, dy = y1 - y0, n = Math.ceil(Math.sqrt(dx * dx + dy * dy)) | 0, lv = BODY_LEVELS[0];
+  for (var k = 1; k < n; k++) {
+    var t = k / n, c = ((y0 + dy * t) | 0) * GW + ((x0 + dx * t) | 0);
+    if (c < 0 || c >= NCELL || bodyV[c] < lv) return false;
+  }
+  return true;
+}
+function nearestGrowPoint(x, y) {
+  var cx = x | 0, cy = y | 0, best = -1, bd = GROW_REACH * GROW_REACH + 0.001;
+  for (var dy = -GROW_REACH; dy <= GROW_REACH; dy++) {
+    var yy = cy + dy; if (yy < 0 || yy >= GH) continue;
+    for (var dx = -GROW_REACH; dx <= GROW_REACH; dx++) {
+      var xx = cx + dx; if (xx < 0 || xx >= GW) continue;
+      var q = vpAt[yy * GW + xx];
+      if (q < 0) continue;
+      var qv = veinOfPoint(q);
+      if (!vState[qv] || !vpLive[q]) continue;
+      if (!vRoot[qv] && q !== vStart[qv] && q !== vStart[qv] + vCount[qv] - 1) continue;
+      var ddx = vpx[q] - x, ddy = vpy[q] - y, d2 = ddx * ddx + ddy * ddy;
+      if (d2 >= bd) continue;
+      if (!tissueBetween(x, y, vpx[q], vpy[q])) continue;
+      bd = d2; best = q;
+    }
+  }
+  return best;
+}
+
+/* on the drop's piece, while it is still the root: where the first
+   lines may begin */
+function onRoot(c) {
+  if (!rootLab) return false;
+  var lc = (((c / GW) | 0) >> 1) * LW + ((c % GW) >> 1);
+  return compL[lc] === rootLab && compPts[rootLab] < ROOT_PTS;
 }
 
 function veinOfPoint(p) {
@@ -6942,9 +7051,11 @@ function pinChain(n) {
          single cell's wobble does not set it */
       var s2 = s + 2 < e ? s + 2 : e - 1, e2 = e - 3 >= s ? e - 3 : s;
       var p0 = nearestVeinPoint(chx[s], chy[s], chx[s] - chx[s2], chy[s] - chy[s2]);
+      if (p0 < 0) p0 = nearestGrowPoint(chx[s], chy[s]);
       if (p0 >= 0) { ax0 = veinOfPoint(p0); ap0 = p0 - vStart[ax0]; }
       else if (bodyV[chi[s]] >= BODY_LEVELS[VEIN_ATTACH]) ax0 = -2;
       var p1 = nearestVeinPoint(chx[e - 1], chy[e - 1], chx[e - 1] - chx[e2], chy[e - 1] - chy[e2]);
+      if (p1 < 0) p1 = nearestGrowPoint(chx[e - 1], chy[e - 1]);
       if (p1 >= 0) { ax1 = veinOfPoint(p1); ap1 = p1 - vStart[ax1]; }
       else if (bodyV[chi[e - 1]] >= BODY_LEVELS[VEIN_ATTACH]) ax1 = -2;
       /* The spur length. The medial axis of a tube runs a branch out to
@@ -6981,38 +7092,34 @@ function pinChain(n) {
       var loopy = p0 >= 0 && p1 >= 0 && ax0 === ax1 && Math.abs(ap0 - ap1) <= VEIN_SNAP * 2;
       var cont0 = p0 >= 0 && continuesVein(p0, ax0, ap0, chx[s] - chx[s2], chy[s] - chy[s2]);
       var cont1 = p1 >= 0 && continuesVein(p1, ax1, ap1, chx[e - 1] - chx[e2], chy[e - 1] - chy[e2]);
+      /* Since a stretch may only be pinned where it starts at a vein's
+         END (or on the root), the barb question — a spur off a trunk's
+         side, or a rung between two — no longer arises: a stretch
+         leaving a tip is growth. A continuation may be as short as it
+         likes; anything else needs VEIN_MINLEN points and must not be a
+         spur by the distance test. The old branch rule, which asked a
+         branch to end at the mask's edge or on another vein, kept every
+         spoke off the root ring unpinned: a tube's axis ends a
+         half-width short of its edge, so a growing tip never passed. */
       var ok;
       if (loopy) ok = false;
       else if (cont0 || cont1) ok = true;
-      else if (p0 >= 0 || p1 >= 0) {
-        /* a branch: longer than a spur by the trunk's half-width, and
-           ending somewhere — on another vein, or at the mask's edge with
-           the tube it marks, which is what tipEnd reads two cells past
-           the end. Snapped at both ends onto two veins it is a rung, and
-           the length alone is asked of it. */
-        var bl = dHi * VEIN_BRANCH_K + VEIN_BRANCH_PAD;
-        if (bl < VEIN_BRANCH_MIN) bl = VEIN_BRANCH_MIN;
-        var ends = (p0 >= 0 && p1 >= 0) ||
-                   (p0 >= 0 ? tipEnd(chx[e - 1], chy[e - 1], chx[e - 1] - chx[e2], chy[e - 1] - chy[e2])
-                            : tipEnd(chx[s], chy[s], chx[s] - chx[s2], chy[s] - chy[s2]));
-        ok = e - s > bl && ends;
-      }
       else ok = e - s >= VEIN_MINLEN && !(spurLen && dLo < dHi - 0.5);
       /* Veins grow one way: from the end of a vein. A stretch is pinned
          only where one of its ends stands on the END point of a pinned
          vein — the tip it continues, or a tip it branches from — or,
          while nothing has been pinned near it, on the inoculation drop
-         within ROOT_R of the inoculation point, which is the root every
+         itself (onRoot), whose edge is the first vein and the root every
          line descends from. Nothing appears on its own in the middle of
          the tissue, however good a ridge it is; the ridge waits for a
          line to reach it. The far end may land anywhere on any vein,
          which is how a growing tip closes a loop. An end that merely
          stands on tissue is not attached: it stays free, and the free
          ends' reach joins it to whatever comes within its snap. */
-      var end0 = p0 >= 0 && (ap0 === 0 || ap0 === vCount[ax0] - 1);
-      var end1 = p1 >= 0 && (ap1 === 0 || ap1 === vCount[ax1] - 1);
-      var root0 = ax0 === -2 && rootNear(chx[s], chy[s]);
-      var root1 = ax1 === -2 && rootNear(chx[e - 1], chy[e - 1]);
+      var end0 = p0 >= 0 && (vRoot[ax0] || ap0 === 0 || ap0 === vCount[ax0] - 1);
+      var end1 = p1 >= 0 && (vRoot[ax1] || ap1 === 0 || ap1 === vCount[ax1] - 1);
+      var root0 = ax0 === -2 && onRoot(chi[s]);
+      var root1 = ax1 === -2 && onRoot(chi[e - 1]);
       if (ax0 === -2 && !root0) ax0 = -1;
       if (ax1 === -2 && !root1) ax1 = -1;
       if (ok && (end0 || end1 || root0 || root1)) {
@@ -7042,6 +7149,7 @@ function pinChain(n) {
         vBand[v] = veinBand(vFlow[v], 255);
         vBorn[v] = S.simT;
         vState[v] = 1;
+        vRoot[v] = 0;
         vAtt[v * 4] = ax0; vAtt[v * 4 + 1] = ap0; vAtt[v * 4 + 2] = ax1; vAtt[v * 4 + 3] = ap1;
         /* the continuation links, for the painter's chains: at most one
            successor and one predecessor each, first come */
@@ -7904,7 +8012,7 @@ function traceIso(f, lv, mm, keep) {
        whether this loop is wanted */
     if (keep) {
       var ce = e < NE ? e : e - NE, cn = e < NE ? ce + 1 : ce + GW;
-      if (!keep(f[ce] >= lv ? ce : cn)) continue;
+      if (!keep(f[ce] >= lv ? ce : cn, m)) continue;
     }
     if (!path) path = new Path2D();
     /* quadratics through the midpoints, every second crossing point as the
