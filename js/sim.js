@@ -2791,19 +2791,42 @@ function inoculate(e) {
   nAgents = 0;
   var n = Math.min(e.start, MAXA);
   /* The drop fills outward from the inoculation point through CONNECTED open
-     agar, one agent per cell in breadth-first order. A plain disk of the
-     needed radius would cross maze walls and seed agents in corridors the
-     culture has never reached (EXP-02's radius spans two baffles); a
-     flood-fill cannot start anywhere it could not physically flow. In an
-     open dish the fill IS the disk, so nothing changes there. */
+     agar, one agent per cell. A plain disk of the needed radius would cross
+     maze walls and seed agents in corridors the culture has never reached
+     (EXP-02's radius spans two baffles); a flood-fill cannot start anywhere
+     it could not physically flow.
+
+     The flood finds the cells; it does not ORDER them. It used to — one
+     agent per cell in breadth-first order — and a breadth-first flood over
+     four neighbours grows a Manhattan ball, which is a diamond: every dish
+     began as a rotated square of tissue, plain to see the moment the drop
+     was drawn as its own edge. So the flood gathers INOC_OVER times the
+     cells the drop needs, those are sorted by their true distance from the
+     inoculation point (ties by index, so the order is fixed), and the drop
+     is the nearest of them: a disc where the agar is open, and where it is
+     not, the round part of one that the walls allow. */
   occ.fill(0);
   var seen = new Uint8Array(GW * GH);
   var q = new Int32Array(GW * GH);
-  var qh = 0, qt = 0;
+  var qh = 0, qt = 0, want = Math.min(GW * GH, (n * INOC_OVER) | 0);
   var s = (e.inoc.y | 0) * GW + (e.inoc.x | 0);
   q[qt++] = s; seen[s] = 1;
-  while (qh < qt && nAgents < n) {
-    var ci = q[qh++];
+  while (qh < qt && qt < want) {
+    var ci0 = q[qh++];
+    var w0 = ci0 - 1, e0 = ci0 + 1, n0 = ci0 - GW, s0 = ci0 + GW;
+    var cx0 = ci0 % GW, cy0 = (ci0 / GW) | 0;
+    if (cx0 < 1 || cy0 < 1 || cx0 >= GW - 1 || cy0 >= GH - 1 || wallM[ci0]) continue;
+    if (!seen[w0]) { seen[w0] = 1; q[qt++] = w0; }
+    if (!seen[e0]) { seen[e0] = 1; q[qt++] = e0; }
+    if (!seen[n0]) { seen[n0] = 1; q[qt++] = n0; }
+    if (!seen[s0]) { seen[s0] = 1; q[qt++] = s0; }
+  }
+  var order = Array.prototype.slice.call(q.subarray(0, qt));
+  var icx = e.inoc.x, icy = e.inoc.y;
+  var d2 = function (c) { var dx = (c % GW) + 0.5 - icx, dy = ((c / GW) | 0) + 0.5 - icy; return dx * dx + dy * dy; };
+  order.sort(function (a, b) { var da = d2(a), db = d2(b); return da < db ? -1 : da > db ? 1 : a - b; });
+  for (var oi = 0; oi < order.length && nAgents < n; oi++) {
+    var ci = order[oi];
     var cx = ci % GW, cy = (ci / GW) | 0;
     if (cx < 1 || cy < 1 || cx >= GW - 1 || cy >= GH - 1 || wallM[ci]) continue;
     /* jitter clear of the cell edges so Float32 rounding cannot carry the
@@ -2818,13 +2841,13 @@ function inoculate(e) {
       astv[nAgents] = 0; aoff[nAgents] = 0; aidle[nAgents] = 0; agoal[nAgents] = 0;
       nAgents++;
     }
-    var w = ci - 1, ee = ci + 1, nn = ci - GW, ss2 = ci + GW;
-    if (!seen[w]) { seen[w] = 1; q[qt++] = w; }
-    if (!seen[ee]) { seen[ee] = 1; q[qt++] = ee; }
-    if (!seen[nn]) { seen[nn] = 1; q[qt++] = nn; }
-    if (!seen[ss2]) { seen[ss2] = 1; q[qt++] = ss2; }
   }
 }
+/* how many times the drop's own cell count the flood gathers before the
+   sort: enough that a disc's worth of nearest cells is always among them
+   in an open dish (a diamond of 2n cells holds the disc of n), with room
+   for the cells a wall takes away */
+var INOC_OVER = 3;
 
 /* Place a daughter at (nx, ny) heading nh, if that cell will take one. */
 /* `tip` says whether the daughter is being put at the FRONT or into the body,
@@ -6465,8 +6488,9 @@ var VEIN_HOLE_L = VEIN_HOLE >> 2;
    of whiskers round the dark. With lines and nothing else, the one line
    such a piece has is its edge. So each connected piece of the mask is
    labelled on the lattice, and a piece no pinned vein stands in is
-   drawn as its outline, a hairline at the mask's level, until a vein
-   forms inside it and the outline goes. A tube that has veins is never
+   drawn as its outline, a line at the mask's level in the third band
+   (a hairline, honestly composited, was too faint to find the drop by),
+   until a vein forms inside it and the outline goes. A tube that has veins is never
    outlined: the outline round a tube would be the pill again. */
 var compL = new Int16Array(LW * LH);         /* piece label per lattice cell, 0 none */
 var COMP_MAX = 4096;
@@ -8543,7 +8567,7 @@ function strokeVeins(tc, sx, sy, mono) {
       if (BODY_FILL) for (k = 0; k < BODY_LEVELS.length; k++) if (bodyPath[k]) ctx.fill(bodyPath[k], 'evenodd');
       /* the outline moves with the tissue, so it lives in the veil and
          is punched like any moving stroke */
-      if (outlinePath) { ctx.lineWidth = VEIN_BANDS[1].w + 0.5; ctx.strokeStyle = '#fff'; ctx.stroke(outlinePath); }
+      if (outlinePath) { ctx.lineWidth = VEIN_BANDS[2].w + 0.5; ctx.strokeStyle = '#fff'; ctx.stroke(outlinePath); }
     }
     else if (lobeMaskPath) ctx.fill(lobeMaskPath);
     for (b = VEIN_BANDS.length - 1; b >= 0; b--) {
@@ -8604,8 +8628,8 @@ function strokeVeins(tc, sx, sy, mono) {
       ctx.stroke(tubePaths[k]);
     }
     if (outlinePath) {
-      ctx.lineWidth = VEIN_BANDS[1].w;
-      ctx.strokeStyle = VEIN_BANDS[1].style;
+      ctx.lineWidth = VEIN_BANDS[2].w;
+      ctx.strokeStyle = VEIN_BANDS[2].style;
       ctx.stroke(outlinePath);
     }
     /* the graph is NOT in the veil: it never moves, so it needs no fade,
@@ -9946,7 +9970,7 @@ var GHOST_ENT = 9;
    9: the hold on a flake and its pull run down with the food left.
    10: the return signal — a find travels back through the cytoplasm, holds
        the route it came by and shades the tubes beside it. */
-var SIM_V = 10;
+var SIM_V = 11;   /* the drop is a disc, not a diamond: every run starts differently */
 
 function ghostSig() {
   var h = mix32(SIM_V, Math.round(CUE_CAP * 1000), Math.round(CUE_REGEN * 1000));
