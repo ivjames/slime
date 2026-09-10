@@ -6872,7 +6872,9 @@ var tN = 0, treePassN = 0;
    the step back toward the source */
 var fAdjStart = new Int32Array(TREE_MAX + 1), fAdj = new Int32Array(TREE_MAX * 4), fDeg = new Int32Array(TREE_MAX);
 var fQueue = new Int32Array(TREE_MAX), fDist = new Int32Array(TREE_MAX), fPrev = new Int32Array(TREE_MAX);
-var fSrcAt = new Int32Array(TREE_MAX);       /* per source: one node standing on its pad, or -1 */
+var fSrcN = new Int32Array(TREE_SRC_MAX);    /* per source: live nodes standing on its pad... */
+var fSrcAt = new Int32Array(TREE_SRC_MAX * 64); /* ...up to 64 of them, so a pad's old detached
+                                                    nodes do not stand for a pad the network has reached */
 /* growth accumulators, per node and angular bin, for one pass: a node
    with tissue all round it (the root in the drop) has pulls that cancel
    as one sum, so they are sorted by direction and the fullest bin wins,
@@ -7091,6 +7093,17 @@ function treeGrow() {
   if (PROF) { treeMs += performance.now() - t0; treePasses++; }
 }
 
+/* whether the segment between two points crosses no wall cell, sampled
+   every half cell */
+function treeClear(x0, y0, x1, y1) {
+  var dx = x1 - x0, dy = y1 - y0, len = Math.sqrt(dx * dx + dy * dy), n = Math.ceil(len * 2), k;
+  for (k = 0; k <= n; k++) {
+    var t = n > 0 ? k / n : 0, x = (x0 + dx * t) | 0, y = (y0 + dy * t) | 0;
+    if (x < 0 || y < 0 || x >= GW || y >= GH || wallM[y * GW + x]) return false;
+  }
+  return true;
+}
+
 /* A live node of another vein within TREE_JOIN_R of a cell, or -1: not
    the tip itself, its parent, or its grandparent, which stand within
    reach of every step it takes; and not a node already fused to it. */
@@ -7104,29 +7117,38 @@ function treeForeign(cx, cy, n) {
       var m = tAt[y * GW + x];
       if (m < 0 || !tstate[m] || m === n || m === p1 || m === p2 || tpar[m] === n || tjoin[m] === n) continue;
       var ox = tx[m] - cx - 0.5, oy = ty[m] - cy - 0.5, d = ox * ox + oy * oy;
-      if (d <= r2 && d < bd) { bd = d; best = m; }
+      if (d > r2 || d >= bd) continue;
+      /* not through a wall: a vein on the far side of a maze wall is
+         within reach of a tip on this side, and a join across it would
+         be an edge the flow walk routes through and the painter draws */
+      if (!treeClear(tx[n], ty[n], tx[m], ty[m])) continue;
+      bd = d; best = m;
     }
   }
   return best;
 }
 
-/* The flow walk. Sources are the flakes with a live node on their pad
-   (one node each, the first found). From each source a breadth-first
-   search over the live network — parent links and joins, both ways —
-   gives the hop distance and the step back; for every other source the
-   path back is walked and each node on it counts one pair. Undirected
+/* The flow walk. Sources are the flakes with a live node on their pad,
+   every such node standing for the flake. From each source a
+   breadth-first search over the live network — parent links and joins,
+   both ways — gives the hop distance and the step back; for every other
+   source the nearest of its pad nodes is found and the path back is
+   walked, each node on it counting one pair. A pad's nodes need not
+   all be one network — a wall can cut a branch off and leave its tip on
+   the pad alive — so the pair is carried by whichever of them the walk
+   reaches. Undirected
    and unweighted: the hop count of a chain of two-cell steps is its
    length near enough, and what this decides is which veins carry, not
    by how much. */
 function treeFlow() {
   var i, k, e = S.exp, nsrc = e.nodes.length < TREE_SRC_MAX ? e.nodes.length : TREE_SRC_MAX;
   for (i = 0; i < tN; i++) { tcarry[i] = 0; fDeg[i] = 0; }
-  for (k = 0; k < nsrc; k++) fSrcAt[k] = -1;
+  for (k = 0; k < nsrc; k++) fSrcN[k] = 0;
   var nfound = 0;
   for (i = 0; i < tN; i++) {
     if (!tstate[i]) continue;
     var fi = feedAt[(ty[i] | 0) * GW + (tx[i] | 0)];
-    if (fi >= 0 && fi < nsrc && fSrcAt[fi] < 0) { fSrcAt[fi] = i; nfound++; }
+    if (fi >= 0 && fi < nsrc && fSrcN[fi] < 64) { if (fSrcN[fi] === 0) nfound++; fSrcAt[fi * 64 + fSrcN[fi]++] = i; }
     if (i > 0 && tstate[tpar[i]]) { fDeg[i]++; fDeg[tpar[i]]++; }
     if (tjoin[i] >= 0 && tstate[tjoin[i]]) { fDeg[i]++; fDeg[tjoin[i]]++; }
   }
@@ -7142,11 +7164,10 @@ function treeFlow() {
     if (j >= 0 && tstate[j]) { fAdj[fAdjStart[i] + fDeg[i]++] = j; fAdj[fAdjStart[j] + fDeg[j]++] = i; }
   }
   for (var a = 0; a < nsrc; a++) {
-    var sa = fSrcAt[a];
-    if (sa < 0) continue;
+    if (fSrcN[a] === 0) continue;
     for (i = 0; i < tN; i++) fDist[i] = -1;
     var qh = 0, qt = 0;
-    fQueue[qt++] = sa; fDist[sa] = 0; fPrev[sa] = -1;
+    for (k = 0; k < fSrcN[a]; k++) { var sa = fSrcAt[a * 64 + k]; fQueue[qt++] = sa; fDist[sa] = 0; fPrev[sa] = -1; }
     while (qh < qt) {
       var u = fQueue[qh++], s0 = fAdjStart[u], s1 = s0 + fDeg[u];
       for (k = s0; k < s1; k++) {
@@ -7155,10 +7176,12 @@ function treeFlow() {
         fDist[v] = fDist[u] + 1; fPrev[v] = u; fQueue[qt++] = v;
       }
     }
-    /* each pair once: walk back from the later source */
+    /* each pair once: walk back from the nearest reached node of the
+       later source's pad */
     for (var b = a + 1; b < nsrc; b++) {
-      var sb = fSrcAt[b];
-      if (sb < 0 || fDist[sb] < 0) continue;
+      var sb = -1, bd = 1e9;
+      for (k = 0; k < fSrcN[b]; k++) { var cb = fSrcAt[b * 64 + k]; if (fDist[cb] >= 0 && fDist[cb] < bd) { bd = fDist[cb]; sb = cb; } }
+      if (sb < 0) continue;
       for (var w = sb; w >= 0; w = fPrev[w]) tcarry[w]++;
     }
   }
