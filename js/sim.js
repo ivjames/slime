@@ -6173,6 +6173,26 @@ function tubeKey(d) {
   if (w > VEIN_TUBE_MAX) w = VEIN_TUBE_MAX;
   return Math.round(w * VEIN_TUBE_Q);
 }
+/* The outlines of the pieces no vein stands in: the pinned points are
+   mapped to the lattice and their pieces marked, then the mask level of
+   the eased body is traced and only the loops inside an unmarked piece
+   are kept. Read before this rebuild's pinning, so a piece is outlined
+   for one rebuild after its first vein — a blink no one sees. */
+function bodyOutlines() {
+  var p, i;
+  for (i = 0; i <= compN; i++) compVein[i] = 0;
+  for (p = 0; p < vpN; p++) {
+    var lc = ((vpy[p] | 0) >> 1) * LW + ((vpx[p] | 0) >> 1);
+    if (lc >= 0 && lc < LW * LH && compL[lc]) compVein[compL[lc]] = 1;
+  }
+  outlinePath = compN ? traceIso(bodyV, BODY_LEVELS[VEIN_MASK], false, outlineKeep) : null;
+}
+function outlineKeep(cell) {
+  var lc = (((cell / GW) | 0) >> 1) * LW + ((cell % GW) >> 1);
+  var lab = compL[lc];
+  return lab > 0 && !compVein[lab];
+}
+
 /* one chain of n points into the tube paths: the half-widths under its
    cells, one 1-2-1 pass along the chain so the transform's integer steps
    do not bead, then runs of one key, each a subpath of quadratics
@@ -6438,6 +6458,21 @@ var bodyM = new Uint8Array(NCELL);          /* the mask: 1 inside, holes filled 
 var holeL = new Uint8Array(LW * LH);
 var holeQ = new Int32Array(LW * LH);        /* the flood's queue; a cell enters once */
 var VEIN_HOLE_L = VEIN_HOLE >> 2;
+/* ---- the outline of tissue with no vein ----
+   A compact piece of tissue — the inoculation drop above all, a disc of
+   four thousand cells — has a medial axis that is a point, and a point
+   is no chain: for its first seconds the drop drew as nothing, a ring
+   of whiskers round the dark. With lines and nothing else, the one line
+   such a piece has is its edge. So each connected piece of the mask is
+   labelled on the lattice, and a piece no pinned vein stands in is
+   drawn as its outline, a hairline at the mask's level, until a vein
+   forms inside it and the outline goes. A tube that has veins is never
+   outlined: the outline round a tube would be the pill again. */
+var compL = new Int16Array(LW * LH);         /* piece label per lattice cell, 0 none */
+var COMP_MAX = 4096;
+var compVein = new Uint8Array(COMP_MAX);     /* a pinned vein stands in this piece */
+var compN = 0;
+var outlinePath = null;
 
 /* The mask at the tube level, with its pinholes filled. Outside is what a
    four-connected flood from the rim reaches — the rim is always outside,
@@ -6478,6 +6513,23 @@ function bodyMask() {
     if (lx < LW - 1 && holeL[c + 1] === 0) { holeL[c + 1] = 2; holeQ[qt++] = c + 1; }
     if (ly > 0 && holeL[c - LW] === 0) { holeL[c - LW] = 2; holeQ[qt++] = c - LW; }
     if (ly < LH - 1 && holeL[c + LW] === 0) { holeL[c + LW] = 2; holeQ[qt++] = c + LW; }
+  }
+  /* the pieces: a flood over the lattice's tissue cells, four-connected,
+     each labelled from 1; more pieces than COMP_MAX share the last label */
+  compL.fill(0); compN = 0;
+  for (n = 0; n < LW * LH; n++) {
+    if (holeL[n] !== 1 || compL[n]) continue;
+    var lab = compN < COMP_MAX - 1 ? ++compN : compN;
+    qh = qt = 0;
+    compL[n] = lab; holeQ[qt++] = n;
+    while (qh < qt) {
+      c = holeQ[qh++];
+      lx = c % LW; ly = (c / LW) | 0;
+      if (lx > 0 && holeL[c - 1] === 1 && !compL[c - 1]) { compL[c - 1] = lab; holeQ[qt++] = c - 1; }
+      if (lx < LW - 1 && holeL[c + 1] === 1 && !compL[c + 1]) { compL[c + 1] = lab; holeQ[qt++] = c + 1; }
+      if (ly > 0 && holeL[c - LW] === 1 && !compL[c - LW]) { compL[c - LW] = lab; holeQ[qt++] = c - LW; }
+      if (ly < LH - 1 && holeL[c + LW] === 1 && !compL[c + LW]) { compL[c + LW] = lab; holeQ[qt++] = c + LW; }
+    }
   }
   /* what is left at 0 is in a hole: measure each, fill the small ones */
   for (n = 0; n < LW * LH; n++) {
@@ -7685,7 +7737,7 @@ function traceMass(minTier, out) {
    whose corners straddle it, which isoMin/isoMax answer in two compares —
    and only the edges the crossing entered are walked, from the list the
    sweep collected, so the cost is the outline's length, not the plate's. */
-function traceIso(f, lv, mm) {
+function traceIso(f, lv, mm, keep) {
   var NE = NCELL, x, y, n, e;
   /* stamps rather than clears, one per level per rebuild; wrapped long
      before the integer runs out, with the one clear that then costs */
@@ -7726,6 +7778,13 @@ function traceIso(f, lv, mm) {
       cur = isoNext[cur];
     } while (cur >= 0 && cur !== e && isoMark[cur] === stamp && isoSeen[cur] !== stamp && m < ISO_LOOP_CAP);
     if (m < ISO_MINPTS) continue;
+    /* the loop's inside cell: of the two cells its first edge lies
+       between, the one at or above the level; a caller's keep says
+       whether this loop is wanted */
+    if (keep) {
+      var ce = e < NE ? e : e - NE, cn = e < NE ? ce + 1 : ce + GW;
+      if (!keep(f[ce] >= lv ? ce : cn)) continue;
+    }
     if (!path) path = new Path2D();
     /* quadratics through the midpoints, every second crossing point as the
        control: the outline passes between them, the cell-scale zigzag of a
@@ -7810,7 +7869,7 @@ function buildVeins() {
      half-second. Zero under walls and on the rim, since the body is. The
      floors are in that field's units, cells, rather than trail. */
   if (PROF) pvMark(0);
-  if (BODY) bodyDist();
+  if (BODY) { bodyDist(); bodyOutlines(); }
   if (PROF) pvMark(1);
   var rf = BODY ? bodyD : shpV;
   var rMin = BODY ? VEIN_DT_MIN : RIDGE_MIN, rMinLo = rMin * RIDGE_HOLD;
@@ -8538,6 +8597,11 @@ function strokeVeins(tc, sx, sy, mono) {
       ctx.lineWidth = k / VEIN_TUBE_Q;
       ctx.strokeStyle = TUBE_STYLE[k];
       ctx.stroke(tubePaths[k]);
+    }
+    if (outlinePath) {
+      ctx.lineWidth = VEIN_BANDS[1].w;
+      ctx.strokeStyle = VEIN_BANDS[1].style;
+      ctx.stroke(outlinePath);
     }
     if (VEIN_GRAPH) {
       paintVeinGraph();
