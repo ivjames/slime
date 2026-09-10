@@ -4188,6 +4188,7 @@ function step() {
       if (atip[k] && VEIN_TREE && exN < EX_CAP && !tcov[idx]) {
         var exi = exN * 4;
         exSeg[exi] = ax[k]; exSeg[exi + 1] = ay[k]; exSeg[exi + 2] = nx; exSeg[exi + 3] = ny;
+        exStepOf[exN] = stepsRun;
         exN++;
       }
       ax[k] = nx; ay[k] = ny; ah[k] = h;
@@ -6883,6 +6884,7 @@ var EX_JUMP = 3.0;                    /* cells: further than this in one step is
 var EX_A = 0.16;                      /* a trail's alpha: faint, since a well-walked cell is stroked many times */
 var EX_W = 0.34;                      /* cells: a trail's width */
 var exSeg = new Float32Array(EX_CAP * 4), exN = 0;
+var exStepOf = new Int32Array(EX_CAP);   /* the step each segment was taken on */
 var exc = null, exctx = null;         /* the record canvas */
 var TREE_REPAINT = 0.2;       /* seconds between repaints while running */
 var TREE_WQ   = 4;            /* width quantisation, steps a cell */
@@ -9801,17 +9803,24 @@ function render() {
       exctx.globalAlpha = EX_A;
       exctx.lineWidth = EX_W;
       exctx.strokeStyle = VEIN_BANDS[0].style;
-      /* one stroke per segment, not one path for the batch: a path is
-         composited once however many of its segments overlap, so a cell
-         walked twice in one frame's steps was as pale as one walked
-         once, and the record's darkness depended on how many steps a
-         frame ran. Stroked singly, every walk counts once. */
-      for (var exq = 0; exq < exN; exq++) {
-        var exb = exq * 4, exdx = exSeg[exb + 2] - exSeg[exb], exdy = exSeg[exb + 3] - exSeg[exb + 1];
-        if (exdx * exdx + exdy * exdy > EX_JUMP * EX_JUMP) continue;
-        exctx.beginPath();
-        exctx.moveTo(exSeg[exb], exSeg[exb + 1]); exctx.lineTo(exSeg[exb + 2], exSeg[exb + 3]);
-        exctx.stroke();
+      /* one path per STEP, not one for the whole batch and not one per
+         segment: a path is composited once however many of its segments
+         overlap, so a cell walked twice in one frame's steps was as
+         pale as one walked once and the record's darkness depended on
+         how many steps a frame ran; and a stroke per segment was a
+         quarter-million draw calls after a stall. Within one step no
+         tip walks a cell twice, so a step's segments are one path and
+         every walk still counts once. */
+      var exq = 0;
+      while (exq < exN) {
+        var exStep = exStepOf[exq], exp = new Path2D(), exAny = false;
+        for (; exq < exN && exStepOf[exq] === exStep; exq++) {
+          var exb = exq * 4, exdx = exSeg[exb + 2] - exSeg[exb], exdy = exSeg[exb + 3] - exSeg[exb + 1];
+          if (exdx * exdx + exdy * exdy > EX_JUMP * EX_JUMP) continue;
+          exp.moveTo(exSeg[exb], exSeg[exb + 1]); exp.lineTo(exSeg[exb + 2], exSeg[exb + 3]);
+          exAny = true;
+        }
+        if (exAny) exctx.stroke(exp);
       }
       exN = 0;
       exctx.restore();
