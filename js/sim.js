@@ -5115,6 +5115,14 @@ function snapshotVeinTemporal(fs) {
   fs.vAtt = vAtt.slice(0, veinN * 4);
   fs.vNext = vNext.slice(0, veinN); fs.vPrev = vPrev.slice(0, veinN);
   if (VEIN_TREE) snapshotTree(fs);
+  /* the explorers' record is a picture, not a field: kept as a copy of
+     the canvas, so a replay exit puts the trails back with the rest */
+  if (VEIN_TREE && exc && exc.width) {
+    var exKeep = document.createElement('canvas');
+    exKeep.width = exc.width; exKeep.height = exc.height;
+    exKeep.getContext('2d').drawImage(exc, 0, 0);
+    fs.exc = exKeep;
+  } else fs.exc = null;
 }
 
 /* The graph out of a snapshot; a snapshot without one (taken before the
@@ -5171,7 +5179,10 @@ function restoreVeinTemporal(fs) {
      it. */
   if (ictx && ink.width) ictx.clearRect(0, 0, ink.width, ink.height);
   inked.fill(0);
-  if (exctx && exc.width) exctx.clearRect(0, 0, exc.width, exc.height);
+  if (exctx && exc.width) {
+    exctx.clearRect(0, 0, exc.width, exc.height);
+    if (fs.exc) exctx.drawImage(fs.exc, 0, 0, exc.width, exc.height);
+  }
   exN = 0;
 }
 
@@ -9773,30 +9784,38 @@ function render() {
   ctx.globalAlpha = BODY && VEIN_GRAPH ? REC_A : INK_A;
   ctx.drawImage(ink, 0, 0);
   ctx.globalAlpha = 1;
+  /* the explorers' record, under the walls as the ink is: a wall poured
+     across old tracks covers them */
+  if (VEIN_TREE && exc && exc.width) ctx.drawImage(exc, 0, 0);
   if (!SHEET) paintWalls(ctx, cv.width / GW, cv.height / GH);
   ctx.drawImage(veilAcc, 0, 0);
   /* the explorers' trails: the steps the tips took since the last frame,
-     stroked once onto their record, and the record laid under the tree */
+     stroked onto their record for the NEXT frame to lay; this frame laid
+     the record before the walls, above */
   if (VEIN_TREE && exc) {
     if (exc.width !== cv.width || exc.height !== cv.height) { exc.width = cv.width; exc.height = cv.height; }
     if (exN) {
-      var exp = new Path2D(), exq;
-      for (exq = 0; exq < exN; exq++) {
-        var exb = exq * 4, exdx = exSeg[exb + 2] - exSeg[exb], exdy = exSeg[exb + 3] - exSeg[exb + 1];
-        if (exdx * exdx + exdy * exdy > EX_JUMP * EX_JUMP) continue;
-        exp.moveTo(exSeg[exb], exSeg[exb + 1]); exp.lineTo(exSeg[exb + 2], exSeg[exb + 3]);
-      }
-      exN = 0;
       exctx.save();
       exctx.setTransform(exc.width / GW, 0, 0, exc.height / GH, 0, 0);
       exctx.lineCap = 'butt';
       exctx.globalAlpha = EX_A;
       exctx.lineWidth = EX_W;
       exctx.strokeStyle = VEIN_BANDS[0].style;
-      exctx.stroke(exp);
+      /* one stroke per segment, not one path for the batch: a path is
+         composited once however many of its segments overlap, so a cell
+         walked twice in one frame's steps was as pale as one walked
+         once, and the record's darkness depended on how many steps a
+         frame ran. Stroked singly, every walk counts once. */
+      for (var exq = 0; exq < exN; exq++) {
+        var exb = exq * 4, exdx = exSeg[exb + 2] - exSeg[exb], exdy = exSeg[exb + 3] - exSeg[exb + 1];
+        if (exdx * exdx + exdy * exdy > EX_JUMP * EX_JUMP) continue;
+        exctx.beginPath();
+        exctx.moveTo(exSeg[exb], exSeg[exb + 1]); exctx.lineTo(exSeg[exb + 2], exSeg[exb + 3]);
+        exctx.stroke();
+      }
+      exN = 0;
       exctx.restore();
     }
-    ctx.drawImage(exc, 0, 0);
   }
   /* the pinned graph, whole, over the veil: opaque where it is drawn and
      laid once per frame onto a frame that is cleared, so nothing
