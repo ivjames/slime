@@ -6856,6 +6856,24 @@ var TREE_JOIN_R = 3.0;        /* cells: a tip this close to another vein fuses w
 var TREE_FLOW_EVERY = 8;      /* growth passes between flow walks */
 var TREE_WLINK = 1.6;         /* cells: a vein carrying one flake pair */
 var TREE_SRC_MAX = 16;        /* flakes the flow walk can take */
+/* ---- the puddle ----
+   In the time-lapse an oat the network has reached disappears under a
+   mass of plasmodium: the flake becomes a puddle as the lines take it.
+   The sim already has that mass — the fan feeding on a flake is the
+   thickest tissue on the plate — so the puddle is drawn from it: the
+   eased body's contour at PUDDLE_LV, filled in the trunk's tone under
+   the veins so the trunks run into it, but only within PUDDLE_R flake
+   radii of a flake being eaten or eaten, and fading to nothing at that
+   distance. The fade, not a loop test, is what keeps the puddle at the
+   flake: at any level the fan on a flake is one piece with the trunk
+   that feeds it, and the trunk with the drop, so the contour's loop
+   around a pad is the loop around the whole network, and a first try
+   that kept whole loops filled the plate. The flake's own dot fades as
+   it is eaten; the ring and dial stay, since they are the instrument
+   and not the food. */
+var PUDDLE_LV = 5;            /* index into BODY_LEVELS: trail 26, the fan and the trunk that feeds it */
+var PUDDLE_R  = 2.4;          /* flake radii: where the puddle has faded to nothing */
+var PUDDLE_A  = 0.92;         /* the fill's alpha at the flake */
 
 var tx = new Float32Array(TREE_MAX), ty = new Float32Array(TREE_MAX);
 var tpar = new Int32Array(TREE_MAX);
@@ -7206,6 +7224,27 @@ function treeFlow() {
   }
 }
 
+/* the puddles: the body's contour, filled within a fading disc around
+   each flake that is being eaten or is eaten */
+function paintPuddles(c) {
+  var e = S.exp, path = null, i;
+  for (i = 0; i < e.nodes.length; i++) {
+    if (!S.nodeDone[i] && !(S.nodeProg[i] > 0.01)) continue;
+    if (!path) { path = traceIso(bodyV, BODY_LEVELS[PUDDLE_LV], false, null); if (!path) return; }
+    var nd = e.nodes[i], r = nd.r * PUDDLE_R;
+    var g = c.createRadialGradient(nd.x, nd.y, 0, nd.x, nd.y, r);
+    var col = PLASMODIUM;
+    g.addColorStop(0, 'rgba(' + col[0] + ',' + col[1] + ',' + col[2] + ',' + PUDDLE_A + ')');
+    g.addColorStop(0.55, 'rgba(' + col[0] + ',' + col[1] + ',' + col[2] + ',' + PUDDLE_A + ')');
+    g.addColorStop(1, 'rgba(' + col[0] + ',' + col[1] + ',' + col[2] + ',0)');
+    c.save();
+    c.beginPath(); c.arc(nd.x, nd.y, r, 0, Math.PI * 2); c.clip();
+    c.fillStyle = g;
+    c.fill(path, 'evenodd');
+    c.restore();
+  }
+}
+
 /* the band whose hairline is nearest below this width, for its colour */
 function treeBand(w) {
   var b = 0;
@@ -7270,6 +7309,8 @@ function paintTree() {
   vgctx.setTransform(sx, 0, 0, sy, 0, 0);
   vgctx.lineCap = 'round';
   vgctx.lineJoin = 'round';
+  /* the puddles first, under everything */
+  paintPuddles(vgctx);
   if (ghost) {
     vgctx.globalAlpha = TREE_GHOST_A;
     vgctx.lineWidth = TREE_GHOST_W;
@@ -9795,7 +9836,11 @@ function render() {
                -Math.PI / 2 + Math.PI * 2 * prog, 2.2, MARK_DIAL);
     }
 
+    /* the flake itself fades as it is eaten: under the puddle it is
+       becoming, the dot is the food and the food is going */
+    if (prog > 0.01) ctx.globalAlpha = 1 - prog;
     casedDisc(ctx, nd.x, nd.y, nd.r * 0.34, MARK_OBJ);
+    ctx.globalAlpha = 1;
   }
 
   if (ptr.down) {
