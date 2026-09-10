@@ -3862,6 +3862,7 @@ function step() {
 
   diffuseTrail();
   if (stepsRun % KNOT_EVERY === 0) slowFields();
+  if (VEIN_TREE && stepsRun % TREE_EVERY === 0) treeGrow();
 
   var i, k;
   /* Last step's contact counts, kept before this step's are zeroed: the fan
@@ -6823,7 +6824,8 @@ var TREE_STEP = 2.0;          /* cells a node extends per growth */
 var TREE_INF  = 12;           /* cells: how far an attractor reaches for a node */
 var TREE_KILL = 2.5;          /* cells: an attractor this close to a node is spent */
 var TREE_SP   = 3;            /* cells: attractor lattice spacing (the lace spacing) */
-var TREE_LV   = 1;            /* index into BODY_LEVELS: tissue the tree grows into */
+var TREE_LV   = 1;            /* index into BODY_LEVELS: trail at which a cell is tissue the tree grows into */
+var TREE_EVERY = 4;           /* sim steps between growth passes: the tree is on the sim's clock, not the frame's */
 var TREE_MIN_COS = 0.77;      /* ~40 degrees: a node does not grow a second child this close to one it has */
 var TREE_BINS = 8;            /* angular bins the pulls on a node are sorted into */
 var TREE_INERTIA = 0.6;       /* share of the parent segment's heading kept by a continuing tip: a vein bends, it does not zigzag */
@@ -6921,27 +6923,33 @@ function treeNearest(cx, cy) {
   return -1;
 }
 
-/* One growth pass, once per rebuild. */
+/* One growth pass, every TREE_EVERY sim steps, from step(). On the sim's
+   clock and reading the sim's own trail rather than the painter's eased
+   body, so the tree a run grows is a function of the run alone: the
+   same seed and step count grow the same tree at x1 and at x16, and a
+   replay puts back the tree the original had. Read at render cadence it
+   was not — a frame at x16 runs sixteen steps and grew one. */
+var treeMs = 0, treePasses = 0;
 function treeGrow() {
   if (!S.exp) return;
   if (tN === 0) treeReset();
   var dt = S.simT - treeT;
   treeT = S.simT;
   if (dt <= 0) return;
+  var t0 = PROF ? performance.now() : 0;
   var lv = BODY_LEVELS[TREE_LV], i, x, y, c, n;
 
-  /* --- the pulls: every unspent attractor cell in the mask box --- */
+  /* --- the pulls: every unspent attractor cell on the plate --- */
   tPulledN = 0;
   var sp = TREE_SP;
-  var ya = ((bmY0 / sp) | 0) * sp, xa = ((bmX0 / sp) | 0) * sp;
-  for (y = ya; y <= bmY1; y += sp) {
-    for (x = xa; x <= bmX1; x += sp) {
+  for (y = 0; y < GH; y += sp) {
+    for (x = 0; x < GW; x += sp) {
       /* the lattice, jittered by a hash so it is not a grid the tree can see */
       var h = mix32(x, y, 7);
       var jx = x + (h % sp), jy = y + ((h >>> 8) % sp);
       if (jx < 2 || jy < 2 || jx >= GW - 2 || jy >= GH - 2) continue;
       c = jy * GW + jx;
-      if (tcov[c] || wallM[c] || bodyV[c] < lv) continue;
+      if (tcov[c] || wallM[c] || trail[c] < lv) continue;
       n = treeNearest(jx, jy);
       if (n < 0) continue;
       var dx = jx + 0.5 - tx[n], dy = jy + 0.5 - ty[n];
@@ -6995,7 +7003,7 @@ function treeGrow() {
     var cx = nx | 0, cy = ny | 0;
     if (cx < 1 || cy < 1 || cx >= GW - 1 || cy >= GH - 1) continue;
     c = cy * GW + cx;
-    if (wallM[c] || bodyV[c] < lv) continue;
+    if (wallM[c] || trail[c] < lv) continue;
     /* not into another vein's cell: the tree does not anastomose */
     var occ = tAt[c];
     if (occ >= 0 && occ !== n && tstate[occ]) continue;
@@ -7014,13 +7022,17 @@ function treeGrow() {
     tw[i] += (target - tw[i]) * kw;
   }
 
-  /* --- the retraction: an idle tip not on food or the fed corridor --- */
+  /* --- the retraction: an idle tip not on food or the fed corridor;
+     and any node a wall has come down on, tip or not, at once --- */
   var retracted = 0;
   for (i = tN - 1; i > 0; i--) {
-    if (!tstate[i] || tkids[i] !== 0 || tidle[i] < RET_IDLE) continue;
+    if (!tstate[i]) continue;
     c = (ty[i] | 0) * GW + (tx[i] | 0);
-    if (feedAt[c] >= 0) continue;
-    if (linkF[c] >= FED_LOW) continue;
+    if (!wallM[c]) {
+      if (tkids[i] !== 0 || tidle[i] < RET_IDLE) continue;
+      if (feedAt[c] >= 0) continue;
+      if (linkF[c] >= FED_LOW) continue;
+    }
     tstate[i] = 0;
     var p = tpar[i];
     tkids[p]--;
@@ -7031,6 +7043,7 @@ function treeGrow() {
   }
   if (grown || retracted) treeDirty = true;
   /* widths ease every pass, so the paint is due on its own clock */
+  if (PROF) { treeMs += performance.now() - t0; treePasses++; }
 }
 
 /* the band whose hairline is nearest below this width, for its colour */
@@ -7061,6 +7074,10 @@ function paintTree() {
        polygon and the line is its quadratic spline, so a chain of
        two-cell steps reads as one bending vein. The root and a branch
        point's first segment start at the node itself. */
+    /* nothing is drawn under a wall, live or ghost: the graph is laid
+       over the walls, and a wall poured across a branch would otherwise
+       show the branch through it */
+    if (wallM[(ty[i] | 0) * GW + (tx[i] | 0)] || wallM[(ty[p] | 0) * GW + (tx[p] | 0)]) continue;
     var g = tpar[p], x0, y0;
     if (g >= 0) { x0 = (tx[g] + tx[p]) * 0.5; y0 = (ty[g] + ty[p]) * 0.5; } else { x0 = tx[p]; y0 = ty[p]; }
     var x1 = (tx[p] + tx[i]) * 0.5, y1 = (ty[p] + ty[i]) * 0.5;
@@ -8786,7 +8803,6 @@ function buildVeins() {
   if (BODY) {
     if (PROF) pvMark(3);
     if (VEIN_GRAPH && !VEIN_TREE) reachFreeEnds();
-    if (VEIN_TREE) treeGrow();
     veinWidths();
     if (PROF) { pvMark(4); profVeinN++; }
     buildWhiskers();
@@ -12031,7 +12047,7 @@ function init() {
     tree: function () {
       var live = 0, wmax = 0, tips = 0;
       for (var i = 0; i < tN; i++) { if (tstate[i]) { live++; if (tw[i] > wmax) wmax = tw[i]; if (tkids[i] === 0) tips++; } }
-      return { n: tN, live: live, tips: tips, wmax: wmax,
+      return { n: tN, live: live, tips: tips, wmax: wmax, ms: treeMs, passes: treePasses,
                x: tx.slice(0, tN), y: ty.slice(0, tN), par: tpar.slice(0, tN), w: tw.slice(0, tN), state: tstate.slice(0, tN) };
     },
     /* the pinned graph, as copies: the harness differences two samples to
