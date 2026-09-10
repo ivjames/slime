@@ -8522,6 +8522,15 @@ function buildWhiskers() {
   for (var k = 0; k < nAgents; k++) {
     if (!atip[k]) continue;
     var ax0 = ax[k], ay0 = ay[k], h = ah[k];
+    /* A tip standing inside a piece that is drawn as its outline — the
+       drop, before it has a vein — has no front to show: its whisker was
+       a speck on the outline, and the drop began as a ring of specks. A
+       tip that has left the outline, or stands in a piece with veins, is
+       the front. */
+    if (BODY && VEIN_GRAPH) {
+      var wl = compL[((ay0 | 0) >> 1) * LW + ((ax0 | 0) >> 1)];
+      if (wl > 0 && !compVein[wl]) continue;
+    }
     wp.moveTo(ax0 - Math.cos(h) * TIP_WHISK, ay0 - Math.sin(h) * TIP_WHISK);
     wp.lineTo(ax0, ay0);
     any = true;
