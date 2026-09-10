@@ -6899,7 +6899,11 @@ function emitChain(bandPaths, rec) {
 function paintVeinGraph() {
   if (!veil || !veil.width) return;
   if (!vgc) { vgc = document.createElement('canvas'); vgctx = vgc.getContext('2d'); }
-  var full = vRepaint && S.simT - vPaintT >= VEIN_REPAINT;
+  /* A halted dish gets no later rebuild, so its last one must not be
+     the one the interval withholds: the verdict would show a picture a
+     band change behind, and a replay exit, restoring the newer arrays,
+     would repaint to a different plate. */
+  var full = vRepaint && (!S.running || S.simT - vPaintT >= VEIN_REPAINT);
   if (vgc.width !== veil.width || vgc.height !== veil.height) { vgc.width = veil.width; vgc.height = veil.height; full = true; }
   if (!full && vDrawn === veinN) return;
   var sx = vgc.width / GW, sy = vgc.height / GH, from = vDrawn, b, v;
@@ -11239,6 +11243,18 @@ function init() {
     veinMap: function () {
       var m = new Uint8Array(NCELL);
       m.fill(255);
+      /* under the body the drawn lines are the graph, not the runs: each
+         point's cell takes its vein's band while live, 200 while record */
+      if (BODY) {
+        for (var gv = 0; gv < veinN; gv++) {
+          var gs = vStart[gv], ge = gs + vCount[gv];
+          for (var gp = gs; gp < ge; gp++) {
+            var gc = (vpy[gp] | 0) * GW + (vpx[gp] | 0);
+            if (gc >= 0 && gc < NCELL) m[gc] = (vState[gv] && vpLive[gp]) ? vBand[gv] : 200;
+          }
+        }
+        return m;
+      }
       /* masses first and crests over them, the order strokeVeins draws in, so
          the difference of two samples is the churn of the composite the eye
          is actually looking at */
