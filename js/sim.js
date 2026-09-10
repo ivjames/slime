@@ -6839,6 +6839,23 @@ var TREE_GHOST_A = 0.34;      /* a ghost's alpha */
 var TREE_GHOST_W = 0.5;       /* cells: a ghost's width, at most */
 var TREE_REPAINT = 0.2;       /* seconds between repaints while running */
 var TREE_WQ   = 4;            /* width quantisation, steps a cell */
+/* ---- anastomosis and flow ----
+   A tip that reaches another vein FUSES with it: in the dish the fans
+   meet and join, and that is how two flakes come to be connected to
+   each other and not only each through the centre. A join is an edge
+   from the tip to the node it met, and the tip stops there. Which
+   joins are kept is the return signal's business: every growth
+   TREE_FLOW_EVERY passes the shortest path through the network between
+   every pair of flakes that the network stands on is walked, and each
+   node counts the pairs whose path runs through it. A node carrying a
+   pair never retracts and is at least TREE_WLINK wide, more with more
+   pairs; a join carrying none is lace, and retracts like lace. That is
+   Tero's rule — the tube on the path between food sources thickens,
+   the rest thins — on the graph the tree has become. */
+var TREE_JOIN_R = 3.0;        /* cells: a tip this close to another vein fuses with it */
+var TREE_FLOW_EVERY = 8;      /* growth passes between flow walks */
+var TREE_WLINK = 1.6;         /* cells: a vein carrying one flake pair */
+var TREE_SRC_MAX = 16;        /* flakes the flow walk can take */
 
 var tx = new Float32Array(TREE_MAX), ty = new Float32Array(TREE_MAX);
 var tpar = new Int32Array(TREE_MAX);
@@ -6848,7 +6865,14 @@ var tkids = new Int16Array(TREE_MAX);         /* live children */
 var tstate = new Uint8Array(TREE_MAX);        /* 1 live, 0 ghost */
 var tidle = new Float32Array(TREE_MAX);       /* seconds since last pulled */
 var tborn = new Float32Array(TREE_MAX);
-var tN = 0;
+var tjoin = new Int32Array(TREE_MAX);        /* the node this tip fused with, or -1 */
+var tcarry = new Int16Array(TREE_MAX);       /* flake pairs whose shortest path runs through this node */
+var tN = 0, treePassN = 0;
+/* the flow walk's scratch: adjacency in CSR form, a queue, distances and
+   the step back toward the source */
+var fAdjStart = new Int32Array(TREE_MAX + 1), fAdj = new Int32Array(TREE_MAX * 4), fDeg = new Int32Array(TREE_MAX);
+var fQueue = new Int32Array(TREE_MAX), fDist = new Int32Array(TREE_MAX), fPrev = new Int32Array(TREE_MAX);
+var fSrcAt = new Int32Array(TREE_MAX);       /* per source: one node standing on its pad, or -1 */
 /* growth accumulators, per node and angular bin, for one pass: a node
    with tissue all round it (the root in the drop) has pulls that cancel
    as one sum, so they are sorted by direction and the fullest bin wins,
@@ -6865,7 +6889,7 @@ var tcov = new Uint8Array(GW * GH);
 var treeT = 0, treePaintT = -1e9, treeDirty = true;
 
 function treeReset() {
-  tN = 0; treeT = S.simT; treePaintT = -1e9; treeDirty = true;
+  tN = 0; treePassN = 0; treeT = S.simT; treePaintT = -1e9; treeDirty = true;
   tAt.fill(-1); tcov.fill(0);
   if (S.exp) {
     var ix = (S.exp.inoc.x | 0) + 0.5, iy = (S.exp.inoc.y | 0) + 0.5;
@@ -6879,6 +6903,7 @@ function treeAdd(x, y, parent) {
   tx[i] = x; ty[i] = y; tpar[i] = parent;
   tw[i] = TREE_W0; tleaf[i] = 1; tkids[i] = 0;
   tstate[i] = 1; tidle[i] = 0; tborn[i] = S.simT;
+  tjoin[i] = -1; tcarry[i] = 0;
   if (parent >= 0) { tkids[parent]++; tidle[parent] = 0; }
   treeCover(i);
   return i;
@@ -6887,8 +6912,12 @@ function treeAdd(x, y, parent) {
 /* the kill disc: attractors inside it are spent; the cell map keeps the
    node for the nearest-node search */
 function treeCover(i) {
-  var cx = tx[i] | 0, cy = ty[i] | 0, r = Math.ceil(TREE_KILL), r2 = TREE_KILL * TREE_KILL;
+  var cx = tx[i] | 0, cy = ty[i] | 0;
   if (cx >= 0 && cy >= 0 && cx < GW && cy < GH) tAt[cy * GW + cx] = i;
+  treeCoverR(i, TREE_KILL);
+}
+function treeCoverR(i, R) {
+  var cx = tx[i] | 0, cy = ty[i] | 0, r = Math.ceil(R), r2 = R * R;
   for (var dy = -r; dy <= r; dy++) {
     var y = cy + dy; if (y < 0 || y >= GH) continue;
     for (var dx = -r; dx <= r; dx++) {
@@ -6973,6 +7002,10 @@ function treeGrow() {
       tgn[b0 + bb] = 0; tgx[b0 + bb] = 0; tgy[b0 + bb] = 0;
     }
     tgAny[n] = 0;
+    /* a fused tip has stopped: the vein it met carries on from there.
+       Its pulls do not keep it awake, so it idles out like any tip
+       unless the flow walk finds it carrying */
+    if (tjoin[n] >= 0) continue;
     tidle[n] = 0;
     var gl = Math.sqrt(gx * gx + gy * gy);
     if (gl < 1e-3) continue;
@@ -7004,12 +7037,22 @@ function treeGrow() {
     if (cx < 1 || cy < 1 || cx >= GW - 1 || cy >= GH - 1) continue;
     c = cy * GW + cx;
     if (wallM[c] || trail[c] < lv) continue;
-    /* not into another vein's cell: the tree does not anastomose */
-    var occ = tAt[c];
-    if (occ >= 0 && occ !== n && tstate[occ]) continue;
+    /* another vein within reach of the step: fuse with it instead of
+       stepping. Not this vein's own last few nodes, which are always
+       within reach. */
+    var occ = treeForeign(cx, cy, n);
+    if (occ >= 0) {
+      tjoin[n] = occ; grown++;
+      /* the attractors between the two are spent by the fusion, or they
+         would pull this tip forever */
+      treeCoverR(n, TREE_JOIN_R + TREE_KILL);
+      continue;
+    }
     if (treeAdd(nx, ny, n) < 0) break;
     grown++;
   }
+  /* --- the flow: which nodes carry a flake pair --- */
+  if (++treePassN % TREE_FLOW_EVERY === 0) treeFlow();
 
   /* --- the widths: leaves under each node, children before parents --- */
   for (i = 0; i < tN; i++) tleaf[i] = (tstate[i] && tkids[i] === 0) ? 1 : 0;
@@ -7018,6 +7061,7 @@ function treeGrow() {
   for (i = 0; i < tN; i++) {
     if (!tstate[i]) continue;
     var target = TREE_W0 * Math.pow(tleaf[i] > 0 ? tleaf[i] : 1, 1 / PIPE_N);
+    if (tcarry[i] > 0) { var wl = TREE_WLINK * Math.sqrt(tcarry[i]); if (wl > target) target = wl; }
     if (target > TREE_WMAX) target = TREE_WMAX;
     tw[i] += (target - tw[i]) * kw;
   }
@@ -7030,6 +7074,7 @@ function treeGrow() {
     c = (ty[i] | 0) * GW + (tx[i] | 0);
     if (!wallM[c]) {
       if (tkids[i] !== 0 || tidle[i] < RET_IDLE) continue;
+      if (tcarry[i] > 0) continue;
       if (feedAt[c] >= 0) continue;
       if (linkF[c] >= FED_LOW) continue;
     }
@@ -7044,6 +7089,79 @@ function treeGrow() {
   if (grown || retracted) treeDirty = true;
   /* widths ease every pass, so the paint is due on its own clock */
   if (PROF) { treeMs += performance.now() - t0; treePasses++; }
+}
+
+/* A live node of another vein within TREE_JOIN_R of a cell, or -1: not
+   the tip itself, its parent, or its grandparent, which stand within
+   reach of every step it takes; and not a node already fused to it. */
+function treeForeign(cx, cy, n) {
+  var r = Math.ceil(TREE_JOIN_R), r2 = TREE_JOIN_R * TREE_JOIN_R, best = -1, bd = 1e9;
+  var p1 = tpar[n], p2 = p1 >= 0 ? tpar[p1] : -1;
+  for (var dy = -r; dy <= r; dy++) {
+    var y = cy + dy; if (y < 0 || y >= GH) continue;
+    for (var dx = -r; dx <= r; dx++) {
+      var x = cx + dx; if (x < 0 || x >= GW) continue;
+      var m = tAt[y * GW + x];
+      if (m < 0 || !tstate[m] || m === n || m === p1 || m === p2 || tpar[m] === n || tjoin[m] === n) continue;
+      var ox = tx[m] - cx - 0.5, oy = ty[m] - cy - 0.5, d = ox * ox + oy * oy;
+      if (d <= r2 && d < bd) { bd = d; best = m; }
+    }
+  }
+  return best;
+}
+
+/* The flow walk. Sources are the flakes with a live node on their pad
+   (one node each, the first found). From each source a breadth-first
+   search over the live network — parent links and joins, both ways —
+   gives the hop distance and the step back; for every other source the
+   path back is walked and each node on it counts one pair. Undirected
+   and unweighted: the hop count of a chain of two-cell steps is its
+   length near enough, and what this decides is which veins carry, not
+   by how much. */
+function treeFlow() {
+  var i, k, e = S.exp, nsrc = e.nodes.length < TREE_SRC_MAX ? e.nodes.length : TREE_SRC_MAX;
+  for (i = 0; i < tN; i++) { tcarry[i] = 0; fDeg[i] = 0; }
+  for (k = 0; k < nsrc; k++) fSrcAt[k] = -1;
+  var nfound = 0;
+  for (i = 0; i < tN; i++) {
+    if (!tstate[i]) continue;
+    var fi = feedAt[(ty[i] | 0) * GW + (tx[i] | 0)];
+    if (fi >= 0 && fi < nsrc && fSrcAt[fi] < 0) { fSrcAt[fi] = i; nfound++; }
+    if (i > 0 && tstate[tpar[i]]) { fDeg[i]++; fDeg[tpar[i]]++; }
+    if (tjoin[i] >= 0 && tstate[tjoin[i]]) { fDeg[i]++; fDeg[tjoin[i]]++; }
+  }
+  if (nfound < 2) return;
+  fAdjStart[0] = 0;
+  for (i = 0; i < tN; i++) fAdjStart[i + 1] = fAdjStart[i] + fDeg[i];
+  for (i = 0; i < tN; i++) fDeg[i] = 0;
+  for (i = 0; i < tN; i++) {
+    if (!tstate[i]) continue;
+    var q = i > 0 && tstate[tpar[i]] ? tpar[i] : -1;
+    if (q >= 0) { fAdj[fAdjStart[i] + fDeg[i]++] = q; fAdj[fAdjStart[q] + fDeg[q]++] = i; }
+    var j = tjoin[i];
+    if (j >= 0 && tstate[j]) { fAdj[fAdjStart[i] + fDeg[i]++] = j; fAdj[fAdjStart[j] + fDeg[j]++] = i; }
+  }
+  for (var a = 0; a < nsrc; a++) {
+    var sa = fSrcAt[a];
+    if (sa < 0) continue;
+    for (i = 0; i < tN; i++) fDist[i] = -1;
+    var qh = 0, qt = 0;
+    fQueue[qt++] = sa; fDist[sa] = 0; fPrev[sa] = -1;
+    while (qh < qt) {
+      var u = fQueue[qh++], s0 = fAdjStart[u], s1 = s0 + fDeg[u];
+      for (k = s0; k < s1; k++) {
+        var v = fAdj[k];
+        if (fDist[v] >= 0) continue;
+        fDist[v] = fDist[u] + 1; fPrev[v] = u; fQueue[qt++] = v;
+      }
+    }
+    /* each pair once: walk back from the later source */
+    for (var b = a + 1; b < nsrc; b++) {
+      var sb = fSrcAt[b];
+      if (sb < 0 || fDist[sb] < 0) continue;
+      for (var w = sb; w >= 0; w = fPrev[w]) tcarry[w]++;
+    }
+  }
 }
 
 /* the band whose hairline is nearest below this width, for its colour */
@@ -7097,6 +7215,12 @@ function paintTree() {
     path.moveTo(x0, y0);
     path.quadraticCurveTo(tx[p], ty[p], x1, y1);
     if (tip) path.lineTo(tx[i], ty[i]);
+    /* the fusion: straight on to the vein this tip met */
+    var jn = tjoin[i];
+    if (jn >= 0 && !wallM[(ty[jn] | 0) * GW + (tx[jn] | 0)]) {
+      var jp = tstate[i] && tstate[jn] ? path : (ghost || (ghost = new Path2D()));
+      jp.moveTo(tx[i], ty[i]); jp.lineTo(tx[jn], ty[jn]);
+    }
   }
   vgctx.save();
   vgctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -7126,6 +7250,7 @@ function snapshotTree(fs) {
   fs.tx = tx.slice(0, tN); fs.ty = ty.slice(0, tN); fs.tpar = tpar.slice(0, tN);
   fs.tw = tw.slice(0, tN); fs.tstate = tstate.slice(0, tN); fs.tidle = tidle.slice(0, tN);
   fs.tborn = tborn.slice(0, tN); fs.tkids = tkids.slice(0, tN);
+  fs.tjoin = tjoin.slice(0, tN); fs.tcarry = tcarry.slice(0, tN);
 }
 
 function restoreTree(fs) {
@@ -7134,6 +7259,7 @@ function restoreTree(fs) {
   tN = fs.tN;
   tx.set(fs.tx); ty.set(fs.ty); tpar.set(fs.tpar); tw.set(fs.tw);
   tstate.set(fs.tstate); tidle.set(fs.tidle); tborn.set(fs.tborn); tkids.set(fs.tkids);
+  if (fs.tjoin) { tjoin.set(fs.tjoin); tcarry.set(fs.tcarry); } else { tjoin.fill(-1, 0, tN); tcarry.fill(0, 0, tN); }
   tAt.fill(-1); tcov.fill(0);
   for (var i = 0; i < tN; i++) treeCover(i);
   treeDirty = true;
@@ -12047,7 +12173,8 @@ function init() {
     tree: function () {
       var live = 0, wmax = 0, tips = 0;
       for (var i = 0; i < tN; i++) { if (tstate[i]) { live++; if (tw[i] > wmax) wmax = tw[i]; if (tkids[i] === 0) tips++; } }
-      return { n: tN, live: live, tips: tips, wmax: wmax, ms: treeMs, passes: treePasses,
+      var joins = 0, carry = 0; for (var q = 0; q < tN; q++) { if (tjoin[q] >= 0 && tstate[q]) joins++; if (tcarry[q] > 0 && tstate[q]) carry++; }
+      return { n: tN, live: live, tips: tips, wmax: wmax, ms: treeMs, passes: treePasses, joins: joins, carry: carry,
                x: tx.slice(0, tN), y: ty.slice(0, tN), par: tpar.slice(0, tN), w: tw.slice(0, tN), state: tstate.slice(0, tN) };
     },
     /* the pinned graph, as copies: the harness differences two samples to
