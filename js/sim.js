@@ -8539,7 +8539,12 @@ function strokeVeins(tc, sx, sy, mono) {
        width fades under the new over the accumulator's fifth of a
        second, which is a tube thinning. The punch was a second stroke of
        every path, and it doubled the composite. */
-    if (BODY) { if (BODY_FILL) for (k = 0; k < BODY_LEVELS.length; k++) if (bodyPath[k]) ctx.fill(bodyPath[k], 'evenodd'); }
+    if (BODY) {
+      if (BODY_FILL) for (k = 0; k < BODY_LEVELS.length; k++) if (bodyPath[k]) ctx.fill(bodyPath[k], 'evenodd');
+      /* the outline moves with the tissue, so it lives in the veil and
+         is punched like any moving stroke */
+      if (outlinePath) { ctx.lineWidth = VEIN_BANDS[1].w + 0.5; ctx.strokeStyle = '#fff'; ctx.stroke(outlinePath); }
+    }
     else if (lobeMaskPath) ctx.fill(lobeMaskPath);
     for (b = VEIN_BANDS.length - 1; b >= 0; b--) {
       if (!veinPath[b]) continue;
@@ -8603,14 +8608,13 @@ function strokeVeins(tc, sx, sy, mono) {
       ctx.strokeStyle = VEIN_BANDS[1].style;
       ctx.stroke(outlinePath);
     }
-    if (VEIN_GRAPH) {
-      paintVeinGraph();
-      if (vgc) {
-        ctx.setTransform(1, 0, 0, 1, 0, 0);
-        ctx.drawImage(vgc, 0, 0);
-        ctx.setTransform(sx, 0, 0, sy, 0, 0);
-      }
-    }
+    /* the graph is NOT in the veil: it never moves, so it needs no fade,
+       and a canvas laid source-over into the accumulator every rebuild
+       with no punch crept toward opaque — the two translucent bands and
+       every antialiased edge a little more solid each time. It is
+       composited straight onto the frame, after the veil; see the
+       composite. */
+    if (VEIN_GRAPH) paintVeinGraph();
   }
   if (lobePath && !BODY) {
     ctx.fillStyle = LOBE_STYLE;
@@ -8959,6 +8963,10 @@ function render() {
   ctx.globalAlpha = 1;
   if (!SHEET) paintWalls(ctx, cv.width / GW, cv.height / GH);
   ctx.drawImage(veilAcc, 0, 0);
+  /* the pinned graph, whole, over the veil: opaque where it is drawn and
+     laid once per frame onto a frame that is cleared, so nothing
+     accumulates */
+  if (BODY && VEIN_GRAPH && vgc) ctx.drawImage(vgc, 0, 0);
   strokeWhiskers(ctx, sx, sy);
   ctx.save();
   ctx.setTransform(sx, 0, 0, sy, 0, 0);
