@@ -4494,7 +4494,11 @@ function resizeCanvas() {
     /* the ink is the one canvas here that must NOT be wiped by a resize: it
        is the record, and a record that a window drag empties is not one.
        Rescaled through a copy, since sizing clears */
-    if (ink && ink.width && ink.height) {
+    if (BODY && ink) {
+      /* the body's record is an outline: refilled at the new size */
+      ink.width = w; ink.height = h;
+      recordBody(ictx, w / GW, h / GH);
+    } else if (ink && ink.width && ink.height) {
       var keep = document.createElement('canvas');
       keep.width = ink.width; keep.height = ink.height;
       keep.getContext('2d').drawImage(ink, 0, 0);
@@ -4637,6 +4641,7 @@ function resetVeinTemporal() {
   if (vactx && veilAcc.width) vactx.clearRect(0, 0, veilAcc.width, veilAcc.height);
   if (ictx && ink.width) ictx.clearRect(0, 0, ink.width, ink.height);   /* a new dish has no record */
   inked.fill(0);
+  recV.fill(0); recPath = null;
 }
 
 /* The other kind of cut: abandoning a replay, which puts a dish back that this
@@ -4661,6 +4666,11 @@ function resetVeinTemporal() {
 function snapshotVeinTemporal(fs) {
   fs.shpV = new Float32Array(shpV);
   fs.shpVB = new Float32Array(shpVB);
+  /* the body's own ease, and its record: the restore leaves dt at zero,
+     so a replay exit that did not put these back would trace the
+     abandoned replay's body over the verdict */
+  fs.bodyV = new Float32Array(bodyV);
+  fs.recV = new Float32Array(recV);
   fs.rdir = new Uint8Array(rdir);
   fs.rband = new Uint8Array(rband);
   fs.lmark = new Uint8Array(lmark);
@@ -4680,6 +4690,9 @@ function restoreVeinTemporal(fs) {
   if (!fs || !fs.shpV) { resetVeinTemporal(); return; }
   shpV.set(fs.shpV);
   if (fs.shpVB) shpVB.set(fs.shpVB);
+  if (fs.bodyV) bodyV.set(fs.bodyV); else bodyV.set(fs.shpV);
+  bodyRim();
+  if (fs.recV) recV.set(fs.recV); else recV.set(bodyV);
   rdir.set(fs.rdir);
   rband.set(fs.rband);
   lmark.set(fs.lmark);
@@ -4694,8 +4707,10 @@ function restoreVeinTemporal(fs) {
      path that skips that rebuild can composite another dish's ghosts */
   if (vactx && veilAcc.width) vactx.clearRect(0, 0, veilAcc.width, veilAcc.height);
   /* the ink holds the replay's lines over the original's, and there is no
-     way to take one out of the other: the record restarts from the restored
-     network, which the next rebuild inks whole */
+     way to take one out of the other: the line record restarts from the
+     restored network, which the next rebuild inks whole. The body's record
+     is a field, put back above, and the next rebuild refills the ink from
+     it. */
   if (ictx && ink.width) ictx.clearRect(0, 0, ink.width, ink.height);
   inked.fill(0);
 }
@@ -4713,7 +4728,11 @@ function smoothRidgeField() {
   /* the body's slower ease; zero under a wall, where the average would
      otherwise remember the tube a wall has just come down on */
   var kb = 1 - Math.exp(-dt / BODY_TAU);
-  for (var ib = 0; ib < NCELL; ib++) bodyV[ib] = wallM[ib] ? 0 : bodyV[ib] + (shpA[ib] - bodyV[ib]) * kb;
+  for (var ib = 0; ib < NCELL; ib++) {
+    var bv = wallM[ib] ? 0 : bodyV[ib] + (shpA[ib] - bodyV[ib]) * kb;
+    bodyV[ib] = bv;
+    if (bv > recV[ib]) recV[ib] = bv;
+  }
   bodyRim();
   if (k >= 0.999) { shpV.set(shpA); shpVB.set(shpB); return; }
   /* Swept whole. Skipping the cells where shpA and shpV already agree is exact
@@ -5855,19 +5874,32 @@ var veilAcc = null, vactx = null;     // the running max
 var ink = null, ictx = null;
 var INK_A = 0.30;                     // how much of the live vein's brightness the record keeps
 /* With the body drawn, the record is the TUBE FOOTPRINT rather than the
-   lines: every rebuild fills the supplied-tube level of the body into the
-   ink, opaque and in the tissue tone, so the ink is the union of every
-   place a tube has stood, no brighter for standing longer, and it is
-   composited under the live body at INK_A — the ghost of routes the
-   organism has withdrawn from, as an agar plate shows them. */
+   lines: recV is the most the eased body has ever stood at, per cell, and
+   its outline at the tube level, traced like the body's, is every place a
+   tube has stood. It is filled into the ink, opaque and in the tissue
+   tone, and composited under the live body at INK_A — the ghost of routes
+   the organism has withdrawn from, as an agar plate shows them.
+
+   A field and an outline rather than an accumulating canvas, because a
+   canvas cannot be made idempotent: an opaque fill of the same path
+   repeated compounds its antialiased edge toward full coverage, and a
+   stationary tube's recorded edge darkened and widened for standing still
+   (the failure the old recorder's per-cell-once rule guarded against).
+   The ink is cleared and refilled from the outline each rebuild, so it is
+   a cache of the outline and nothing more, and a resize refills it. */
 var REC_LEVEL = 2;                    // index into BODY_LEVELS: the tube, trail 12
 var REC_STYLE = '';
+var recV = new Float32Array(NCELL);
+var recPath = null;
 function recordBody(tc, sx, sy) {
-  if (!bodyPath[REC_LEVEL]) return;
   tc.save();
-  tc.setTransform(sx, 0, 0, sy, 0, 0);
-  tc.fillStyle = REC_STYLE;
-  tc.fill(bodyPath[REC_LEVEL], 'evenodd');
+  tc.setTransform(1, 0, 0, 1, 0, 0);
+  tc.clearRect(0, 0, tc.canvas.width, tc.canvas.height);
+  if (recPath) {
+    tc.setTransform(sx, 0, 0, sy, 0, 0);
+    tc.fillStyle = REC_STYLE;
+    tc.fill(recPath, 'evenodd');
+  }
   tc.restore();
 }
 /* Which cells the record already holds. A settled run is inked only where it
@@ -6290,7 +6322,7 @@ function traceMass(minTier, out) {
    whose corners straddle it, which isoMin/isoMax answer in two compares —
    and only the edges the crossing entered are walked, from the list the
    sweep collected, so the cost is the outline's length, not the plate's. */
-function traceIso(lv) {
+function traceIso(f, lv, mm) {
   var NE = NCELL, x, y, n, e;
   /* stamps rather than clears, one per level per rebuild; wrapped long
      before the integer runs out, with the one clear that then costs */
@@ -6301,10 +6333,11 @@ function traceIso(lv) {
     var row = y * GW;
     for (x = 0; x < GW - 1; x++) {
       n = row + x;
-      if (isoMin[n] >= lv || isoMax[n] < lv) continue;
-      var a = bodyV[n], b = bodyV[n + 1], c = bodyV[n + GW + 1], d = bodyV[n + GW];
+      if (mm && (isoMin[n] >= lv || isoMax[n] < lv)) continue;
+      var a = f[n], b = f[n + 1], c = f[n + GW + 1], d = f[n + GW];
       var ai = a >= lv, bi = b >= lv, ci = c >= lv, di = d >= lv;
       var cs = (ai ? 1 : 0) | (bi ? 2 : 0) | (ci ? 4 : 0) | (di ? 8 : 0);
+      if (cs === 0 || cs === 15) continue;
       /* edges: 0 top (H n), 1 right (V n+1), 2 bottom (H n+GW), 3 left (V n) */
       msEid[0] = n; msEid[1] = NE + n + 1; msEid[2] = n + GW; msEid[3] = NE + n;
       if (ai !== bi) { isoX[n] = x + 0.5 + (lv - a) / (b - a); isoY[n] = y + 0.5; }
@@ -6392,7 +6425,8 @@ function buildVeins() {
         isoMin[i] = bmin; isoMax[i] = bmax;
       }
     }
-    for (b = 0; b < BODY_LEVELS.length; b++) bodyPath[b] = traceIso(BODY_LEVELS[b]);
+    for (b = 0; b < BODY_LEVELS.length; b++) bodyPath[b] = traceIso(bodyV, BODY_LEVELS[b], true);
+    recPath = traceIso(recV, BODY_LEVELS[REC_LEVEL], false);
     for (b = 0; b < VEIN_BANDS.length; b++) veinPath[b] = null;
     lobePath = null; lobeMaskPath = null;
     veinIslands = 0;
