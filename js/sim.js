@@ -3851,6 +3851,10 @@ function step() {
   var e = S.exp;
   S.simT += DT;
   fieldDirty = true;
+  /* the explorers' buffer: where the last step's segments ended, so the
+     flush strokes each step's as one path. Noted at the start rather
+     than the end, since step() returns early on a finish. */
+  if (VEIN_TREE && exSteps < EX_STEPS && exN > (exSteps ? exStepEnd[exSteps - 1] : 0)) exStepEnd[exSteps++] = exN;
 
   /* Dish events, at most one a step and strictly in order, before anything
      else reads the masks — so the trail under a wall that has just appeared is
@@ -4182,6 +4186,14 @@ function step() {
       ah[k] = offTube ? h + (L >= R ? -SENS_A : SENS_A) : rnd() * Math.PI * 2;
       cell = oldIdx;
     } else {
+      /* only a tip out ahead of the stalks: one standing in a cell the
+         tree already covers is inside the body, and its wandering there
+         is not exploration */
+      if (atip[k] && VEIN_TREE && exN < EX_CAP && !tcov[idx]) {
+        var exi = exN * 4;
+        exSeg[exi] = ax[k]; exSeg[exi + 1] = ay[k]; exSeg[exi + 2] = nx; exSeg[exi + 3] = ny;
+        exN++;
+      }
       ax[k] = nx; ay[k] = ny; ah[k] = h;
       if (idx !== oldIdx) { occ[oldIdx]--; occ[idx]++; }
       cell = idx;
@@ -4839,6 +4851,8 @@ function initCanvas() {
   vmctx = veilMask.getContext('2d');
   ink = document.createElement('canvas');
   ictx = ink.getContext('2d');
+  exc = document.createElement('canvas');
+  exctx = exc.getContext('2d');
   off = document.createElement('canvas');
   octx = off.getContext('2d', { alpha: false });
   allocField();
@@ -4902,6 +4916,8 @@ function resizeCanvas() {
       ink.width = w; ink.height = h;
       ictx.drawImage(keep, 0, 0, w, h);
     } else if (ink) { ink.width = w; ink.height = h; }
+    /* the explorers' record likewise: a resize must not empty it */
+    exResize(w, h);
   }
 }
 
@@ -5037,6 +5053,8 @@ function resetVeinTemporal() {
   envT = S.simT;
   if (vactx && veilAcc.width) vactx.clearRect(0, 0, veilAcc.width, veilAcc.height);
   if (ictx && ink.width) ictx.clearRect(0, 0, ink.width, ink.height);   /* a new dish has no record */
+  if (exctx && exc.width) exctx.clearRect(0, 0, exc.width, exc.height);
+  exN = 0; exSteps = 0; exSrc = null;
   inked.fill(0);
   recV.fill(0); recPath = null;
   resetVeinGraph();
@@ -5095,6 +5113,14 @@ function snapshotVeinTemporal(fs) {
   fs.vAtt = vAtt.slice(0, veinN * 4);
   fs.vNext = vNext.slice(0, veinN); fs.vPrev = vPrev.slice(0, veinN);
   if (VEIN_TREE) snapshotTree(fs);
+  /* the explorers' record is a picture, not a field: kept as a copy of
+     the canvas, so a replay exit puts the trails back with the rest */
+  if (VEIN_TREE && exc && exc.width) {
+    var exKeep = document.createElement('canvas');
+    exKeep.width = exc.width; exKeep.height = exc.height;
+    exKeep.getContext('2d').drawImage(exc, 0, 0);
+    fs.exc = exKeep;
+  } else fs.exc = null;
 }
 
 /* The graph out of a snapshot; a snapshot without one (taken before the
@@ -5151,6 +5177,12 @@ function restoreVeinTemporal(fs) {
      it. */
   if (ictx && ink.width) ictx.clearRect(0, 0, ink.width, ink.height);
   inked.fill(0);
+  if (exctx && exc.width) {
+    exctx.clearRect(0, 0, exc.width, exc.height);
+    if (fs.exc) exctx.drawImage(fs.exc, 0, 0, exc.width, exc.height);
+  }
+  exSrc = fs.exc || null;
+  exN = 0; exSteps = 0;
 }
 
 function smoothRidgeField() {
@@ -6837,6 +6869,45 @@ var RET_IDLE  = 5.0;          /* seconds a tip stands unpulled before it retract
 var RET_DT    = 0.25;         /* seconds between one node's retraction and its parent's */
 var TREE_GHOST_A = 0.34;      /* a ghost's alpha */
 var TREE_GHOST_W = 0.5;       /* cells: a ghost's width, at most */
+/* ---- the explorers' trails ----
+   The tips are the detached bits out ahead of the stalks, and the
+   whiskers show only where each one is this frame. In the dish the
+   path an explorer took stays: the fine lace behind the front IS those
+   paths. So every step a tip takes is recorded, on the sim's clock, and
+   stroked once onto a record canvas as a ghost line that is never
+   erased. Segments are buffered in step() and flushed by the next
+   render, one path per step. A step is at most a cell (SPEED times a
+   slow factor and a supply factor, both at most one), and the
+   compaction swaps that relocate an agent do not pass through the
+   recording site, so no jump guard is needed. */
+var EX_CAP = 262144;                  /* segments the buffer holds between renders */
+var EX_STEPS = 4096;                  /* step boundaries the buffer holds between renders */
+var EX_A = 0.16;                      /* a trail's alpha: faint, since a well-walked cell is stroked many times */
+var EX_W = 0.34;                      /* cells: a trail's width */
+var exSeg = new Float32Array(EX_CAP * 4), exN = 0;
+/* where each step's segments end: step() notes exN as it begins, so the
+   flush can stroke each step's segments as one path */
+var exStepEnd = new Int32Array(EX_STEPS), exSteps = 0;
+var exc = null, exctx = null;         /* the record canvas */
+/* the record as put back by a restore, at its own size, kept until the
+   next segment is stroked: a resize after a restore draws from this
+   rather than from the once-resampled canvas, so the trails are
+   resampled once and not twice */
+var exSrc = null;
+
+/* the record resized: through a copy, or from the pristine source if
+   one stands, since sizing a canvas clears it */
+function exResize(w, h) {
+  if (!exc) return;
+  var src = exSrc;
+  if (!src && exc.width && exc.height) {
+    src = document.createElement('canvas');
+    src.width = exc.width; src.height = exc.height;
+    src.getContext('2d').drawImage(exc, 0, 0);
+  }
+  exc.width = w; exc.height = h;
+  if (src) exctx.drawImage(src, 0, 0, w, h);
+}
 var TREE_REPAINT = 0.2;       /* seconds between repaints while running */
 var TREE_WQ   = 4;            /* width quantisation, steps a cell */
 /* ---- anastomosis and flow ----
@@ -9778,8 +9849,47 @@ function render() {
   ctx.globalAlpha = BODY && VEIN_GRAPH ? REC_A : INK_A;
   ctx.drawImage(ink, 0, 0);
   ctx.globalAlpha = 1;
+  /* the explorers' record, under the walls as the ink is: a wall poured
+     across old tracks covers them */
+  if (VEIN_TREE && exc && exc.width) ctx.drawImage(exc, 0, 0);
   if (!SHEET) paintWalls(ctx, cv.width / GW, cv.height / GH);
   ctx.drawImage(veilAcc, 0, 0);
+  /* the explorers' trails: the steps the tips took since the last frame,
+     stroked onto their record for the NEXT frame to lay; this frame laid
+     the record before the walls, above */
+  if (VEIN_TREE && exc) {
+    if (exc.width !== cv.width || exc.height !== cv.height) exResize(cv.width, cv.height);
+    if (exN) {
+      exctx.save();
+      exctx.setTransform(exc.width / GW, 0, 0, exc.height / GH, 0, 0);
+      exctx.lineCap = 'butt';
+      exctx.globalAlpha = EX_A;
+      exctx.lineWidth = EX_W;
+      /* the opaque ink tone, so EX_A is the whole alpha: the band's
+         style carries an alpha of its own */
+      exctx.strokeStyle = VEIN_BANDS[0].ink;
+      /* one path per STEP, not one for the whole batch and not one per
+         segment: a path is composited once however many of its segments
+         overlap, so a cell walked twice in one frame's steps was as
+         pale as one walked once and the record's darkness depended on
+         how many steps a frame ran; and a stroke per segment was a
+         quarter-million draw calls after a stall. Within one step no
+         tip walks a cell twice, so a step's segments are one path and
+         every walk still counts once. */
+      var exq = 0, exg = 0;
+      while (exq < exN) {
+        var exEnd = exg < exSteps ? exStepEnd[exg++] : exN, exp = new Path2D();
+        if (exEnd > exN) exEnd = exN;
+        for (; exq < exEnd; exq++) {
+          var exb = exq * 4;
+          exp.moveTo(exSeg[exb], exSeg[exb + 1]); exp.lineTo(exSeg[exb + 2], exSeg[exb + 3]);
+        }
+        exctx.stroke(exp);
+      }
+      exN = 0; exSteps = 0; exSrc = null;
+      exctx.restore();
+    }
+  }
   /* the pinned graph, whole, over the veil: opaque where it is drawn and
      laid once per frame onto a frame that is cleared, so nothing
      accumulates */
