@@ -592,6 +592,144 @@ var COND_RATE  = 0.02;     // share of the way to the drive taken per sweep
    three. It was 46 first, which is high enough that the core outbid the food
    gradient for the agents that should have been following it. */
 var COND_LEVEL = 34.0;     // the tube a fully conductive cell maintains
+/* ---- the return signal: a find travels back down the tube ----
+   Nothing above travels backwards. Food is a weak static attractant, a
+   feeding agent lays a little more than a walking one, and conductivity is
+   earned cell by cell from the traffic a cell happens to carry — so a tip
+   that finds a flake tells the rest of the culture nothing, and the route it
+   came by is held exactly as hard as any other route with the same traffic.
+   The organism is not like that. Shuttle streaming carries a find back
+   through the network within a minute, flow reorganises toward the fed
+   route, and the exploratory branches beside it are drawn back into it:
+   the plate thickens one tube and thins the ones next to it, and it does
+   so from the food end, not from the core.
+
+   Two signals, then, meeting in the middle. fedF is the find: every feeding
+   agent stamps its cell with the share of the flake's food still there, so
+   a fresh flake shouts and a nearly-spent one whispers, along the same line
+   the hold and the pull already run down. bodyF is the body: the cytoplasm
+   within FED_CORE_R of the inoculation point, stamped 1 every sweep, which
+   is the mass the culture was seeded from and where nearly all of it still
+   sits. Each PROPAGATES as a relaxation: every pass a cytoplasm cell takes
+   the best of its own faded value and FED_STEP times the strongest of its
+   eight neighbours, so the front advances one cell per pass and the value
+   falls off as FED_STEP to the path length. Max, not sum, because a signal
+   is a message rather than a substance: two routes to the same flake do not
+   add up to a louder one.
+
+   The CONNECTION is where the two meet. Along the shortest path between
+   flake and body, fedF x bodyF is FED_STEP to the whole path length — the
+   same number at every cell, since what one signal loses the other has not
+   yet lost — and off that path it is lower by FED_STEP to the detour: how
+   many more cells the best route through this cell is than the best route
+   there is. A branch off the trunk, a parallel loop of the mesh, the far
+   side of the core, are all just detours of different lengths, and one
+   number says which they are. It is normalised per flake rather than
+   across the dish: the find carries a label, padF, which starts as the
+   product at the pad it was stamped on and is raised, cell by cell along
+   the signal's own path, to the largest product that path has crossed. So
+   the ratio fedF x bodyF / padF is 1 on any flake's trunk and pure
+   geometry everywhere else, whatever the flake's distance or how much of
+   it is left. Both halves of the label are needed. Stamped alone it goes
+   stale: a trunk thickens from the core end first, the product there
+   rises above what the pad knew when it stamped, and the ratio clamps to
+   one across the whole core-side mesh (measured: the blob covered every
+   tube within forty cells of the centre). Running-max alone normalises
+   each path to itself, so a parallel route that never touches the trunk
+   is a trunk in its own right. Together, the trunk carries its own current
+   best and everything else is measured against it. Raised to FED_SHARP,
+   that ratio is linkF, and a detour of n cells
+   costs FED_STEP to n x FED_SHARP: at these numbers a four-cell detour
+   keeps two thirds, a twenty-cell one an eighth, and the trunk is a
+   corridor a few cells either side of the shortest path.
+
+   Two things about the metric, both measured. A diagonal step costs
+   FED_STEP to root two, not FED_STEP: with all eight neighbours a step
+   apart the distance is Chebyshev, every path with the same max(dx, dy) is
+   shortest, and for a route that is not on an axis or a diagonal the tie
+   zone is a lens tens of cells wide — on EXP-01 a third of the cytoplasm,
+   17,000 cells, came out as trunk. Octile narrows the lens; it does not
+   close it, since a route at an odd angle still has its diagonal steps and
+   its straight ones in any order. What closes it is thickness: a cell
+   passes a signal on at a little less than the step when it is thin,
+   FED_THIN less at no trail than at FED_THICK, so among paths of one length
+   the thickest carries the signal best and is the one the link picks out.
+   A thin stretch of twenty cells against a thick one of the same length
+   costs a tenth at the sixteenth power, and once the link is thickening
+   the winner that is the whole of the contest. The weight is on trail
+   rather than conductivity because trail is what is thick NOW: the
+   feedback should close in the time a tube thickens, not the seven seconds
+   conductivity takes to notice.
+
+   Both ride CYTOPLASM (trail at or above FED_BODY) rather than committed
+   tube, and that is measured rather than chosen. On EXP-01 at forty
+   seconds, with three flakes being eaten, not one of their pads was joined
+   to the inoculation point through cells at IDLE_C — the discs' tube
+   components were 66 to 185 cells against a 200-cell route — while every
+   one was joined through cytoplasm at trail 3, in a body of nineteen
+   thousand cells. A signal gated on tube would never have left the pad.
+   Off cytoplasm a signal is multiplied by FED_OFF a pass and is gone in a
+   few, so it cannot cross bare agar or a wall.
+
+   FED_STEP is both the attenuation with distance and the clock a signal
+   dies on once its source stops. It has to be both: with the step at 1 a
+   ring of cells all at 1 would hold each other up forever, since each is
+   the other's best neighbour. At 0.995 the value two hundred cells from a
+   flake — the corners of EXP-01 to its centre — is 0.37, and with the
+   source gone a field's maximum falls by 0.995 a pass, fifteen passes a
+   second, a half-life of nine seconds; the link, being that to the
+   sixteenth, lapses in two. FED_FADE is only what an isolated cell does
+   with its own value between neighbours: lower than the step, so a cell
+   cannot remember more than its neighbours can bring it. FED_PASSES sets
+   the speed: two passes a sweep at KNOT_EVERY steps is fifteen cells a
+   second, so a corner flake reaches the centre of EXP-01 in about ten
+   seconds (measured: nine) — the organism's minute, at this dish's pace,
+   and slow enough to watch happen.
+
+   What the link DOES is two things, and both go through conductivity,
+   because that is the field that decides which tubes the culture keeps.
+
+   Fortify. On the connection the flux counts for more: q is multiplied by
+   1 + FED_GAIN x linkF before the saturating feedback, so a tube on the
+   route to a flake commits at a third of the traffic a tube anywhere else
+   needs. Through the flux and not as a floor on the drive, deliberately: a
+   floor would hold every cell the link reached, sheet and all, and
+   multiplying the flux holds only cells that carry traffic, which is what
+   a route is. Deposit on the connection rises with it (FED_LAY_GAIN,
+   applied where the agent steps), so the thickening lands on the trunk and
+   on nothing else.
+
+   Shrink. A cytoplasm cell within FED_R of the trunk — a cell whose link
+   is at least FED_HI — that is itself well off it, link under FED_LOW, is
+   SHADED: a branch that leaves the connection and goes nowhere the
+   connection does not already go. Its conductivity loses an extra
+   FED_SHADE a sweep and the traffic through it lays FED_SHADE_DEP less, so
+   it thins from both ends at once. The body's own source disc is never
+   shaded, since it is the body; and the far side of the core, which is a
+   long detour from any flake, is not within FED_R of a trunk either, so
+   the shade stays on the flanks of the route — measured, not assumed.
+
+   The route is safe from its own shade by construction: linkF is 1 along
+   the shortest path and the trunk's corridor keeps well over FED_LOW, so
+   the thing shaded is only ever what is beside it. The winner-take-all is
+   the same one Tero's model has; this only points it at the fed route. */
+var FED_BODY     = 3.0;   // trail at which a cell is cytoplasm a signal can ride
+var FED_STEP     = 0.995; // share of the strongest neighbour a cell takes per pass, straight
+var FED_STEP_D   = Math.pow(FED_STEP, Math.SQRT2); // ...and diagonally: octile, not Chebyshev
+var FED_THIN     = 0.005; // extra share lost per cell at no trail, against FED_THICK
+var FED_THICK    = 18.0;  // trail at which a cell passes the signal at the full step (= ADRIFT_T)
+var FED_FADE     = 0.90;  // what a cell keeps of its own value per pass, on cytoplasm
+var FED_OFF      = 0.50;  // ...and off it, where a signal dies in a few passes
+var FED_PASSES   = 2;     // relaxation passes per slow sweep: cells per KNOT_EVERY steps
+var FED_CORE_R   = 16;    // cells around the inoculation point that are the body signal's source
+var FED_SHARP    = 16;    // exponent on the detour ratio: how tight a corridor the trunk is
+var FED_GAIN     = 2.0;   // flux multiplier on the connection, before the feedback
+var FED_LAY_GAIN = 0.50;  // extra deposit per step on the connection
+var FED_R        = 8;     // cells: how far the connection's shade reaches
+var FED_HI       = 0.60;  // link at which a cell is trunk enough to cast a shade
+var FED_LOW      = 0.25;  // link below which a cell in that shade is shaded
+var FED_SHADE    = 0.03;  // extra share of conductivity a shaded cell loses per sweep
+var FED_SHADE_DEP = 0.50; // share of deposit traffic through a shaded cell does not lay
 /* ---- the vein scar: where a tube HAS been ----
    The residual the dish has been missing. Three fields already say something
    about a cell and all three are short: trail is the tube now, the trace is
@@ -1936,6 +2074,22 @@ var condF = new Float32Array(NCELL);
 /* Where a tube has been, long after it has gone — the one field in the dish
    with a memory measured in minutes. Sensed. See the scar block. */
 var scarF = new Float32Array(NCELL);
+/* The return signal, and its shade. fedF is what the plate knows of a find
+   here, sourced on the pads and relaxed back through the cytoplasm, and
+   padF is the label it carries — the body signal at the pad it came from;
+   bodyF is the body, sourced at the core and relaxed outward. Each has the
+   other half of a double buffer (fedB, padB, bodyB), so a pass reads one
+   sweep's values and writes the next and no cell's answer depends on where
+   it sits in the scan; the spare halves double as the dilation's scratch.
+   linkF is the connection — the two signals' product against the label,
+   sharpened — and shadeF marks the cells standing beside it. Not sensed,
+   any of them: the organism senses the tube, and these are among the
+   reasons the tube is the shape it is. See the return-signal block. */
+var fedF = new Float32Array(NCELL), fedB = new Float32Array(NCELL);
+var padF = new Float32Array(NCELL), padB = new Float32Array(NCELL);
+var bodyF = new Float32Array(NCELL), bodyB = new Float32Array(NCELL);
+var linkF = new Float32Array(NCELL);
+var shadeF = new Uint8Array(NCELL);
 var nodeAt = new Int16Array(NCELL);    // cell -> node index, -1 for none
 /* And the same map at the fan's radius: which flake an agent standing here is
    feeding on, which is a wider disc than the flake itself because a pad
@@ -2410,6 +2564,8 @@ function buildDish(e) {
   trail.fill(0); tmpF.fill(0); stalkF.fill(0); foodF.fill(0);
   cueF.fill(0); retF.fill(0); slimeF.fill(0); knotF.fill(0); traceF.fill(0);
   flowF.fill(0); condF.fill(0); scarF.fill(0);
+  fedF.fill(0); fedB.fill(0); padF.fill(0); padB.fill(0);
+  bodyF.fill(0); bodyB.fill(0); linkF.fill(0); shadeF.fill(0);
   nodeAt.fill(-1);
   feedAt.fill(-1);
 
@@ -3312,8 +3468,15 @@ function slowFields() {
     var fl = flowF[i], cd = condF[i];
     if (fl > 0 || cd > 0) {
       var q = fl * COND_Q, drive = 0;
+      /* the return signal: traffic on the connection counts for more, and
+         a cell in the connection's shade loses conductivity faster than an
+         idle one would — both from the previous sweep's answer, which is the
+         one that exists when this cell is read. See the return-signal block. */
+      var lk = linkF[i];
+      if (lk > 0) q *= 1 + FED_GAIN * lk;
       if (q > 0) { var q2 = q * q; drive = q2 / (1 + q2); }
       cd += COND_RATE * (drive - cd);
+      if (shadeF[i]) cd *= 1 - FED_SHADE;
       cd = wall ? 0 : (cd < 0.002 ? 0 : cd);
       condF[i] = cd;
       flowF[i] = 0;
@@ -3331,6 +3494,176 @@ function slowFields() {
       sc = wall ? 0 : sc * SCAR_FADE;
       scarF[i] = sc < 0.004 ? 0 : sc;
     }
+  }
+  fedSweep();
+}
+
+/* The return signal's own pass: source the body, relax both signals through
+   the cytoplasm, take their product against the label, and work out what
+   stands beside the connection. Runs at the end of every slow sweep, after
+   the conductivity has been brought up to date. See the return-signal block
+   in section 1 for what each step is for.
+
+   The relaxation is double-buffered rather than in place. In place, a cell
+   would read neighbours already updated this pass on one side and not yet
+   on the other, and the front would run a whole row a pass in the scan
+   direction and one cell in the other — a signal that travels faster
+   south-east than north-west is not a signal, and a field that depends on
+   the scan order is one the determinism guarantee (section 0b) cannot
+   cover. Two arrays and a swap cost nothing the sim notices.
+
+   Almost all of the dish is agar carrying no signal, and the loop pays for
+   that as it does for the other slow fields: one load and a test. The
+   eight neighbour reads are spent only on cytoplasm. */
+function fedRelax(src, dst, lsrc, ldst) {
+  var i, x, y, row;
+  for (y = 0; y < GH; y++) {
+    row = y * GW;
+    var up = y > 0 ? row - GW : -1;
+    var dn = y < GH - 1 ? row + GW : -1;
+    for (x = 0; x < GW; x++) {
+      i = row + x;
+      var v = src[i];
+      if (trail[i] < FED_BODY || wallM[i]) {
+        /* off cytoplasm: the signal has nothing to ride and dies */
+        v *= FED_OFF;
+        dst[i] = v < 0.004 ? 0 : v;
+        if (ldst) ldst[i] = lsrc[i];
+        continue;
+      }
+      /* the strongest neighbour, and which — the label follows it. Straight
+         neighbours first at the straight step, then the diagonals at the
+         diagonal one, and the neighbour order is fixed, so a tie is broken
+         the same way on every machine, which is what the label needs to be
+         deterministic. */
+      var m = 0, mi = -1, n;
+      if (up >= 0) { n = src[up + x]; if (n > m) { m = n; mi = up + x; } }
+      if (x > 0) { n = src[i - 1]; if (n > m) { m = n; mi = i - 1; } }
+      if (x < GW - 1) { n = src[i + 1]; if (n > m) { m = n; mi = i + 1; } }
+      if (dn >= 0) { n = src[dn + x]; if (n > m) { m = n; mi = dn + x; } }
+      m *= FED_STEP;
+      var md = 0, mdi = -1;
+      if (up >= 0) {
+        if (x > 0) { n = src[up + x - 1]; if (n > md) { md = n; mdi = up + x - 1; } }
+        if (x < GW - 1) { n = src[up + x + 1]; if (n > md) { md = n; mdi = up + x + 1; } }
+      }
+      if (dn >= 0) {
+        if (x > 0) { n = src[dn + x - 1]; if (n > md) { md = n; mdi = dn + x - 1; } }
+        if (x < GW - 1) { n = src[dn + x + 1]; if (n > md) { md = n; mdi = dn + x + 1; } }
+      }
+      md *= FED_STEP_D;
+      if (md > m) { m = md; mi = mdi; }
+      /* and the receiving cell's thickness: a thin cell passes a little less on */
+      var tw = trail[i];
+      if (tw < FED_THICK) m *= 1 - FED_THIN * (1 - tw / FED_THICK);
+      v *= FED_FADE;
+      if (m > v) {
+        dst[i] = m < 0.004 ? 0 : m;
+        if (ldst) {
+          /* the label: the largest product the path has crossed, this cell
+             included — bodyF is not written by this pass, so it is the
+             same field for every cell however the scan is ordered */
+          var lb = lsrc[mi], pr = m * bodyF[i];
+          ldst[i] = pr > lb ? pr : lb;
+        }
+      } else {
+        dst[i] = v < 0.004 ? 0 : v;
+        if (ldst) {
+          /* a cell keeping its own value keeps its label, raised to its own
+             product if the body signal under it has risen since — so the
+             ratio is bounded by one everywhere, rather than clamped there */
+          var lk2 = lsrc[i], pr2 = v * bodyF[i];
+          ldst[i] = pr2 > lk2 ? pr2 : lk2;
+        }
+      }
+    }
+  }
+}
+
+function fedSweep() {
+  var i, x, y, pass, row, t;
+  /* The body's source: cytoplasm within FED_CORE_R of the inoculation point
+     is the body, at 1, every sweep. */
+  var inoc = S.exp.inoc, cx = inoc.x | 0, cy = inoc.y | 0, r2 = FED_CORE_R * FED_CORE_R;
+  var y0 = cy - FED_CORE_R, y1 = cy + FED_CORE_R, x0 = cx - FED_CORE_R, x1 = cx + FED_CORE_R;
+  if (y0 < 0) y0 = 0;
+  if (y1 > GH - 1) y1 = GH - 1;
+  if (x0 < 0) x0 = 0;
+  if (x1 > GW - 1) x1 = GW - 1;
+  for (y = y0; y <= y1; y++) {
+    row = y * GW;
+    for (x = x0; x <= x1; x++) {
+      var dx = x - cx, dy = y - cy;
+      if (dx * dx + dy * dy <= r2 && trail[row + x] >= FED_BODY && !wallM[row + x]) bodyF[row + x] = 1;
+    }
+  }
+  for (pass = 0; pass < FED_PASSES; pass++) {
+    fedRelax(fedF, fedB, padF, padB);
+    t = fedF; fedF = fedB; fedB = t;
+    t = padF; padF = padB; padB = t;
+    fedRelax(bodyF, bodyB, null, null);
+    t = bodyF; bodyF = bodyB; bodyB = t;
+  }
+
+  /* The connection: the product of the two signals against the label, to
+     the FED_SHARP. Cells with either signal missing, or no label, are not
+     on any connection and get 0; a ratio over 1 — a label stamped on the
+     far side of a pad — is a trunk and is clamped to one. */
+  for (i = 0; i < NCELL; i++) {
+    var f = fedF[i], lk = 0;
+    if (f > 0) {
+      var b = bodyF[i], pd = padF[i];
+      if (b > 0 && pd > 0) {
+        lk = f * b / pd;
+        if (lk > 1) lk = 1;
+        lk = Math.pow(lk, FED_SHARP);
+        if (lk < 0.001) lk = 0;
+      }
+    }
+    linkF[i] = lk;
+  }
+
+  /* Where the trunk is within FED_R: a mask of link >= FED_HI dilated by two
+     separable passes, a row pass into bodyB and a column pass into fedB,
+     like rnear in buildVeins — both spare halves are free until the next
+     sweep. Each pass spreads only from cells that have something to spread,
+     so the cost is a window per trunk cell rather than a window per cell of
+     the dish. */
+  var nearH = bodyB, near = fedB;
+  nearH.fill(0);
+  for (y = 0; y < GH; y++) {
+    row = y * GW;
+    for (x = 0; x < GW; x++) {
+      if (linkF[row + x] < FED_HI) continue;
+      var xa = x - FED_R, xb = x + FED_R;
+      if (xa < 0) xa = 0;
+      if (xb > GW - 1) xb = GW - 1;
+      for (var xx = xa; xx <= xb; xx++) nearH[row + xx] = 1;
+    }
+  }
+  near.fill(0);
+  for (y = 0; y < GH; y++) {
+    row = y * GW;
+    for (x = 0; x < GW; x++) {
+      if (nearH[row + x] === 0) continue;
+      var ya = y - FED_R, yb = y + FED_R;
+      if (ya < 0) ya = 0;
+      if (yb > GH - 1) yb = GH - 1;
+      for (var yy = ya; yy <= yb; yy++) near[yy * GW + x] = 1;
+    }
+  }
+
+  /* And the shade: cytoplasm beside the trunk that is well off it, and not
+     the body's own source. Read by the next sweep's conductivity update and
+     by the deposit rule until then. */
+  for (i = 0; i < NCELL; i++) {
+    var sh = 0;
+    if (near[i] !== 0 && linkF[i] < FED_LOW && trail[i] >= FED_BODY && !wallM[i]) {
+      x = i % GW; y = (i - x) / GW;
+      var ddx = x - cx, ddy = y - cy;
+      if (ddx * ddx + ddy * ddy > r2) sh = 1;
+    }
+    shadeF[i] = sh;
   }
 }
 
@@ -3818,8 +4151,25 @@ function step() {
        moment the flake is engulfed. */
     var kn = knotF[cell];
     var dep = 0;
-    if (feeding) dep = stepDeposit * FEED_LAY;
+    if (feeding) {
+      dep = stepDeposit * FEED_LAY;
+      /* and the return signal is sourced here: the pad says how much of the
+         flake is still there, and the rest of the plate hears it, labelled
+         with the body signal standing at this cell so that the connection
+         normalises to this flake. A max and a copy, so the order the pad's
+         agents are visited in cannot matter. */
+      var fsrc = foodLeft(fi);
+      if (fedF[cell] < fsrc) { fedF[cell] = fsrc; padF[cell] = fsrc * bodyF[cell]; }
+    }
     else if (!blocked) dep = stepDeposit * ((tip || agoal[k]) ? TIP_LAY : spd / SPEED);
+    /* The connection to a flake thickens under the traffic it carries, and
+       a cell in its shade thins under its own. Both read the last slow
+       sweep's answer, which is the only one there is. */
+    if (dep > 0) {
+      var lkc = linkF[cell];
+      if (lkc > 0) dep *= 1 + FED_LAY_GAIN * lkc;
+      if (shadeF[cell]) dep *= 1 - FED_SHADE_DEP;
+    }
     /* Traffic through a marked junction leaves more of itself there than
        traffic through a tube does, and leaves it whether or not the agent
        found a free cell to step into: an agent stalled in a crossroads is
@@ -8414,8 +8764,10 @@ var GHOST_ENT = 9;
    6: settling — a dish with `refine` runs on past its last node.
    7: the stalk floors at STALK_W, and idle tube is withdrawn from.
    8: followers stay in the tube, and new cytoplasm arrives on it.
-   9: the hold on a flake and its pull run down with the food left. */
-var SIM_V = 9;
+   9: the hold on a flake and its pull run down with the food left.
+   10: the return signal — a find travels back through the cytoplasm, holds
+       the route it came by and shades the tubes beside it. */
+var SIM_V = 10;
 
 function ghostSig() {
   var h = mix32(SIM_V, Math.round(CUE_CAP * 1000), Math.round(CUE_REGEN * 1000));
@@ -8426,6 +8778,15 @@ function ghostSig() {
                Math.round(RETW * 1000) ^ Math.round(TURN * 1000));
   h = mix32(h, Math.round(SPEED * 1000) ^ Math.round(TRAIL_MAX * 10),
                Math.round(SPEED_REF * 100) ^ EXPERIMENTS.length);
+  /* the return signal's constants, all of them: each one changes the dish */
+  h = mix32(h, Math.round(FED_STEP * 10000) ^ (FED_PASSES << 16) ^ (FED_R << 20),
+               Math.round(FED_GAIN * 1000) ^ (Math.round(FED_LAY_GAIN * 1000) << 12));
+  h = mix32(h, (FED_SHARP << 12) ^ (FED_CORE_R << 20) ^ Math.round(FED_LOW * 1000),
+               Math.round(FED_HI * 1000) ^ (Math.round(FED_SHADE * 10000) << 12) ^
+               (Math.round(FED_SHADE_DEP * 1000) << 20));
+  h = mix32(h, Math.round(FED_BODY * 1000) ^ (Math.round(FED_FADE * 1000) << 12),
+               Math.round(FED_OFF * 1000) ^ (Math.round(FED_THIN * 10000) << 12) ^
+               (Math.round(FED_THICK * 10) << 20));
   return h & 0xFF;
 }
 
@@ -8667,6 +9028,11 @@ function exitReplay() {
     if (FINAL_STATE.traceF) traceF.set(FINAL_STATE.traceF);
     if (FINAL_STATE.condF) condF.set(FINAL_STATE.condF);
     if (FINAL_STATE.scarF) scarF.set(FINAL_STATE.scarF);
+    if (FINAL_STATE.fedF) fedF.set(FINAL_STATE.fedF);
+    if (FINAL_STATE.padF) padF.set(FINAL_STATE.padF);
+    if (FINAL_STATE.bodyF) bodyF.set(FINAL_STATE.bodyF);
+    if (FINAL_STATE.linkF) linkF.set(FINAL_STATE.linkF);
+    if (FINAL_STATE.shadeF) shadeF.set(FINAL_STATE.shadeF);
     nAgents = FINAL_STATE.n;
     fieldDirty = true;
     ax.set(FINAL_STATE.ax); ay.set(FINAL_STATE.ay);
@@ -9383,6 +9749,12 @@ function showResult(won) {
        more state worth restoring than tmpF does. */
     condF: new Float32Array(condF),
     scarF: new Float32Array(scarF),
+    /* and the return signal with its shade, for the same reason as the
+       conductivity: the harness reads them, and the finished plate's should
+       be the finished plate's */
+    fedF: new Float32Array(fedF), padF: new Float32Array(padF),
+    bodyF: new Float32Array(bodyF), linkF: new Float32Array(linkF),
+    shadeF: new Uint8Array(shadeF),
     n: nAgents,
     ax: ax.slice(0, nAgents), ay: ay.slice(0, nAgents),
     ah: ah.slice(0, nAgents), atip: atip.slice(0, nAgents),
@@ -9960,6 +10332,12 @@ function init() {
        the game reads either of them back. */
     cond: function () { return Float32Array.prototype.slice.call(condF); },
     scar: function () { return Float32Array.prototype.slice.call(scarF); },
+    /* the return signal, the body signal, the connection they make and its
+       shade — see the return-signal block */
+    fed: function () { return Float32Array.prototype.slice.call(fedF); },
+    bodySig: function () { return Float32Array.prototype.slice.call(bodyF); },
+    linkSig: function () { return Float32Array.prototype.slice.call(linkF); },
+    shade: function () { return new Uint8Array(shadeF); },
     /* sim seconds per real second — the DISH clock, which is itself about
        REAL_X times life. Same path the on-screen control uses, so the button
        label and HUD follow a harness that sets it directly, and fractional
