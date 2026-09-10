@@ -5935,8 +5935,8 @@ var jvis = new Int32Array(NCELL), jstamp = 0;   // cells a climb has stood on, b
 var OUF_CAP = 16384 + LW * LH;
 var ouf = new Int32Array(OUF_CAP), esz = new Int32Array(OUF_CAP);
 var opar = new Int32Array(NCELL), odist = new Float32Array(NCELL);
-var olab = new Int32Array(NCELL);   // the piece each searched cell belongs to
-var odone = new Uint8Array(OUF_CAP);  // pieces that have made their contact
+var olab = new Int32Array(NCELL);   // the piece each searched cell belongs to (its seed's, before any union)
+var oset = new Uint8Array(NCELL);   // cells the search has settled: their distance and label are final
 var opath = new Int32Array(4096);
 /* The search is weighted: a step costs its length times a factor that is 1
    on trail at PATH_T or more and PATH_K + 1 on none, so the shortest path
@@ -6637,15 +6637,19 @@ function buildVeins() {
          a cell another piece has claimed — a drawn cell, or tissue its
          front reached first — the two are joined: the path is this cell's
          chain of parents back to its seed, then the met cell's back to
-         its own, and the pieces are united. A piece stops expanding at
-         its first contact. What it met may itself be detached; it is
-         united with that, and that piece goes on to meet something in its
-         turn, so the pieces chain to the main one, or, if none of a
-         cluster ever meets it, are counted as islands at the end. The
+         its own, and the pieces are united. What it met may itself be
+         detached: the two go on as one cluster, every cell of it still
+         expanding, until the cluster meets the main piece, or, if it
+         never does, is counted as an island at the end. A piece does NOT
+         stop at its first contact: its later cells, settled but never
+         expanded, walled the rest of the cluster in, and a cluster whose
+         only open front lay behind that wall never reached the main piece
+         though tissue joined them. Only cells of the main cluster stop. The
          work is the tissue AROUND the detached pieces, not the whole
          body: searching outward from the main piece had to cover the
          body to reach a piece at the far edge, every rebuild. */
       opar.fill(-1);
+      oset.fill(0);
       hn = 0;
       var seeds = 0;
       for (i = 0; i < NCELL; i++) {
@@ -6658,13 +6662,15 @@ function buildVeins() {
         var tR = ufind(tE);
         opar[i] = i; odist[i] = 0; olab[i] = tR;
         if (tR !== mainE) { heapPush(0, i); seeds++; }
+        else oset[i] = 1;   /* the main piece never expands; its cells are settled from the start */
       }
-      for (i = 0; i < NENT; i++) odone[i] = 0;
       while (hn > 0 && seeds > 0) {
         var qk = hk[0], qc = heapPop();
-        if (qk > odist[qc]) continue;   /* a stale entry */
-        var qL = ufind(olab[qc]);
-        if (odone[qL] || qL === ufind(mainE)) continue;
+        if (qk > odist[qc] || oset[qc]) continue;   /* a stale entry, or settled already */
+        oset[qc] = 1;
+        var qO = olab[qc];
+        var qL = ufind(qO);
+        if (qL === ufind(mainE)) continue;
         var qx = qc % GW, qy = (qc / GW) | 0, met = -1;
         for (var oy1 = -1; oy1 <= 1 && met < 0; oy1++) {
           var ny1 = qy + oy1;
@@ -6675,7 +6681,11 @@ function buildVeins() {
             if (nx1 < 1 || nx1 >= GW - 1) continue;
             var nq = ny1 * GW + nx1;
             if (wallM[nq]) continue;
-            if (opar[nq] >= 0) {
+            /* contact is with a SETTLED cell of another piece: its distance
+               and label are final. A tentative cell is relaxed instead,
+               whoever found it first, since the first discovery is not the
+               cheapest when a diagonal costs more than a side */
+            if (oset[nq]) {
               if (ufind(olab[nq]) !== qL) { met = nq; break; }
               continue;
             }
@@ -6683,7 +6693,8 @@ function buildVeins() {
             if (tq < CONN_T) continue;
             var wq = tq >= PATH_T ? 1 : 1 + PATH_K * (1 - tq / PATH_T);
             var nd = qk + (ox1 && oy1 ? 1.4142135 : 1) * wq;
-            opar[nq] = qc; odist[nq] = nd; olab[nq] = olab[qc]; heapPush(nd, nq);
+            if (opar[nq] >= 0 && nd >= odist[nq]) continue;
+            opar[nq] = qc; odist[nq] = nd; olab[nq] = qO; heapPush(nd, nq);
           }
         }
         if (met < 0) continue;
@@ -6699,7 +6710,6 @@ function buildVeins() {
         opath[pn++] = pcur;
         var qR = ufind(olab[met]);
         uunion(qL, qR);
-        odone[qL] = 1;
         var pb = rchain[opath[0]] ? rband[opath[0]] : 0;
         if (pb > 4) pb = 0;
         var pa = vseg[pb], pw = vsegN[pb];
