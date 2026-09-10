@@ -7039,17 +7039,25 @@ function treeGrow() {
     if (cx < 1 || cy < 1 || cx >= GW - 1 || cy >= GH - 1) continue;
     c = cy * GW + cx;
     if (wallM[c] || trail[c] < lv) continue;
-    /* another vein within reach of the step: fuse with it instead of
-       stepping. Not this vein's own last few nodes, which are always
-       within reach. */
-    var occ = treeForeign(cx, cy, n);
-    if (occ >= 0) {
-      tjoin[n] = occ; grown++;
-      /* the attractors between the two are spent by the fusion, or they
-         would pull this tip forever */
-      treeCoverR(n, TREE_JOIN_R + TREE_KILL);
-      continue;
+    /* a TIP with another vein within reach of its step fuses with it
+       instead of stepping — not this vein's own last few nodes, which
+       are always within reach. An inner node growing a new branch does
+       not fuse: a join would end its growing for good, and the branch
+       point's job is to branch. It steps, and the child is the tip that
+       may fuse next pass. */
+    if (tkids[n] === 0) {
+      var occ = treeForeign(cx, cy, n);
+      if (occ >= 0) {
+        tjoin[n] = occ; grown++;
+        /* the attractors between the two are spent by the fusion, or they
+           would pull this tip forever */
+        treeCoverR(n, TREE_JOIN_R + TREE_KILL);
+        continue;
+      }
     }
+    /* not into another vein's cell */
+    var occ2 = tAt[c];
+    if (occ2 >= 0 && occ2 !== n && tstate[occ2]) continue;
     if (treeAdd(nx, ny, n) < 0) break;
     grown++;
   }
@@ -7069,10 +7077,13 @@ function treeGrow() {
   }
 
   /* --- the retraction: an idle tip not on food or the fed corridor;
-     and any node a wall has come down on, tip or not, at once --- */
+     and any node a wall has come down on, tip or not, at once. A wall
+     poured across a join's middle severs the join: the tip is a plain
+     tip again and idles out like one --- */
   var retracted = 0;
   for (i = tN - 1; i > 0; i--) {
     if (!tstate[i]) continue;
+    if (tjoin[i] >= 0 && !treeClear(tx[i], ty[i], tx[tjoin[i]], ty[tjoin[i]])) { tjoin[i] = -1; treeDirty = true; }
     c = (ty[i] | 0) * GW + (tx[i] | 0);
     if (!wallM[c]) {
       if (tkids[i] !== 0 || tidle[i] < RET_IDLE) continue;
@@ -7240,7 +7251,7 @@ function paintTree() {
     if (tip) path.lineTo(tx[i], ty[i]);
     /* the fusion: straight on to the vein this tip met */
     var jn = tjoin[i];
-    if (jn >= 0 && !wallM[(ty[jn] | 0) * GW + (tx[jn] | 0)]) {
+    if (jn >= 0 && !wallM[(ty[jn] | 0) * GW + (tx[jn] | 0)] && treeClear(tx[i], ty[i], tx[jn], ty[jn])) {
       var jp = tstate[i] && tstate[jn] ? path : (ghost || (ghost = new Path2D()));
       jp.moveTo(tx[i], ty[i]); jp.lineTo(tx[jn], ty[jn]);
     }
