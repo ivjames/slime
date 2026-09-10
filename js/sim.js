@@ -6213,7 +6213,7 @@ function bodyOutlines() {
 function outlineKeep(cell) {
   var lc = (((cell / GW) | 0) >> 1) * LW + ((cell % GW) >> 1);
   var lab = compL[lc];
-  return lab > 0 && !compVein[lab];
+  return lab > 0 && !compVein[lab] && compSize[lab] >= OUTLINE_MIN_L;
 }
 
 /* one chain of n points into the tube paths: the half-widths under its
@@ -6495,7 +6495,15 @@ var VEIN_HOLE_L = VEIN_HOLE >> 2;
 var compL = new Int16Array(LW * LH);         /* piece label per lattice cell, 0 none */
 var COMP_MAX = 4096;
 var compVein = new Uint8Array(COMP_MAX);     /* a pinned vein stands in this piece */
+var compSize = new Int32Array(COMP_MAX);     /* lattice cells in the piece */
 var compN = 0;
+/* Only a piece the size of a drop is outlined. The lattice counts a cell
+   only when its whole block is tissue, so a network of thin tubes breaks
+   into hundreds of pieces a few cells each, and every one that happened
+   to have no pinned point on it flashed its outline for a rebuild — the
+   perimeter of the tubes, blinking. The drop is over a thousand lattice
+   cells; a fragment is a handful. */
+var OUTLINE_MIN_L = 150;
 var outlinePath = null;
 
 /* The mask at the tube level, with its pinholes filled. Outside is what a
@@ -6546,8 +6554,10 @@ function bodyMask() {
     var lab = compN < COMP_MAX - 1 ? ++compN : compN;
     qh = qt = 0;
     compL[n] = lab; holeQ[qt++] = n;
+    if (lab === compN && qh === 0) compSize[lab] = 0;
     while (qh < qt) {
       c = holeQ[qh++];
+      compSize[lab]++;
       lx = c % LW; ly = (c / LW) | 0;
       if (lx > 0 && holeL[c - 1] === 1 && !compL[c - 1]) { compL[c - 1] = lab; holeQ[qt++] = c - 1; }
       if (lx < LW - 1 && holeL[c + 1] === 1 && !compL[c + 1]) { compL[c + 1] = lab; holeQ[qt++] = c + 1; }
@@ -6817,6 +6827,70 @@ function foldOnto(p, u, i, k, dir) {
 
 /* Which vein a point index belongs to. Veins are laid down in order, so
    their starts are sorted and this is a binary search. */
+/* ---- the free ends reach ----
+   A stretch snaps onto what is near it WHEN it is pinned, and never
+   again: an end that found nothing then stayed a free end though a vein
+   was pinned a cell from it a second later, and the picture was a
+   network of pieces with gaps between them — the breaks, every one
+   ending a cell or three short of the line it belonged to. So every
+   rebuild each vein's free ends look again: the nearest pinned point of
+   another vein within VEIN_SNAP, and if there is one a connector of two
+   frozen points is pinned from the end to it and the end is attached
+   for good. An end on the body (-2) reaches too — standing on tissue is
+   not being joined to a line. The cost is the free ends times the snap
+   disc, a few hundred cells a rebuild. */
+var REACH_MAX = 64;                          /* connectors pinned per rebuild, so a flurry is spread */
+function reachFreeEnds() {
+  var made = 0;
+  for (var v = 0; v < veinN && made < REACH_MAX; v++) {
+    for (var side = 0; side < 2 && made < REACH_MAX; side++) {
+      var a = vAtt[v * 4 + side * 2];
+      if (a >= 0) continue;
+      var p = side ? vStart[v] + vCount[v] - 1 : vStart[v];
+      var px = vpx[p], py = vpy[p], cx = px | 0, cy = py | 0;
+      var best = -1, bd = VEIN_SNAP * VEIN_SNAP + 0.001;
+      for (var dy = -VEIN_SNAP; dy <= VEIN_SNAP; dy++) {
+        var yy = cy + dy; if (yy < 0 || yy >= GH) continue;
+        for (var dx = -VEIN_SNAP; dx <= VEIN_SNAP; dx++) {
+          var xx = cx + dx; if (xx < 0 || xx >= GW) continue;
+          var q = vpAt[yy * GW + xx];
+          if (q < 0) continue;
+          var qv = veinOfPoint(q);
+          if (qv === v) continue;
+          var ddx = vpx[q] - px, ddy = vpy[q] - py, d2 = ddx * ddx + ddy * ddy;
+          if (d2 < bd && d2 > 0.04) { bd = d2; best = q; }
+        }
+      }
+      if (best < 0) continue;
+      if (veinN >= VEIN_MAX || vpN + 2 > VEIN_PTS_CAP) return;
+      var bv = veinOfPoint(best), c = veinN++;
+      vStart[c] = vpN;
+      vpx[vpN] = px; vpy[vpN] = py; vpW[vpN] = vpW[p]; vpLive[vpN] = 1; vpN++;
+      vpx[vpN] = vpx[best]; vpy[vpN] = vpy[best]; vpW[vpN] = vpW[best]; vpLive[vpN] = 1; vpN++;
+      vCount[c] = 2;
+      vFlow[c] = vFlow[v] < vFlow[bv] ? vFlow[v] : vFlow[bv];
+      vBand[c] = vBand[v] < vBand[bv] ? vBand[v] : vBand[bv];
+      vBorn[c] = S.simT;
+      vState[c] = 1;
+      vAtt[c * 4] = v; vAtt[c * 4 + 1] = p - vStart[v];
+      vAtt[c * 4 + 2] = bv; vAtt[c * 4 + 3] = best - vStart[bv];
+      vNext[c] = -1; vPrev[c] = -1;
+      vAtt[v * 4 + side * 2] = c; vAtt[v * 4 + side * 2 + 1] = 0;
+      coverPoint(vStart[c]); coverPoint(vStart[c] + 1);
+      made++;
+    }
+  }
+}
+
+/* within ROOT_R cells of the inoculation point: where the first lines
+   may begin on the drop itself */
+var ROOT_R = 16;
+function rootNear(x, y) {
+  var e = S.exp; if (!e || !e.inoc) return false;
+  var dx = x - e.inoc.x, dy = y - e.inoc.y;
+  return dx * dx + dy * dy <= ROOT_R * ROOT_R;
+}
+
 function veinOfPoint(p) {
   var lo = 0, hi = veinN - 1;
   while (lo < hi) {
@@ -6918,7 +6992,24 @@ function pinChain(n) {
         ok = e - s > bl && ends;
       }
       else ok = e - s >= VEIN_MINLEN && !(spurLen && dLo < dHi - 0.5);
-      if ((ax0 !== -1 || ax1 !== -1) && ok) {
+      /* Veins grow one way: from the end of a vein. A stretch is pinned
+         only where one of its ends stands on the END point of a pinned
+         vein — the tip it continues, or a tip it branches from — or,
+         while nothing has been pinned near it, on the inoculation drop
+         within ROOT_R of the inoculation point, which is the root every
+         line descends from. Nothing appears on its own in the middle of
+         the tissue, however good a ridge it is; the ridge waits for a
+         line to reach it. The far end may land anywhere on any vein,
+         which is how a growing tip closes a loop. An end that merely
+         stands on tissue is not attached: it stays free, and the free
+         ends' reach joins it to whatever comes within its snap. */
+      var end0 = p0 >= 0 && (ap0 === 0 || ap0 === vCount[ax0] - 1);
+      var end1 = p1 >= 0 && (ap1 === 0 || ap1 === vCount[ax1] - 1);
+      var root0 = ax0 === -2 && rootNear(chx[s], chy[s]);
+      var root1 = ax1 === -2 && rootNear(chx[e - 1], chy[e - 1]);
+      if (ax0 === -2 && !root0) ax0 = -1;
+      if (ax1 === -2 && !root1) ax1 = -1;
+      if (ok && (end0 || end1 || root0 || root1)) {
         var v = veinN++, sum = 0;
         vStart[v] = vpN;
         /* A continuation's first points are folded onto the line of the
@@ -8230,6 +8321,7 @@ function buildVeins() {
   /* --- the graph: widths, and the paths --- */
   if (BODY) {
     if (PROF) pvMark(3);
+    if (VEIN_GRAPH) reachFreeEnds();
     veinWidths();
     if (PROF) { pvMark(4); profVeinN++; }
     buildWhiskers();
