@@ -6562,7 +6562,6 @@ var ROOT_PTS = 80;
 var ROOT_DELAY = 0.5;                        /* sim-seconds after the dish starts */
 var rootT0 = 0;                              /* S.simT at the dish's start */
 var rootLoopX = new Float32Array(4096), rootLoopY = new Float32Array(4096), rootLoopN = 0;
-var vRoot = new Uint8Array(VEIN_MAX);        /* a root vein: attach anywhere on it */
 /* Only a piece the size of a drop is outlined. The lattice counts a cell
    only when its whole block is tissue, so a network of thin tubes breaks
    into hundreds of pieces a few cells each, and every one that happened
@@ -6729,6 +6728,12 @@ var vNext = new Int32Array(VEIN_MAX), vPrev = new Int32Array(VEIN_MAX);
    Held with the band margin so a point on the film's edge does not
    flicker the picture. */
 var vpLive = new Uint8Array(VEIN_PTS_CAP);
+/* a root vein: attach anywhere on it. Allocated here, after VEIN_MAX,
+   and not beside the root's other constants above it: declared there it
+   was sized by a VEIN_MAX not yet assigned, which is a zero-length
+   array, and every write to it was discarded — the ring could be joined
+   only at its duplicated end point. */
+var vRoot = new Uint8Array(VEIN_MAX);
 var veinN = 0;
 /* the coverage: 1 within VEIN_R of any pinned point; and the index of a
    pinned point standing in each cell, -1 for none, which is what the snap
