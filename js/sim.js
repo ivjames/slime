@@ -5833,15 +5833,16 @@ var VEIN_R = 3;
    first uncovered cell of a continuing stretch lies just past the disc,
    and must be within reach of the point at its centre. */
 var VEIN_SNAP = 5;
-/* Points an uncovered stretch needs to be pinned on one attachment. Below
-   this it is the last few cells of a tube that a longer stretch will
-   claim next second. A stretch attached at BOTH ends is a bridge and is
-   exempt: two veins along one tube whose ends stand a few cells apart
-   leave a gap the coverage discs nearly close, and the cells between
-   them are never six — under the old rule that gap was permanent, and a
-   tube drawn as collinear dashes is the scatter this layer must not
-   make. A bridge still needs two points of its own, since one cell is
-   speckle whatever it stands between. */
+/* Points an uncovered stretch needs to be pinned when it stands on its
+   own, attached to the organism only through the tissue. Below this it
+   is the last few cells of a tube that a longer stretch will claim next
+   second. A stretch that snaps onto a vein is held to what it is
+   instead — see pinChain — and one that continues a vein may be as
+   short as two points: two veins along one tube whose ends stand a few
+   cells apart leave a gap the coverage discs nearly close, and the cells
+   between them are never six; under a flat rule that gap was permanent,
+   and a tube drawn as collinear dashes is the scatter this layer must
+   not make. One cell is speckle whatever it stands between. */
 var VEIN_MINLEN = 6;
 var VEIN_BRIDGE_MIN = 2;
 /* A branch shorter than this many times the distance field at its root
@@ -6158,8 +6159,11 @@ function nearestVeinPoint(x, y, tx, ty) {
    stretch arrives along u's own line there — within VEIN_CONT_COS of
    straight on. A stretch meeting u anywhere along its length is a
    branch whatever its angle, and one meeting an end at a corner is a
-   branch too. */
-var VEIN_CONT_COS = 0.8;                     /* about 37 degrees */
+   branch too. Generous, at fifty degrees: what separates a spur from a
+   continuation is mostly WHERE it lands — a spur leaves the side of a
+   line, an interior point — and a gap in a tube's line at a bend has
+   to close too. */
+var VEIN_CONT_COS = 0.64;                    /* about 50 degrees */
 function continuesVein(p, u, i, hx, hy) {
   var n = vCount[u], st = vStart[u], ux, uy;
   if (n < 2) return false;
@@ -6224,24 +6228,12 @@ function pinChain(n) {
       var p1 = nearestVeinPoint(chx[e - 1], chy[e - 1], chx[e - 1] - chx[e2], chy[e - 1] - chy[e2]);
       if (p1 >= 0) { ax1 = veinOfPoint(p1); ap1 = p1 - vStart[ax1]; }
       else if (bodyV[chi[e - 1]] >= BODY_LEVELS[VEIN_ATTACH]) ax1 = -2;
-      /* a bridge is a stretch snapped at both ends; anything else needs
-         the full length. Both ends on the same point is a stray cell
-         beside a vein, not a bridge, and a loop of two points of the
-         same vein a few cells apart is likewise a stray: a bridge from a
-         vein to itself has to span more than the snap could reach. */
-      var bridge = p0 >= 0 && p1 >= 0 && p0 !== p1 && (ax0 !== ax1 || Math.abs(ap0 - ap1) > VEIN_SNAP * 2);
-      /* The spur test. The medial axis of a tube runs a branch out to
+      /* The spur length. The medial axis of a tube runs a branch out to
          every bump on the tube's outline, and a branch that only reaches
          from the axis to the edge is the bump, not a tube: it is about
-         as long as the axis is far from the edge, and the distance field
-         falls along it. A tube leaving a trunk runs on past the trunk's
-         edge, so it is longer than that by the time it is worth a line.
-         A bridge is asked the stricter question — does the field HALVE
-         along it — because a bridge closing a gap in a tube's line runs
-         along the axis, where the field is level, and can only be a
-         spur when it is a rung: a spur to a side bump that found an
-         older vein near the bump to snap to, and with the bridge exempt
-         these drew as ladders down every tube whose axis had moved. */
+         as long as the axis is far from the edge. A tube leaving a trunk
+         runs on past the trunk's edge, so it is longer than that by the
+         time it is worth a line. */
       var dA = bodyD[chi[s]], dB = bodyD[chi[e - 1]];
       var dHi = dA > dB ? dA : dB, dLo = dA > dB ? dB : dA;
       var spurLen = e - s <= dHi * VEIN_SPUR + 1;
@@ -6250,21 +6242,28 @@ function pinChain(n) {
          it, and may be as short as it likes: a short continuation is
          the few cells between a vein and a covered zone that a longer
          stretch would never claim, and left unpinned those were the
-         gaps in every line. One that meets a vein anywhere else, or at
-         an angle, is a BRANCH — a side tube or a spur, and at the length
-         of a spur the two cannot be told apart, so a branch is pinned
-         only once it is longer than a spur could be: the bumps on a
-         tube's film outline drew as ticks down both sides of every
-         tube while the distance-drop test alone was asked of them,
-         because at the film level the bumps are soft and the field
-         along a spur barely falls. A bridge is asked whether the field
-         halves along it, the rung test above. A stretch standing on its
-         own, attached only through the tissue, needs the full length
-         and must not be a spur by the distance test. */
+         gaps in every line; the stretch that closes the gap between two
+         veins facing each other along one tube is a continuation of
+         either. One that meets a vein anywhere else, or at an angle, is
+         a BRANCH — a side tube or a spur, and at the length of a spur
+         the two cannot be told apart, so a branch is pinned only once
+         it is longer than a spur could be: the bumps on a tube's film
+         outline drew as ticks down both sides of every tube while only
+         a distance-drop test was asked of them, because at the film
+         level the bumps are soft and the field along a spur barely
+         falls. Snapped at both ends and continuing neither, a stretch
+         is a RUNG — a spur to a side bump that found an older vein near
+         the bump — and a rung is a branch: exempted, as a bridge, they
+         drew as ladders down every tube whose axis had moved. A stretch
+         standing on its own, attached only through the tissue, needs
+         the full length and must not be a spur by the distance test.
+         And a stretch that leaves a vein and comes back to it within the
+         snap's reach is a loop beside it, and is nothing. */
+      var loopy = p0 >= 0 && p1 >= 0 && ax0 === ax1 && Math.abs(ap0 - ap1) <= VEIN_SNAP * 2;
       var cont = (p0 >= 0 && continuesVein(p0, ax0, ap0, chx[s] - chx[s2], chy[s] - chy[s2])) ||
                  (p1 >= 0 && continuesVein(p1, ax1, ap1, chx[e - 1] - chx[e2], chy[e - 1] - chy[e2]));
       var ok;
-      if (bridge) ok = !(spurLen && dLo < dHi * 0.5);
+      if (loopy) ok = false;
       else if (cont) ok = true;
       else if (p0 >= 0 || p1 >= 0) ok = !spurLen;
       else ok = e - s >= VEIN_MINLEN && !(spurLen && dLo < dHi - 0.5);
