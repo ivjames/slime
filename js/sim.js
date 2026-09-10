@@ -5586,6 +5586,15 @@ var VEIN_BANDS = [
    of a fork or a tight corner, and the tube between is the vein's. */
 var LOBE_MARK = 0.50;
 var LOBE_PAD  = 24;    // ...and the blurred trail a pad needs to be drawn at all
+/* ...and the sheet. A flat plateau of tissue — the inoculation drop, a pad
+   that has spread past its flake, the packed body between trunks — has no
+   ridge for the line layer and, unless it sits on food, had no mass
+   either, so the drop drew as a ring around nothing while the centre was
+   as full as anywhere. A cell above LOBE_PAD with no ridge within
+   SHEET_R cells is sheet, and is a mass. The radius is what keeps a
+   trunk's flanks out of it: a trunk has a ridge down its middle. */
+var SHEET_R   = 3;     // cells from the nearest ridge for tissue to count as sheet
+var rnear = new Uint8Array(NCELL), rnearH = new Uint8Array(NCELL);
 var LOBE_OUT  = 0.5;   // how far past the mask's boundary a mass is drawn, cells
 /* the mask itself, one slot per lattice cell: the presence tier the cell is
    drawn at, or -1. Filled from lseg/lbuck at bake, read by the tracer. */
@@ -5925,8 +5934,50 @@ var jvis = new Int32Array(NCELL), jstamp = 0;   // cells a climb has stood on, b
    lattice cells chainN+1 onward; union-find joins what touches. */
 var OUF_CAP = 16384 + LW * LH;
 var ouf = new Int32Array(OUF_CAP), esz = new Int32Array(OUF_CAP);
-var obest = new Int32Array(OUF_CAP), obd = new Int32Array(OUF_CAP);
-var opar = new Int32Array(NCELL), odist = new Int32Array(NCELL), oq = new Int32Array(NCELL);
+var opar = new Int32Array(NCELL), odist = new Float32Array(NCELL);
+var olab = new Int32Array(NCELL);   // the piece each searched cell belongs to
+var odone = new Uint8Array(OUF_CAP);  // pieces that have made their contact
+var opath = new Int32Array(4096);
+/* The search is weighted: a step costs its length times a factor that is 1
+   on trail at PATH_T or more and PATH_K + 1 on none, so the shortest path
+   is the one that stays on tube, and a piece is joined along the thread
+   that actually connects it rather than across the sheet by the shortest
+   diagonal — which cut straight lines through the body and, being found
+   afresh each rebuild, flashed. A binary heap with lazy deletion; the heap
+   is bounded, and a search that fills it stops rather than overruns. */
+var PATH_T = 30, PATH_K = 6;
+var HEAP_CAP = NCELL * 4;
+var hk = new Float32Array(HEAP_CAP), hv = new Int32Array(HEAP_CAP), hn = 0;
+function heapPush(k, v) {
+  if (hn >= HEAP_CAP) return;
+  var i = hn++;
+  hk[i] = k; hv[i] = v;
+  while (i > 0) {
+    var pi = (i - 1) >> 1;
+    if (hk[pi] <= hk[i]) break;
+    var tk = hk[pi]; hk[pi] = hk[i]; hk[i] = tk;
+    var tv = hv[pi]; hv[pi] = hv[i]; hv[i] = tv;
+    i = pi;
+  }
+}
+function heapPop() {
+  var top = hv[0];
+  hn--;
+  if (hn > 0) {
+    hk[0] = hk[hn]; hv[0] = hv[hn];
+    var i = 0;
+    for (;;) {
+      var l = i * 2 + 1, r = l + 1, m = i;
+      if (l < hn && hk[l] < hk[m]) m = l;
+      if (r < hn && hk[r] < hk[m]) m = r;
+      if (m === i) break;
+      var tk = hk[m]; hk[m] = hk[i]; hk[i] = tk;
+      var tv = hv[m]; hv[m] = hv[i]; hv[i] = tv;
+      i = m;
+    }
+  }
+  return top;
+}
 var JP_CAP = 16384;
 var jpA = new Int32Array(JP_CAP), jpB = new Int32Array(JP_CAP), jpN = 0;
 var veinIslands = 0;
@@ -6241,6 +6292,27 @@ function buildVeins() {
      where a crest cell dropping out only shortens a line. `lmark` is read and
      written in the same sweep, which is safe because the lattice visits each
      of its cells exactly once. */
+  /* which cells have a ridge within SHEET_R: two separable passes of a
+     running window over the ridge map, for the sheet test below */
+  for (y = 0; y < GH; y++) {
+    var rrow = y * GW, rc = 0;
+    for (x = 0; x < SHEET_R && x < GW; x++) if (rdir[rrow + x] !== 255) rc++;
+    for (x = 0; x < GW; x++) {
+      if (x + SHEET_R < GW && rdir[rrow + x + SHEET_R] !== 255) rc++;
+      if (x - SHEET_R - 1 >= 0 && rdir[rrow + x - SHEET_R - 1] !== 255) rc--;
+      rnearH[rrow + x] = rc > 0 ? 1 : 0;
+    }
+  }
+  for (x = 0; x < GW; x++) {
+    var vc = 0;
+    for (y = 0; y < SHEET_R && y < GH; y++) if (rnearH[y * GW + x]) vc++;
+    for (y = 0; y < GH; y++) {
+      if (y + SHEET_R < GH && rnearH[(y + SHEET_R) * GW + x]) vc++;
+      if (y - SHEET_R - 1 >= 0 && rnearH[(y - SHEET_R - 1) * GW + x]) vc--;
+      rnear[y * GW + x] = vc > 0 ? 1 : 0;
+    }
+  }
+
   for (y = 2; y < GH - 2; y += 2) {
     var rowL = y * GW;
     for (x = 2; x < GW - 2; x += 2) {
@@ -6258,7 +6330,7 @@ function buildVeins() {
       if (k2 > kf) kf = k2; if (k3 > kf) kf = k3; if (k4 > kf) kf = k4;
       var mass = lv >= BODY_T * hold &&
                  (kf > LOBE_MARK * hold ||
-                  (lv > LOBE_PAD * hold && feedAt[i] >= 0));
+                  (lv > LOBE_PAD * hold && (feedAt[i] >= 0 || !rnear[i])));
       lmark[i] = mass ? 1 : 0;
       if (!mass) {
         /* A mass the test just dropped still has its presence, and unlike a
@@ -6525,7 +6597,7 @@ function buildVeins() {
      at all, and two such masses are two pieces like any other */
   if (NENT <= OUF_CAP && (chainN > 0 || ldrawnN > 0)) {
     var e1, e2, lx1, ly1, ln1;
-    for (i = 0; i < NENT; i++) { ouf[i] = i; esz[i] = 0; obest[i] = -1; }
+    for (i = 0; i < NENT; i++) { ouf[i] = i; esz[i] = 0; }
     /* sizes: a chain's cells, four per drawn lattice cell */
     for (ln1 = 0; ln1 < LW * LH; ln1++) if (ldrawn[ln1]) esz[chainN + 1 + ln1] = 4;
     for (i = 0; i < NCELL; i++) if (rchain[i]) esz[rchain[i]]++;
@@ -6558,23 +6630,43 @@ function buildVeins() {
     var mainE = -1, mainSz = 0;
     for (i = 1; i < NENT; i++) if (ouf[i] === i && esz[i] > mainSz) { mainSz = esz[i]; mainE = i; }
     if (mainE >= 0) {
-      /* breadth-first from every cell of the main piece, over body */
+      /* The search runs FROM the detached pieces, not from the main one.
+         Every cell of every piece is a seed, labelled with its piece; the
+         main piece's cells are seeds that never expand. Fronts grow out
+         through body in weighted order, and the first time a front meets
+         a cell another piece has claimed — a drawn cell, or tissue its
+         front reached first — the two are joined: the path is this cell's
+         chain of parents back to its seed, then the met cell's back to
+         its own, and the pieces are united. A piece stops expanding at
+         its first contact. What it met may itself be detached; it is
+         united with that, and that piece goes on to meet something in its
+         turn, so the pieces chain to the main one, or, if none of a
+         cluster ever meets it, are counted as islands at the end. The
+         work is the tissue AROUND the detached pieces, not the whole
+         body: searching outward from the main piece had to cover the
+         body to reach a piece at the far edge, every rebuild. */
       opar.fill(-1);
-      var qh = 0, qt = 0;
+      hn = 0;
+      var seeds = 0;
       for (i = 0; i < NCELL; i++) {
-        if (rchain[i] && ufind(rchain[i]) === mainE) { opar[i] = i; odist[i] = 0; oq[qt++] = i; }
-      }
-      for (ln1 = 0; ln1 < LW * LH; ln1++) {
-        if (!ldrawn[ln1] || ufind(chainN + 1 + ln1) !== mainE) continue;
-        var bx = (ln1 % LW) << 1, by = ((ln1 / LW) | 0) << 1;
-        for (var dy1 = 0; dy1 < 2; dy1++) for (var dx1 = 0; dx1 < 2; dx1++) {
-          var bc = (by + dy1) * GW + bx + dx1;
-          if (bc < NCELL && opar[bc] < 0) { opar[bc] = bc; odist[bc] = 0; oq[qt++] = bc; }
+        var tE = rchain[i];
+        if (!tE) {
+          var tln = (((i / GW) | 0) >> 1) * LW + ((i % GW) >> 1);
+          if (ldrawn[tln]) tE = chainN + 1 + tln;
         }
+        if (!tE) continue;
+        var tR = ufind(tE);
+        opar[i] = i; odist[i] = 0; olab[i] = tR;
+        if (tR !== mainE) { heapPush(0, i); seeds++; }
       }
-      while (qh < qt) {
-        var qc = oq[qh++], qx = qc % GW, qy = (qc / GW) | 0, qd = odist[qc] + 1;
-        for (var oy1 = -1; oy1 <= 1; oy1++) {
+      for (i = 0; i < NENT; i++) odone[i] = 0;
+      while (hn > 0 && seeds > 0) {
+        var qk = hk[0], qc = heapPop();
+        if (qk > odist[qc]) continue;   /* a stale entry */
+        var qL = ufind(olab[qc]);
+        if (odone[qL] || qL === ufind(mainE)) continue;
+        var qx = qc % GW, qy = (qc / GW) | 0, met = -1;
+        for (var oy1 = -1; oy1 <= 1 && met < 0; oy1++) {
           var ny1 = qy + oy1;
           if (ny1 < 1 || ny1 >= GH - 1) continue;
           for (var ox1 = -1; ox1 <= 1; ox1++) {
@@ -6582,45 +6674,49 @@ function buildVeins() {
             var nx1 = qx + ox1;
             if (nx1 < 1 || nx1 >= GW - 1) continue;
             var nq = ny1 * GW + nx1;
-            if (opar[nq] >= 0 || wallM[nq] || trail[nq] < CONN_T) continue;
-            opar[nq] = qc; odist[nq] = qd; oq[qt++] = nq;
+            if (wallM[nq]) continue;
+            if (opar[nq] >= 0) {
+              if (ufind(olab[nq]) !== qL) { met = nq; break; }
+              continue;
+            }
+            var tq = trail[nq];
+            if (tq < CONN_T) continue;
+            var wq = tq >= PATH_T ? 1 : 1 + PATH_K * (1 - tq / PATH_T);
+            var nd = qk + (ox1 && oy1 ? 1.4142135 : 1) * wq;
+            opar[nq] = qc; odist[nq] = nd; olab[nq] = olab[qc]; heapPush(nd, nq);
           }
         }
-      }
-      /* each other piece's nearest reached cell */
-      for (i = 0; i < NCELL; i++) {
-        if (opar[i] < 0) continue;
-        e1 = rchain[i];
-        var r1 = -1;
-        if (e1) r1 = ufind(e1);
-        else {
-          ln1 = (((i / GW) | 0) >> 1) * LW + ((i % GW) >> 1);
-          if (ldrawn[ln1]) r1 = ufind(chainN + 1 + ln1);
-        }
-        if (r1 < 0 || r1 === mainE) continue;
-        if (obest[r1] < 0 || odist[i] < obd[r1]) { obest[r1] = i; obd[r1] = odist[i]; }
-      }
-      /* the paths, and the count of pieces with none */
-      for (e1 = 1; e1 < NENT; e1++) {
-        if (ouf[e1] !== e1 || e1 === mainE || esz[e1] === 0) continue;
-        var pc = obest[e1];
-        if (pc < 0) { veinIslands++; continue; }
-        var pb = rchain[pc] ? rband[pc] : 0;
+        if (met < 0) continue;
+        /* contact: the path is this cell's parents back to its seed, then
+           the met cell's back to its own */
+        var pn = 0, pcur = qc;
+        while (pn < 2048 && opar[pcur] !== pcur) { opath[pn++] = pcur; pcur = opar[pcur]; }
+        opath[pn++] = pcur;
+        /* reverse, so the run starts at this piece's seed */
+        for (var pa1 = 0, pb1 = pn - 1; pa1 < pb1; pa1++, pb1--) { var pt = opath[pa1]; opath[pa1] = opath[pb1]; opath[pb1] = pt; }
+        pcur = met;
+        while (pn < 4094 && opar[pcur] !== pcur) { opath[pn++] = pcur; pcur = opar[pcur]; }
+        opath[pn++] = pcur;
+        var qR = ufind(olab[met]);
+        uunion(qL, qR);
+        odone[qL] = 1;
+        var pb = rchain[opath[0]] ? rband[opath[0]] : 0;
         if (pb > 4) pb = 0;
-        var pa = vseg[pb], pw = vsegN[pb], pn = 0, pcur = pc;
-        while (pn < 2048 && opar[pcur] !== pcur) { pn++; pcur = opar[pcur]; }
-        if (pn === 0 || pw + (pn + 1) * 2 + 2 > VEIN_CAP) continue;
-        /* drawn at the mid tier: live, but not inked — the path is the
-           shortest one through tissue THIS rebuild, and it wanders as the
-           tissue does, so recording it hatched the record with every
-           rebuild's route */
-        pa[pw++] = 1; pa[pw++] = pn + 1;
-        pcur = pc;
-        for (var pk = 0; pk <= pn; pk++) {
-          pa[pw++] = (pcur % GW) + 0.5; pa[pw++] = ((pcur / GW) | 0) + 0.5;
-          pcur = opar[pcur];
+        var pa = vseg[pb], pw = vsegN[pb];
+        if (pn >= 2 && pw + pn * 2 + 2 <= VEIN_CAP) {
+          /* drawn at the mid tier: live, but not inked — the path is the
+             one through tissue THIS rebuild, and it wanders as the tissue
+             does, so recording it hatched the record with every rebuild's
+             route */
+          pa[pw++] = 1; pa[pw++] = pn;
+          for (var pk = 0; pk < pn; pk++) { pa[pw++] = (opath[pk] % GW) + 0.5; pa[pw++] = ((opath[pk] / GW) | 0) + 0.5; }
+          vsegN[pb] = pw;
         }
-        vsegN[pb] = pw;
+      }
+      /* the count of pieces that never met the main one */
+      var mainR = ufind(mainE);
+      for (e1 = 1; e1 < NENT; e1++) {
+        if (ouf[e1] === e1 && esz[e1] > 0 && e1 !== mainR) veinIslands++;
       }
     }
   }
