@@ -6155,7 +6155,12 @@ var VEIN_TUBE_Q   = 4;
    second it beaded and gapped, and as hairlines it went stale. It is
    kept, off, for the record it can make and for a day the picture wants
    a fixed skeleton again. */
-var VEIN_GRAPH = false;                 // pin and paint the frozen graph
+var VEIN_GRAPH = true;                  // pin and paint the frozen graph
+/* ...and whether the tubes are stroked at all. They are not: the user
+   wants LINES — the veins as a drawing, the pinned graph's strokes at
+   the band widths on the bare plate — not the tissue as a shape. The
+   tube stroke stays in the file, off. */
+var TUBES = false;
 var TUBE_KEYS = VEIN_TUBE_MAX * VEIN_TUBE_Q + 2;
 var TUBE_TIP = 0.35, TUBE_TIP2 = 0.7;   // a chain's end widths, as shares of the transform's
 var tubePaths = new Array(TUBE_KEYS);
@@ -6278,7 +6283,7 @@ var isoPX = new Float32Array(ISO_LOOP_CAP), isoPY = new Float32Array(ISO_LOOP_CA
    the tube behind the front settles. A growing tube's newest cells are
    always unsettled, which is right: the front is drawn by the whiskers,
    and the vein arrives a second behind it, where the tube is. */
-var VEIN_SETTLE = 1.0;
+var VEIN_SETTLE = 0.5;   /* was 1.0: with nothing drawn under the lines, a tube half a second old with no line is a gap */
 /* Cells from a pinned point that count as that vein's: a ridge cell
    inside the disc is the same tube and is never pinned again. Euclidean,
    not a square, so a diagonal tube's coverage ends at the same distance
@@ -6413,7 +6418,7 @@ var DT_R2 = 1.4142135;
    the opposite of the hierarchy the lines are for; the drop itself is
    thirty and more across for its first seconds and is inside this. */
 var VEIN_DT_MIN = 1.0;
-var VEIN_DT_MAX = 12.0;
+var VEIN_DT_MAX = 30.0;  /* was 12 while the body was drawn under the lines; with nothing under them a corridor forty cells wide had no line at all */
 /* ...and no ceiling at all for the tubes: a sheet is drawn by the stroke
    down its middle, and a stroke that stopped at twelve left a forty-cell
    corridor as a few sausages and a scatter of blobs. */
@@ -6993,8 +6998,10 @@ var VEIN_KEYS = (VEIN_TUBE_MAX * VEIN_TUBE_Q + 2) * VEIN_BANDS.length;
    earlier vein's, so the segment after it is the later's), and is live
    when both points are and that vein is. The paths are keyed by width
    step and band, so every run of one width and colour is one stroke. */
+/* the graph is LINES: a vein's stroke is its band's width. (The tube
+   width under the points, vcW, is used only when TUBES is on.) */
 function segKey(k) {
-  var own = vcOwn[k + 1], d = vcW[k] > vcW[k + 1] ? vcW[k] : vcW[k + 1];
+  var own = vcOwn[k + 1], d = TUBES ? (vcW[k] > vcW[k + 1] ? vcW[k] : vcW[k + 1]) : 0;
   return strokeQ(d, VEIN_BANDS[vBand[own]].w) * VEIN_BANDS.length + vBand[own];
 }
 function emitChain(bandPaths, rec) {
@@ -7213,6 +7220,12 @@ var veilAcc = null, vactx = null;     // the running max
    vein, or a wall poured over one, covers it, as it covers the agar. */
 var ink = null, ictx = null;
 var INK_A = 0.30;                     // how much of the live vein's brightness the record keeps
+/* ...for the line record of the crests. The GRAPH's record — veins the
+   tissue has drifted off — is drawn as a line in its own right, at
+   REC_A: with nothing under the lines it is half the network, and at a
+   third alpha the network read broken. It never moves and is never
+   erased; it is only the veins the flow has left. */
+var REC_A = 0.62;
 /* With the body drawn, the record is the TUBE FOOTPRINT rather than the
    lines: recV is the most the eased body has ever stood at, per cell, and
    its outline at the tube level, traced like the body's, is every place a
@@ -7246,8 +7259,8 @@ function recordBody(tc, sx, sy) {
   if (vRecPath) {
     tc.lineCap = 'round';
     tc.lineJoin = 'round';
-    tc.lineWidth = VEIN_BANDS[0].w;
-    tc.strokeStyle = VEIN_BANDS[0].ink;
+    tc.lineWidth = VEIN_BANDS[1].w;
+    tc.strokeStyle = VEIN_BANDS[1].ink;
     tc.stroke(vRecPath);
   }
   tc.restore();
@@ -8088,7 +8101,7 @@ function buildVeins() {
       if (n < RIDGE_MINPTS) continue;
       /* under the body the chain is a candidate for the graph and nothing
          else: no runs, no envelope, no ends for the joins to reach from */
-      if (BODY) { if (VEIN_GRAPH) pinChain(n); emitTube(n); continue; }
+      if (BODY) { if (VEIN_GRAPH) pinChain(n); if (TUBES) emitTube(n); continue; }
 
       var mean = sum / n;
       b = pickBand(mean, chi, n);
@@ -8520,7 +8533,7 @@ function strokeVeins(tc, sx, sy, mono) {
        under all of this, in the ink. */
     /* the tubes, widest first so a narrow one landing on a trunk keeps
        its own edge */
-    for (k = TUBE_KEYS - 1; k >= 0; k--) {
+    for (k = TUBES ? TUBE_KEYS - 1 : -1; k >= 0; k--) {
       if (!tubePaths[k]) continue;
       ctx.lineWidth = k / VEIN_TUBE_Q;
       ctx.strokeStyle = TUBE_STYLE[k];
@@ -8877,7 +8890,7 @@ function render() {
     vactx.drawImage(veil, 0, 0);
     veinFresh = false;
   }
-  ctx.globalAlpha = INK_A;
+  ctx.globalAlpha = BODY && VEIN_GRAPH ? REC_A : INK_A;
   ctx.drawImage(ink, 0, 0);
   ctx.globalAlpha = 1;
   if (!SHEET) paintWalls(ctx, cv.width / GW, cv.height / GH);
