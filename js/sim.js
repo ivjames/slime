@@ -7062,8 +7062,10 @@ function treeGrow() {
        are always within reach. An inner node growing a new branch does
        not fuse: a join would end its growing for good, and the branch
        point's job is to branch. It steps, and the child is the tip that
-       may fuse next pass. */
-    if (tkids[n] === 0) {
+       may fuse next pass. Nor the root, which a wall can leave without
+       a child: its join would be walked by the flow and never drawn or
+       severed, since both start at node 1. */
+    if (tkids[n] === 0 && n > 0) {
       var occ = treeForeign(cx, cy, n);
       if (occ >= 0) {
         tjoin[n] = occ; grown++;
