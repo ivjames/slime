@@ -4642,6 +4642,7 @@ function resetVeinTemporal() {
   if (ictx && ink.width) ictx.clearRect(0, 0, ink.width, ink.height);   /* a new dish has no record */
   inked.fill(0);
   recV.fill(0); recPath = null;
+  resetVeinGraph();
 }
 
 /* The other kind of cut: abandoning a replay, which puts a dish back that this
@@ -4684,10 +4685,39 @@ function snapshotVeinTemporal(fs) {
      re-routed under a REPLAY's holds could bridge a different layout than
      the verdict it is putting back */
   fs.bridgeP = new Uint8Array(bridgeP);
+  /* the vein graph is the picture's lines, and the ridge ages are what
+     the next rebuild pins from: a replay exit that lost either would put
+     the dish back with its veins gone and a second's wait before any
+     came back */
+  fs.rage = new Float32Array(rage);
+  fs.vpN = vpN; fs.veinN = veinN;
+  fs.vpx = vpx.slice(0, vpN); fs.vpy = vpy.slice(0, vpN);
+  fs.vStart = vStart.slice(0, veinN); fs.vCount = vCount.slice(0, veinN);
+  fs.vBand = vBand.slice(0, veinN); fs.vFlow = vFlow.slice(0, veinN);
+  fs.vBorn = vBorn.slice(0, veinN); fs.vState = vState.slice(0, veinN);
+  fs.vAtt = vAtt.slice(0, veinN * 4);
+}
+
+/* The graph out of a snapshot; a snapshot without one (taken before the
+   graph existed) leaves the dish with no veins, and the next rebuilds
+   pin them afresh. The coverage and point map are rebuilt from the
+   points rather than carried, since the points are the truth of both. */
+function restoreVeinGraph(fs) {
+  resetVeinGraph();
+  if (!fs.vpx) return;
+  vpN = fs.vpN; veinN = fs.veinN;
+  vpx.set(fs.vpx); vpy.set(fs.vpy);
+  vStart.set(fs.vStart); vCount.set(fs.vCount);
+  vBand.set(fs.vBand); vFlow.set(fs.vFlow);
+  vBorn.set(fs.vBorn); vState.set(fs.vState);
+  vAtt.set(fs.vAtt);
+  for (var p = 0; p < vpN; p++) coverPoint(p);
+  if (fs.rage) rage.set(fs.rage);
 }
 
 function restoreVeinTemporal(fs) {
   if (!fs || !fs.shpV) { resetVeinTemporal(); return; }
+  restoreVeinGraph(fs);
   shpV.set(fs.shpV);
   if (fs.shpVB) shpVB.set(fs.shpVB);
   if (fs.bodyV) bodyV.set(fs.bodyV); else bodyV.set(fs.shpV);
@@ -5569,12 +5599,26 @@ var RIDGE_REL = 0.14;  // ...as a fraction of the cell's own trail
    inner shadow now (section 9, ISH_D), computed from the SHAPE of the mold
    rather than drawn along its veins; the crests stay where light belongs,
    on top of it. */
+/* The sixth band is the vein graph's, for the tubes of the packed core.
+   With the body drawn under the lines, a line is a highlight only where
+   it is lighter than the tissue it lies on, and the body's own levels
+   walk to 0.50 at the core (BODY_HOT): the 0.44 that was the brightest
+   thing on a dark plate vanishes on a trunk at trail 52, and at 40 the
+   core's tubes carried lines the eye could not find. So the trunk band
+   stops at trail 40 — the seventh body level, where the tissue is at
+   0.34 — and above it the core's tubes take 0.64, a step of the same
+   size over their tissue as every band below takes over its own. The
+   walk ends at cream, not white (see above), so this is still yellow;
+   and since hotBandK reads the widest band, the palette solve's 7:1 is
+   asked of this tone now, which it clears further than the old trunk
+   did. */
 var VEIN_BANDS = [
   { max: 6,        w: 0.34, hot: 0.00, dim: 0.86, alpha: 0.90, style: '' },
   { max: 10,       w: 0.62, hot: 0.08, dim: 1.00, alpha: 0.97, style: '' },
   { max: 16,       w: 1.05, hot: 0.18, dim: 1.00, alpha: 1 },
   { max: 26,       w: 1.75, hot: 0.30, dim: 1.00, alpha: 1 },
-  { max: Infinity, w: 2.70, hot: 0.44, dim: 1.00, alpha: 1 }
+  { max: 40,       w: 2.70, hot: 0.44, dim: 1.00, alpha: 1 },
+  { max: Infinity, w: 3.20, hot: 0.64, dim: 1.00, alpha: 1 }
 ];
 /* The lobe layer: the swellings, drawn as swellings.
 
@@ -5730,6 +5774,529 @@ var isoList = new Int32Array(NCELL * 2), isoListN = 0;
 /* a loop can be at most every edge once, so the point buffers cannot overflow */
 var ISO_LOOP_CAP = NCELL * 2;
 var isoPX = new Float32Array(ISO_LOOP_CAP), isoPY = new Float32Array(ISO_LOOP_CAP);
+
+/* ---- the veins: a graph that is drawn once and kept ----
+   The body above is the tissue; these are the lines on it — the crest
+   highlight along each tube, which the old line layer drew by re-finding
+   the ridges of the trail every rebuild. A ridge of a moving field moves,
+   and the lines flickered like lightning: measured a second apart on
+   First Contact, under half the drawn crest cells were still crest. The
+   requirement is the opposite of that, and it is stated once here because
+   every constant below serves it: keep a vector where it is.
+
+   So a vein is created once, from a ridge that has held still long enough
+   to be trusted, and its coordinates are then frozen for good — never
+   moved, never erased, never re-traced. What stays live is its WIDTH,
+   read off the tissue under it each rebuild: a vein thickens with use and
+   thins when starved, and a vein the tissue has left is kept as a dim
+   record, the track a withdrawn tube leaves on the agar. The picture is
+   then a drawing that only ever gains lines, which is what a time-lapse
+   of a plate shows, and nothing on it ever twitches.
+
+   The graph is CONNECTED BY CONSTRUCTION rather than by any later join
+   pass. A candidate stretch is pinned only if one of its ends attaches:
+   either to an existing vein, in which case that vein's nearest point —
+   its exact coordinates — is added as the end, so the two are one line
+   with no gap and no overlap to knot; or to the body itself, where the
+   end stands on supplied tube (VEIN_ATTACH). A stretch with nothing to
+   hang from waits; the tube it marks is still growing toward something,
+   and next second it will have arrived.
+
+   The first attempt at this pinned a settled run as soon as it appeared,
+   two cells of proximity and no linking, and left a scatter of parallel
+   dashes: a tube several cells wide collects two or three crest
+   fragments at different moments, and the crests end at every junction.
+   The three things below that the attempt lacked are the settle time
+   (a crest is trusted only after it has stood in the same cells for a
+   while), the coverage radius (a pinned vein owns the tube around it, and
+   nothing is pinned inside that), and the snap (so a fragment cannot be
+   pinned beside a vein — it can only be pinned onto its end). */
+/* Sim-seconds a cell must have been ridge, CONTINUOUSLY, before a chain
+   through it can be pinned. The ridge pass has hysteresis of its own, so
+   a cell that qualifies is already one the trace has agreed on for a few
+   rebuilds; this is the longer wait for the crest to stop wandering as
+   the tube behind the front settles. A growing tube's newest cells are
+   always unsettled, which is right: the front is drawn by the whiskers,
+   and the vein arrives a second behind it, where the tube is. */
+var VEIN_SETTLE = 1.0;
+/* Cells from a pinned point that count as that vein's: a ridge cell
+   inside the disc is the same tube and is never pinned again. Euclidean,
+   not a square, so a diagonal tube's coverage ends at the same distance
+   as a straight one's — the snap radius has to clear this in every
+   direction or a stretch on a diagonal would begin just out of reach of
+   the vein it continues and wait forever. Wider than the two cells the
+   first attempt used, since a trunk at full flow is five or six cells
+   across and its crest can lie anywhere in the middle of that. */
+var VEIN_R = 3;
+/* Cells within which a stretch's end snaps onto an existing vein point.
+   Greater than VEIN_R plus a diagonal step, for the reason above: the
+   first uncovered cell of a continuing stretch lies just past the disc,
+   and must be within reach of the point at its centre. */
+var VEIN_SNAP = 5;
+/* Points an uncovered stretch needs to be pinned on one attachment. Below
+   this it is the last few cells of a tube that a longer stretch will
+   claim next second. A stretch attached at BOTH ends is a bridge and is
+   exempt: two veins along one tube whose ends stand a few cells apart
+   leave a gap the coverage discs nearly close, and the cells between
+   them are never six — under the old rule that gap was permanent, and a
+   tube drawn as collinear dashes is the scatter this layer must not
+   make. A bridge still needs two points of its own, since one cell is
+   speckle whatever it stands between. */
+var VEIN_MINLEN = 6;
+var VEIN_BRIDGE_MIN = 2;
+/* A branch shorter than this many times the distance field at its root
+   (plus a cell) is a spur of the medial axis — see the test in
+   pinChain. One and a half: a bump's spur is about the half-width long,
+   and a tube that has cleared the trunk's edge by half again the
+   trunk's half-width is a tube. */
+var VEIN_SPUR = 1.5;
+/* The body level at which a stretch's end counts as attached to the
+   organism without a vein to snap to: index into BODY_LEVELS, the tube
+   level, trail 12 — TIP_FEED, where the simulation itself counts a
+   filament as supplied. The first design attached only to the packed
+   core, on the picture of a graph growing outward from the inoculation
+   drop by successive snaps, and measured at 40 seconds on First Contact
+   it had pinned 260 veins while 2,100 settled ridge cells waited
+   uncovered, nearly all at tube level: the outer mesh is not grown from
+   the drop, it CONDENSES out of the sheet everywhere at once, and a
+   graph that can only reach it by adjacency never does. A tube is body,
+   and the simulation keeps the body one piece by its own rule, so a vein
+   standing on supplied tube is connected to every other through the
+   tissue whether or not a line yet joins them; the lines then close the
+   gaps between themselves as bridges. */
+var VEIN_ATTACH = 2;
+/* ---- the field the ridges are read from ----
+   Not the body itself. The ridge test asks for a strict maximum across
+   the vein with a drop of RIDGE_REL per cell either side, which is what
+   a crest of the trail looks like on a filament two or three cells
+   wide, and is nothing like the top of a trunk: a trunk at full flow is
+   nine cells across with a flat top, so it has no maximum at its axis
+   and the only crests found on it were the noise bumps on its shoulders
+   — exactly the ridges that wander, and the first build of this layer
+   drew them as bright dashes down both flanks of every trunk with
+   nothing along the middle. What has a ridge along a tube's axis at
+   every width is the DISTANCE from its edge: the Euclidean distance
+   transform of the tube-level mask rises one cell per cell from either
+   side to the middle and turns over there, with across-curvature two
+   whether the tube is three cells wide or twelve. Its ridge is the
+   medial axis — one line per tube, through every junction — and the
+   whole of pass one and pass two run on it unchanged: the hysteresis,
+   the direction stickiness, the parabolic fit and the walk were built
+   for a field with crests, and this is a field of nothing but crests.
+
+   The mask is the body at the tube level, VEIN_ATTACH: a filament
+   thinner than that has no line yet, and gets one when it thickens,
+   which is also when the walker would first trust it. The transform is
+   a two-sweep chamfer with weights one and root two — the exact
+   transform (Felzenszwalb and Huttenlocher's separable envelope) was
+   written first and measured at 4.2 ms against the chamfer's 1.7 on a
+   grown dish, for a mean difference of a quarter of a cell and none of
+   it where it matters: the ridge needs the fold to be symmetric about
+   the tube's axis, which any metric gives it, and the chamfer's
+   octagonal error is largest far from every edge, inside the core,
+   where nothing is read. */
+var bodyD = new Float32Array(NCELL);        /* distance to the mask's edge, cells; 0 outside */
+var DT_INF = 1e9;                           /* a distance no sweep leaves in place */
+var DT_R2 = 1.4142135;
+/* Floors for the ridge test on the distance field, in cells, standing in
+   for RIDGE_MIN's trail units: a crest under a cell from the edge is a
+   tube two cells wide, which is film with a line through it. And a
+   ceiling: a cell further than this from any edge is inside the packed
+   core, whose medial axis is a spray of spokes toward every bump on its
+   outline and not a vein — the old layer drew nothing on a plateau, and
+   neither does this. Twelve, because the trunks that leave the core on
+   First Contact at 40 seconds are fourteen to eighteen cells across and
+   a ceiling of seven left every one of them without a line, which is
+   the opposite of the hierarchy the lines are for; the drop itself is
+   thirty and more across for its first seconds and is inside this. */
+var VEIN_DT_MIN = 1.0;
+var VEIN_DT_MAX = 12.0;
+/* A hole in the sheet smaller than this, in cells, is a pinhole and is
+   filled before the transform: the medial axis of the tissue round a
+   hole is a ring at the hole's radius, and a ring pinned round a pinhole
+   stays a ring inside the tube that later grows over it. A hole this
+   size or larger is a mesh cell opening, and the ring round it IS the
+   tubes that will bound it. Forty cells is about seven across. */
+var VEIN_HOLE = 40;
+var bodyM = new Uint8Array(NCELL);          /* the mask: 1 inside, holes filled */
+/* the fill runs on the two-cell lattice, a quarter of the cells: a
+   lattice cell is open where any of its four is, so a channel a cell
+   wide stays a channel and no opening is walled off into a hole that
+   is not one; holes are then measured in lattice cells */
+var holeL = new Uint8Array(LW * LH);
+var holeQ = new Int32Array(LW * LH);        /* the flood's queue; a cell enters once */
+var VEIN_HOLE_L = VEIN_HOLE >> 2;
+
+/* The mask at the tube level, with its pinholes filled. Outside is what a
+   four-connected flood from the rim reaches — the rim is always outside,
+   since the body is zero there — and any open lattice cell the flood did
+   not reach is in a hole; a hole under VEIN_HOLE_L lattice cells is
+   filled, which puts every fine cell inside its lattice cells into the
+   mask. Values in holeL while it runs: 0 open and unknown, 1 tissue, 2
+   outside, 3 a hole being measured. */
+function bodyMask() {
+  var lv = BODY_LEVELS[VEIN_ATTACH], i, x, y, lx, ly, qh, qt, c, n;
+  for (i = 0; i < NCELL; i++) bodyM[i] = bodyV[i] >= lv ? 1 : 0;
+  for (ly = 0; ly < LH; ly++) {
+    for (lx = 0; lx < LW; lx++) {
+      i = (ly << 1) * GW + (lx << 1);
+      holeL[ly * LW + lx] = (bodyM[i] & bodyM[i + 1] & bodyM[i + GW] & bodyM[i + GW + 1]) ? 1 : 0;
+    }
+  }
+  qh = qt = 0;
+  for (lx = 0; lx < LW; lx++) { holeL[lx] = 2; holeQ[qt++] = lx; holeL[(LH - 1) * LW + lx] = 2; holeQ[qt++] = (LH - 1) * LW + lx; }
+  for (ly = 1; ly < LH - 1; ly++) { holeL[ly * LW] = 2; holeQ[qt++] = ly * LW; holeL[ly * LW + LW - 1] = 2; holeQ[qt++] = ly * LW + LW - 1; }
+  while (qh < qt) {
+    c = holeQ[qh++];
+    lx = c % LW; ly = (c / LW) | 0;
+    if (lx > 0 && holeL[c - 1] === 0) { holeL[c - 1] = 2; holeQ[qt++] = c - 1; }
+    if (lx < LW - 1 && holeL[c + 1] === 0) { holeL[c + 1] = 2; holeQ[qt++] = c + 1; }
+    if (ly > 0 && holeL[c - LW] === 0) { holeL[c - LW] = 2; holeQ[qt++] = c - LW; }
+    if (ly < LH - 1 && holeL[c + LW] === 0) { holeL[c + LW] = 2; holeQ[qt++] = c + LW; }
+  }
+  /* what is left at 0 is in a hole: measure each, fill the small ones */
+  for (n = 0; n < LW * LH; n++) {
+    if (holeL[n] !== 0) continue;
+    qh = qt = 0;
+    holeL[n] = 3; holeQ[qt++] = n;
+    while (qh < qt) {
+      c = holeQ[qh++];
+      lx = c % LW; ly = (c / LW) | 0;
+      if (lx > 0 && holeL[c - 1] === 0) { holeL[c - 1] = 3; holeQ[qt++] = c - 1; }
+      if (lx < LW - 1 && holeL[c + 1] === 0) { holeL[c + 1] = 3; holeQ[qt++] = c + 1; }
+      if (ly > 0 && holeL[c - LW] === 0) { holeL[c - LW] = 3; holeQ[qt++] = c - LW; }
+      if (ly < LH - 1 && holeL[c + LW] === 0) { holeL[c + LW] = 3; holeQ[qt++] = c + LW; }
+    }
+    if (qt < VEIN_HOLE_L) {
+      for (c = 0; c < qt; c++) {
+        i = ((holeQ[c] / LW) | 0) * 2 * GW + (holeQ[c] % LW) * 2;
+        bodyM[i] = 1; bodyM[i + 1] = 1; bodyM[i + GW] = 1; bodyM[i + GW + 1] = 1;
+      }
+    }
+  }
+  /* the rim is outside whatever the fill did: the body is zero there,
+     and the sweeps below read one cell past every cell they visit */
+  for (x = 0; x < GW; x++) { bodyM[x] = 0; bodyM[(GH - 1) * GW + x] = 0; }
+  for (y = 0; y < GH; y++) { bodyM[y * GW] = 0; bodyM[y * GW + GW - 1] = 0; }
+}
+
+/* The distance field: a forward sweep carrying the least of each cell's
+   four already-visited neighbours plus their step, then a backward one
+   over the other four. Inside cells start unreachable and the rim, which
+   is outside, bounds both sweeps. */
+function bodyDist() {
+  var x, y, i, c, d, a;
+  bodyMask();
+  for (i = 0; i < NCELL; i++) bodyD[i] = bodyM[i] ? DT_INF : 0;
+  for (y = 1; y < GH - 1; y++) {
+    i = y * GW;
+    for (x = 1; x < GW - 1; x++) {
+      c = i + x; d = bodyD[c];
+      if (d === 0) continue;
+      a = bodyD[c - 1] + 1; if (a < d) d = a;
+      a = bodyD[c - GW] + 1; if (a < d) d = a;
+      a = bodyD[c - GW - 1] + DT_R2; if (a < d) d = a;
+      a = bodyD[c - GW + 1] + DT_R2; if (a < d) d = a;
+      bodyD[c] = d;
+    }
+  }
+  for (y = GH - 2; y >= 1; y--) {
+    i = y * GW;
+    for (x = GW - 2; x >= 1; x--) {
+      c = i + x; d = bodyD[c];
+      if (d === 0) continue;
+      a = bodyD[c + 1] + 1; if (a < d) d = a;
+      a = bodyD[c + GW] + 1; if (a < d) d = a;
+      a = bodyD[c + GW - 1] + DT_R2; if (a < d) d = a;
+      a = bodyD[c + GW + 1] + DT_R2; if (a < d) d = a;
+      bodyD[c] = d;
+    }
+  }
+}
+
+/* Sim-seconds of memory in a vein's measure, the eased mean of the body
+   under its points, from which its width is read. The body itself is
+   eased at BODY_TAU already; this is the second ease that turns a band
+   crossing into a swell rather than a click. */
+var VEIN_W_TAU = 1.0;
+/* The graph, in flat arrays: a vein is a run of vCount[v] points from
+   vStart[v] in vpx/vpy. Capped hard, and full means no more veins rather
+   than eviction — an evicted vein is a vein that moved. 300,000 points is
+   about three times the cells a fully grown dish's ridges occupy. */
+var VEIN_PTS_CAP = 300000;
+var VEIN_MAX = 40000;
+var vpx = new Float32Array(VEIN_PTS_CAP), vpy = new Float32Array(VEIN_PTS_CAP);
+var vpN = 0;
+var vStart = new Int32Array(VEIN_MAX), vCount = new Int32Array(VEIN_MAX);
+var vBand = new Uint8Array(VEIN_MAX);      // the band it is drawn in now
+var vFlow = new Float32Array(VEIN_MAX);    // the eased measure the band is read from
+var vBorn = new Float32Array(VEIN_MAX);    // S.simT at pinning
+var vState = new Uint8Array(VEIN_MAX);     // 1 live, 0 record
+/* what each end attached to when the vein was pinned, four slots per vein:
+   [vein, point, vein, point], with vein -1 for an unattached end and -2
+   for the core (point -1). Kept for the harness, which checks that no
+   vein was ever pinned adrift. */
+var vAtt = new Int32Array(VEIN_MAX * 4);
+var veinN = 0;
+/* the coverage: 1 within VEIN_R of any pinned point; and the index of a
+   pinned point standing in each cell, -1 for none, which is what the snap
+   searches. Both maintained as veins are added, and rebuilt from the
+   points on a restore. */
+var vcov = new Uint8Array(NCELL);
+var vpAt = new Int32Array(NCELL);
+vpAt.fill(-1);
+/* sim time at which each cell last BECAME ridge — the start of its current
+   unbroken run as one. Written in pass one where a cell qualifies that
+   did not last rebuild; a cell held by the hysteresis keeps its start. */
+var rage = new Float32Array(NCELL);
+/* the drawn paths, one per band for the live veins and one for the
+   records, in grid coordinates; rebuilt only when a vein enters or leaves
+   the set they draw, which after the first few seconds is rare */
+var vGraphPath = [], vRecPath = null, vPathDirty = [];
+(function () { for (var i = 0; i < VEIN_BANDS.length; i++) { vGraphPath.push(null); vPathDirty.push(true); } })();
+var vRecDirty = true;
+var veinWT = 0;                            // S.simT at the last width pass
+/* PROF only: milliseconds per phase of the graph's rebuild, summed until
+   the harness reads them — the body trace, the mask and transform, pass
+   one, pass two with the pins, the widths, the bake */
+var profVein = new Float64Array(8), profVeinN = 0, pvT = 0;
+function pvMark(k) { var t = performance.now(); profVein[k] += t - pvT; pvT = t; }
+
+/* Forget the graph: a new dish. */
+function resetVeinGraph() {
+  vpN = 0; veinN = 0;
+  vcov.fill(0); vpAt.fill(-1);
+  rage.fill(0);
+  for (var b = 0; b < VEIN_BANDS.length; b++) { vGraphPath[b] = null; vPathDirty[b] = true; }
+  vRecPath = null; vRecDirty = true;
+  veinWT = S.simT;
+}
+
+/* The coverage disc around one pinned point, and its entry in the point
+   map — unless the cell already holds one: a snapped end stands in the
+   cell of the point it took, and the map keeps the OLDER point there so a
+   later snap lands on the same vertex rather than on this vein's copy. */
+function coverPoint(p) {
+  var cx = vpx[p] | 0, cy = vpy[p] | 0;
+  if (cx < 0 || cy < 0 || cx >= GW || cy >= GH) return;
+  if (vpAt[cy * GW + cx] < 0) vpAt[cy * GW + cx] = p;
+  for (var dy = -VEIN_R; dy <= VEIN_R; dy++) {
+    var yy = cy + dy;
+    if (yy < 0 || yy >= GH) continue;
+    for (var dx = -VEIN_R; dx <= VEIN_R; dx++) {
+      var xx = cx + dx;
+      if (xx < 0 || xx >= GW || dx * dx + dy * dy > VEIN_R * VEIN_R) continue;
+      vcov[yy * GW + xx] = 1;
+    }
+  }
+}
+
+/* The nearest pinned point within VEIN_SNAP of (x, y) that lies AHEAD
+   of a stretch leaving it in direction (tx, ty), or -1. Ahead means the
+   hop from the end to the point is within VEIN_SNAP_COS of the stretch's
+   own heading: a side tube meets its trunk along its own axis, and a
+   vein continuing a vein does so straight, so a junction's hop is
+   always within that; the hops this refuses are the square ones, from
+   a stretch to a vein it runs BESIDE, which drew a hook the width of a
+   trunk at the end of every line that happened to be pinned four cells
+   from another. Such an end attaches through the tissue instead, if it
+   is on tube. Searches the cells the point map could hold one in; the
+   map keeps one point per cell, which is every point of a chain since
+   the walk stands on each cell once. */
+var VEIN_SNAP_COS = 0.34;                    /* 70 degrees */
+function nearestVeinPoint(x, y, tx, ty) {
+  var cx = x | 0, cy = y | 0, best = -1, bd = VEIN_SNAP * VEIN_SNAP + 1e-6;
+  var tl = Math.sqrt(tx * tx + ty * ty);
+  if (tl > 0) { tx /= tl; ty /= tl; }
+  for (var dy = -VEIN_SNAP; dy <= VEIN_SNAP; dy++) {
+    var yy = cy + dy;
+    if (yy < 0 || yy >= GH) continue;
+    for (var dx = -VEIN_SNAP; dx <= VEIN_SNAP; dx++) {
+      var xx = cx + dx;
+      if (xx < 0 || xx >= GW) continue;
+      var p = vpAt[yy * GW + xx];
+      if (p < 0) continue;
+      var ddx = vpx[p] - x, ddy = vpy[p] - y, d2 = ddx * ddx + ddy * ddy;
+      if (d2 >= bd) continue;
+      if (tl > 0 && d2 > 0.25 && (ddx * tx + ddy * ty) < VEIN_SNAP_COS * Math.sqrt(d2)) continue;
+      bd = d2; best = p;
+    }
+  }
+  return best;
+}
+
+/* Which vein a point index belongs to. Veins are laid down in order, so
+   their starts are sorted and this is a binary search. */
+function veinOfPoint(p) {
+  var lo = 0, hi = veinN - 1;
+  while (lo < hi) {
+    var mid = (lo + hi + 1) >> 1;
+    if (vStart[mid] <= p) lo = mid; else hi = mid - 1;
+  }
+  return lo;
+}
+
+/* A pinned vein's band from its measure, with the same reluctance to
+   cross a boundary that pickBand gives a chain: climbing waits for the
+   boundary to be cleared by BAND_HYST, falling likewise. A measure eased
+   over a second still hovers at a boundary for many rebuilds, and a vein
+   that flicked between two widths there would be the twitch this whole
+   layer exists to remove. */
+function veinBand(flow, prev) {
+  var last = VEIN_BANDS.length - 1, b = 0;
+  while (b < last && flow > VEIN_BANDS[b].max) b++;
+  if (prev > last || b === prev) return b;
+  if (b > prev) { if (flow < VEIN_BANDS[prev].max * (1 + BAND_HYST)) return prev; }
+  else if (flow > VEIN_BANDS[prev - 1].max * (1 - BAND_HYST)) return prev;
+  return b;
+}
+
+/* One chain of pass two, as candidate veins. The chain's points are in
+   chx/chy on cells chi; the parts of it that are settled and not already
+   a vein's are its uncovered stretches, and each long enough is pinned if
+   an end attaches. The snap appends the existing point to the stretch,
+   so the graph gains a vertex of degree three there and no seam. Pinned
+   veins are targets for the stretches after them in the
+   same rebuild, which is what lets a chain that continues past a junction
+   become two veins meeting at it. */
+function pinChain(n) {
+  var settleT = S.simT - VEIN_SETTLE;
+  var s = 0, e, k, c;
+  while (s < n) {
+    while (s < n) { c = chi[s]; if (!vcov[c] && rage[c] <= settleT) break; s++; }
+    e = s;
+    while (e < n) { c = chi[e]; if (vcov[c] || rage[c] > settleT) break; e++; }
+    if (e - s >= VEIN_BRIDGE_MIN && veinN < VEIN_MAX && vpN + (e - s) + 2 <= VEIN_PTS_CAP) {
+      var ax0 = -1, ap0 = -1, ax1 = -1, ap1 = -1;
+      /* each end's heading is taken over two points, outward, so a
+         single cell's wobble does not set it */
+      var s2 = s + 2 < e ? s + 2 : e - 1, e2 = e - 3 >= s ? e - 3 : s;
+      var p0 = nearestVeinPoint(chx[s], chy[s], chx[s] - chx[s2], chy[s] - chy[s2]);
+      if (p0 >= 0) { ax0 = veinOfPoint(p0); ap0 = p0 - vStart[ax0]; }
+      else if (bodyV[chi[s]] >= BODY_LEVELS[VEIN_ATTACH]) ax0 = -2;
+      var p1 = nearestVeinPoint(chx[e - 1], chy[e - 1], chx[e - 1] - chx[e2], chy[e - 1] - chy[e2]);
+      if (p1 >= 0) { ax1 = veinOfPoint(p1); ap1 = p1 - vStart[ax1]; }
+      else if (bodyV[chi[e - 1]] >= BODY_LEVELS[VEIN_ATTACH]) ax1 = -2;
+      /* a bridge is a stretch snapped at both ends; anything else needs
+         the full length. Both ends on the same point is a stray cell
+         beside a vein, not a bridge, and a loop of two points of the
+         same vein a few cells apart is likewise a stray: a bridge from a
+         vein to itself has to span more than the snap could reach. */
+      var bridge = p0 >= 0 && p1 >= 0 && p0 !== p1 && (ax0 !== ax1 || Math.abs(ap0 - ap1) > VEIN_SNAP * 2);
+      /* The spur test. The medial axis of a tube runs a branch out to
+         every bump on the tube's outline, and a branch that only reaches
+         from the axis to the edge is the bump, not a tube: it is about
+         as long as the axis is far from the edge, and the distance field
+         falls along it. A tube leaving a trunk runs on past the trunk's
+         edge, so it is longer than that by the time it is worth a line.
+         A bridge is asked the stricter question — does the field HALVE
+         along it — because a bridge closing a gap in a tube's line runs
+         along the axis, where the field is level, and can only be a
+         spur when it is a rung: a spur to a side bump that found an
+         older vein near the bump to snap to, and with the bridge exempt
+         these drew as ladders down every tube whose axis had moved. */
+      var dA = bodyD[chi[s]], dB = bodyD[chi[e - 1]];
+      var dHi = dA > dB ? dA : dB, dLo = dA > dB ? dB : dA;
+      var spur = (bridge ? dLo < dHi * 0.5 : dLo < dHi - 0.5) && e - s <= dHi * VEIN_SPUR + 1;
+      /* the full length is asked only of a stretch with no vein to snap
+         to at either end — a fragment standing on its own. One snapped
+         end makes it an extension of the vein it continues, and a short
+         extension is the few cells between that vein and a covered zone
+         that a longer stretch would never claim: left unpinned they were
+         the gaps in the line. */
+      var ext = p0 >= 0 || p1 >= 0;
+      if ((ax0 !== -1 || ax1 !== -1) && !spur && (ext || e - s >= VEIN_MINLEN)) {
+        var v = veinN++, sum = 0;
+        vStart[v] = vpN;
+        /* the snapped point goes on the end, so the stretch keeps every
+           crest it found and the hop to the vein it joins is one short
+           segment; both hops are inside VEIN_SNAP by construction */
+        if (p0 >= 0) { vpx[vpN] = vpx[p0]; vpy[vpN] = vpy[p0]; vpN++; }
+        for (k = s; k < e; k++) {
+          vpx[vpN] = chx[k]; vpy[vpN] = chy[k]; vpN++;
+          sum += bodyV[chi[k]];
+        }
+        if (p1 >= 0) { vpx[vpN] = vpx[p1]; vpy[vpN] = vpy[p1]; vpN++; }
+        vCount[v] = vpN - vStart[v];
+        vFlow[v] = sum / (e - s);
+        vBand[v] = veinBand(vFlow[v], 255);
+        vBorn[v] = S.simT;
+        vState[v] = 1;
+        vAtt[v * 4] = ax0; vAtt[v * 4 + 1] = ap0; vAtt[v * 4 + 2] = ax1; vAtt[v * 4 + 3] = ap1;
+        for (k = vStart[v]; k < vpN; k++) coverPoint(k);
+        vPathDirty[vBand[v]] = true;
+      }
+    }
+    s = e;
+  }
+}
+
+/* The live half: every vein's measure, band and state, each rebuild. The
+   measure is the mean of the eased body under the vein's points; below
+   the film level there is no tissue under it and it becomes a record,
+   and above the level by the band margin it comes back. The cost is one
+   read per point, which for a grown dish is under a hundred thousand. */
+function veinWidths() {
+  var dt = S.simT - veinWT;
+  veinWT = S.simT;
+  if (dt < 0) dt = 0;
+  var kw = dt > 0 ? 1 - Math.exp(-dt / VEIN_W_TAU) : 0;
+  for (var v = 0; v < veinN; v++) {
+    var st = vStart[v], en = st + vCount[v], sum = 0;
+    for (var p = st; p < en; p++) sum += bodyV[(vpy[p] | 0) * GW + (vpx[p] | 0)];
+    var f = vFlow[v] + (sum / (en - st) - vFlow[v]) * kw;
+    vFlow[v] = f;
+    var live = vState[v] ? (f >= BODY_LEVELS[0] ? 1 : 0) : (f >= BODY_LEVELS[0] * (1 + BAND_HYST) ? 1 : 0);
+    var b = live ? veinBand(f, vBand[v]) : 0;
+    if (live !== vState[v]) {
+      vRecDirty = true;
+      vPathDirty[live ? b : vBand[v]] = true;
+      vState[v] = live;
+    }
+    if (b !== vBand[v]) { vPathDirty[vBand[v]] = true; vPathDirty[b] = true; vBand[v] = b; }
+  }
+}
+
+/* One vein as a subpath: quadratics through the midpoints, as the old
+   bake drew a chain, so the walk's 45-degree steps are not a staircase;
+   the ends are hit exactly, which is where the snap put them. */
+function veinSubpath(path, v) {
+  var st = vStart[v], cnt = vCount[v];
+  path.moveTo(vpx[st], vpy[st]);
+  if (cnt === 2) { path.lineTo(vpx[st + 1], vpy[st + 1]); return; }
+  for (var q = 1; q < cnt - 1; q++) {
+    var px = vpx[st + q], py = vpy[st + q];
+    path.quadraticCurveTo(px, py, (px + vpx[st + q + 1]) * 0.5, (py + vpy[st + q + 1]) * 0.5);
+  }
+  path.lineTo(vpx[st + cnt - 1], vpy[st + cnt - 1]);
+}
+
+/* The paths, per band and for the records, remade only where the set of
+   veins they hold changed. */
+function bakeVeinGraph() {
+  var b, v, path;
+  for (b = 0; b < VEIN_BANDS.length; b++) {
+    if (!vPathDirty[b]) continue;
+    vPathDirty[b] = false;
+    path = null;
+    for (v = 0; v < veinN; v++) {
+      if (!vState[v] || vBand[v] !== b) continue;
+      if (!path) path = new Path2D();
+      veinSubpath(path, v);
+    }
+    vGraphPath[b] = path;
+  }
+  if (vRecDirty) {
+    vRecDirty = false;
+    path = null;
+    for (v = 0; v < veinN; v++) {
+      if (vState[v]) continue;
+      if (!path) path = new Path2D();
+      veinSubpath(path, v);
+    }
+    vRecPath = path;
+  }
+}
 
 function tintVeins(vein) {
   for (var i = 0; i < VEIN_BANDS.length; i++) {
@@ -6408,10 +6975,13 @@ function buildVeins() {
   veilDn = (dtE > 0 && S.running) ? Math.exp(-dtE / ENV_DN_TAU) : 0;
   veinFresh = true;
   /* --- the body ---
-     With the body drawn, this is the whole of the rebuild: the crests,
-     joins, masses and connecting paths below are the line layer, which is
-     not drawn while the body is (see BODY), so none of it is built. The
-     front's whiskers are built either way. */
+     With the body drawn, the rebuild is this, then the ridge and chain
+     passes below run on the body's own field and feed the vein graph
+     rather than the line layer: the joins, masses and connecting paths
+     are the line layer's, which is not drawn while the body is (see
+     BODY), and the graph's snap replaces the joins. The front's whiskers
+     are built either way. */
+  if (PROF) pvT = performance.now();
   if (BODY) {
     for (y = 0; y < GH - 1; y++) {
       var rowB = y * GW;
@@ -6430,9 +7000,34 @@ function buildVeins() {
     for (b = 0; b < VEIN_BANDS.length; b++) veinPath[b] = null;
     lobePath = null; lobeMaskPath = null;
     veinIslands = 0;
-    buildWhiskers();
-    return;
   }
+  /* The field the ridges are read from. Under the body it is the distance
+     field of the body's tube-level mask — see bodyD — whose ridge is the
+     medial axis of every tube; the mask is of the 1.5-second ease, so
+     the axis is the tube's line rather than where the flow peaked this
+     half-second. Zero under walls and on the rim, since the body is. The
+     floors are in that field's units, cells, rather than trail. */
+  if (PROF) pvMark(0);
+  if (BODY) bodyDist();
+  if (PROF) pvMark(1);
+  var rf = BODY ? bodyD : shpV;
+  var rMin = BODY ? VEIN_DT_MIN : RIDGE_MIN, rMinLo = rMin * RIDGE_HOLD;
+  var rMax = BODY ? VEIN_DT_MAX : Infinity;
+  /* How the four directions' curvatures are compared. On the trail a
+     crest is a parabola, and the raw across-curvature already favours
+     the direction that crosses it squarest. The distance field is a
+     FOLD — linear in distance from the axis on both sides — and under a
+     fold every direction that is not the tangent sees the same drop per
+     cell of distance, so on an axis-aligned tube the two diagonals tie
+     with the true across (each samples a row above and a row below), and
+     the first of them in table order won the direction map. Divided by
+     the sample spacing the score is the drop per cell of the direction's
+     own step, which is greatest square across the fold and distinct on
+     tubes at every angle: 2 against 1.41 for an axis-aligned tube, 2
+     against 1.41 for a diagonal one. The floors still test the raw
+     curvature. */
+  var dsc1 = BODY ? 1 / 1.4142 : 1;
+  var rageNow = S.simT;
 
   /* last rebuild's maps become this one's memory by swapping the pairs, which
      costs a pointer where copying 106,000 bytes costs 106,000 bytes */
@@ -6444,7 +7039,7 @@ function buildVeins() {
     var row = y * GW;
     for (x = 2; x < GW - 2; x++) {
       i = row + x;
-      var v = shpV[i];
+      var v = rf[i];
       /* Every floor here is two floors: the one a cell must clear to BECOME a
          crest, and the lower one it must fall through to stop being one. In
          between, last rebuild's answer stands.
@@ -6452,7 +7047,7 @@ function buildVeins() {
          Tested lowest bar first, so the great majority of the plate — bare
          agar, nowhere near either floor — still leaves on one comparison and
          never reads the memory at all. */
-      if (v < RIDGE_MIN_LO) continue;
+      if (v < rMinLo || v > rMax) continue;
       /* Never on a wall. Agar that has just been poured over carries no
          tissue by definition — diffuseTrail zeroes the trail inside wallM
          every step — but the surface this pass reads is an AVERAGE, and an
@@ -6467,23 +7062,27 @@ function buildVeins() {
          clear would have to be hooked onto every path that can move one. */
       if (wallM[i]) continue;
       var pd = rprev[i], held = pd !== 255;
-      if (!held && v < RIDGE_MIN) continue;
+      if (!held && v < rMin) continue;
       var floorK = held ? RIDGE_K_LO : RIDGE_K;
       var floorR = (held ? RIDGE_REL_LO : RIDGE_REL) * v;
       var bestS = 0, bestD = -1, bestK = 0;
       for (var d = 0; d < 4; d++) {
         var o = RIDGE_DIR[d].o;
-        var lo = shpV[i - o], hi = shpV[i + o];
+        var lo = rf[i - o], hi = rf[i + o];
         if (v < lo || v < hi) continue;         /* not a maximum across d */
         var kk = 2 * v - lo - hi;               /* curvature across d */
         if (kk <= floorK || kk <= floorR) continue;
         /* scored, not thresholded, so the tie-break can lean on last
            rebuild's direction without letting it lower the bar */
         var sc = d === pd ? kk * DIR_STICK : kk;
+        if (d & 1) sc *= dsc1;          /* the diagonals, whose samples are root two apart */
         if (sc > bestS) { bestS = sc; bestD = d; bestK = kk; bestLo = lo; bestHi = hi; }
       }
       if (bestD < 0) continue;
       rdir[i] = bestD;
+      /* the start of this cell's run as a crest: now, unless it was one
+         last rebuild too — the graph pins nothing that has not held */
+      if (!held) rage[i] = rageNow;
       /* Where the crest really is. The four directions quantise a vein's
          position to the cell it happens to fall in, so a crest drifting half a
          cell holds still and then jumps a whole one — the third source of
@@ -6500,7 +7099,12 @@ function buildVeins() {
     }
   }
 
+  if (PROF) pvMark(2);
   /* --- pass 1b: where the masses are --- */
+  /* The line layer's, and not built under the body: a junction is body,
+     and the body is drawn. */
+  var ldrawnN = 0;
+  if (!BODY) {
   /* Every other cell in each direction, so a pad the size of a flake costs a
      few hundred discs rather than a few thousand; the discs are wider than
      the lattice they sit on, so the union is still solid.
@@ -6600,13 +7204,13 @@ function buildVeins() {
     ltier[(((lseg[i * 2 + 1] - 0.5) | 0) >> 1) * LW + (((lseg[i * 2] - 0.5) | 0) >> 1)] = lbuck[i];
   }
   ldrawn.fill(0);
-  var ldrawnN = 0;
   for (i = 0; i < lsegN; i++) {
     var ln = (((lseg[i * 2 + 1] - 0.5) | 0) >> 1) * LW + (((lseg[i * 2] - 0.5) | 0) >> 1);
     var lx0 = ln % LW, ly0 = (ln / LW) | 0;
     if (!ldrawn[ln] && ((lx0 > 0 && ltier[ln - 1] >= 0) || (lx0 < LW - 1 && ltier[ln + 1] >= 0) ||
         (ly0 > 0 && ltier[ln - LW] >= 0) || (ly0 < LH - 1 && ltier[ln + LW] >= 0))) { ldrawn[ln] = 1; ldrawnN++; }
   }
+  }   /* !BODY: the masses */
 
   /* --- pass two: walk each ridge from end to end into a polyline ---
      Emitting one short segment per ridge cell instead — which is the obvious
@@ -6619,7 +7223,8 @@ function buildVeins() {
      dropped, which is a far better filter for noise than any threshold on a
      single cell. */
   rvis.fill(0);
-  rchain.fill(0); epN = 0; chainN = 0; jpN = 0;
+  if (!BODY) rchain.fill(0);   /* the joins' map; the graph has no joins */
+  epN = 0; chainN = 0; jpN = 0;
   for (y = 2; y < GH - 2; y++) {
     var row2 = y * GW;
     for (x = 2; x < GW - 2; x++) {
@@ -6649,7 +7254,7 @@ function buildVeins() {
       chi[n] = c;
       chx[n] = (c % GW) + 0.5 + roff[c] * RIDGE_DIR[cd].ax;
       chy[n] = ((c / GW) | 0) + 0.5 + roff[c] * RIDGE_DIR[cd].ay;
-      sum += shpV[c]; n++;
+      sum += rf[c]; n++;
       var nx2 = c, pc = c;
       while (n < 2000) {
         pc = chi[n - 1];
@@ -6664,7 +7269,7 @@ function buildVeins() {
         chi[n] = nx2;
         chx[n] = qx + 0.5 + roff[nx2] * RIDGE_DIR[cd].ax;
         chy[n] = qy + 0.5 + roff[nx2] * RIDGE_DIR[cd].ay;
-        sum += shpV[nx2]; n++;
+        sum += rf[nx2]; n++;
       }
       /* reverse in place so the backward walk can append */
       for (var a2 = 0, b2 = n - 1; a2 < b2; a2++, b2--) {
@@ -6686,9 +7291,12 @@ function buildVeins() {
         chi[n] = nx2;
         chx[n] = rx + 0.5 + roff[nx2] * RIDGE_DIR[cd].ax;
         chy[n] = ry + 0.5 + roff[nx2] * RIDGE_DIR[cd].ay;
-        sum += shpV[nx2]; n++;
+        sum += rf[nx2]; n++;
       }
       if (n < RIDGE_MINPTS) continue;
+      /* under the body the chain is a candidate for the graph and nothing
+         else: no runs, no envelope, no ends for the joins to reach from */
+      if (BODY) { pinChain(n); continue; }
 
       var mean = sum / n;
       b = pickBand(mean, chi, n);
@@ -6729,6 +7337,17 @@ function buildVeins() {
       noteEnd(chx[0], chy[0], chx[0] - chx[2], chy[0] - chy[2], b, envBucket(venv[chi[0]]), chainN);
       noteEnd(chx[n - 1], chy[n - 1], chx[n - 1] - chx[n - 3], chy[n - 1] - chy[n - 3], b, envBucket(venv[chi[n - 1]]), chainN);
     }
+  }
+
+  /* --- the graph: widths, and the paths --- */
+  if (BODY) {
+    if (PROF) pvMark(3);
+    veinWidths();
+    if (PROF) pvMark(4);
+    bakeVeinGraph();
+    if (PROF) { pvMark(5); profVeinN++; }
+    buildWhiskers();
+    return;
   }
 
   /* --- the joins: a chain end reaches for the chain it was walking toward --- */
@@ -7043,7 +7662,22 @@ function strokeVeins(tc, sx, sy, mono) {
   var k, b;
   if (mono) {
     ctx.fillStyle = '#fff';
-    if (BODY) { for (k = 0; k < BODY_LEVELS.length; k++) if (bodyPath[k]) ctx.fill(bodyPath[k], 'evenodd'); }
+    /* The live graph is not in the mask. The punch exists to clear the
+       accumulator where the fresh drawing has MOVED from the old, and a
+       vein never moves: under every stroke this rebuild lays is the same
+       stroke, decayed by one interval, and an opaque line over its own
+       ghost is the line. What does change — a band narrowing, a live
+       vein becoming a record — leaves the old width fading under the
+       new for a fifth of a second, which is a tube thinning, and the
+       only thing the punch would buy is that stroke pass twice over.
+       The records ARE in it: they are drawn at INK_A over agar the body
+       punch does not reach, and a translucent stroke laid on its own
+       decayed ghost every rebuild converges to twice its alpha, which
+       is the accumulation the punch was built against. */
+    if (BODY) {
+      for (k = 0; k < BODY_LEVELS.length; k++) if (bodyPath[k]) ctx.fill(bodyPath[k], 'evenodd');
+      if (vRecPath) { ctx.strokeStyle = '#fff'; ctx.lineWidth = VEIN_BANDS[0].w + 0.5; ctx.stroke(vRecPath); }
+    }
     else if (lobeMaskPath) ctx.fill(lobeMaskPath);
     for (b = VEIN_BANDS.length - 1; b >= 0; b--) {
       if (!veinPath[b]) continue;
@@ -7090,6 +7724,27 @@ function strokeVeins(tc, sx, sy, mono) {
       ctx.fillStyle = BODY_STYLE[k];
       ctx.fill(bodyPath[k], 'evenodd');
     }
+    /* the graph over the body: the records first, dim, as the line
+       record was composited — the track of a tube the tissue has left;
+       then the live veins, widest first, so a hairline lands on top of
+       the trunk it joins. Not clipped to the body: a vein is where it
+       was pinned, and the tube swelling and thinning under it is the
+       picture. */
+    if (vRecPath) {
+      ctx.globalAlpha = INK_A;
+      ctx.lineWidth = VEIN_BANDS[0].w;
+      ctx.strokeStyle = VEIN_BANDS[0].ink;
+      ctx.stroke(vRecPath);
+      ctx.globalAlpha = 1;
+    }
+    var pst = PROF ? performance.now() : 0;
+    for (b = VEIN_BANDS.length - 1; b >= 0; b--) {
+      if (!vGraphPath[b]) continue;
+      ctx.lineWidth = VEIN_BANDS[b].w;
+      ctx.strokeStyle = VEIN_BANDS[b].style;
+      ctx.stroke(vGraphPath[b]);
+    }
+    if (PROF) profVein[6] += performance.now() - pst;
   }
   if (lobePath && !BODY) {
     ctx.fillStyle = LOBE_STYLE;
@@ -9886,8 +10541,38 @@ function init() {
        RUNS since the envelope split chains at tier boundaries, so the count is
        an upper bound on chains rather than the thing itself. */
     veinIslands: function () { return veinIslands; },
+    /* the pinned graph, as copies: the harness differences two samples to
+       check that no point ever moves, and reads the attachments to check
+       that no vein was pinned adrift. att is four per vein — [vein,
+       point, vein, point] for the two ends, vein -1 unattached, -2 the
+       core. flow is the eased measure the band is read from. */
+    veinGraph: function () {
+      return { n: veinN, start: vStart.slice(0, veinN), count: vCount.slice(0, veinN),
+               px: vpx.slice(0, vpN), py: vpy.slice(0, vpN),
+               band: vBand.slice(0, veinN), state: vState.slice(0, veinN),
+               flow: vFlow.slice(0, veinN), born: vBorn.slice(0, veinN), att: vAtt.slice(0, veinN * 4),
+               settle: VEIN_SETTLE, r: VEIN_R, snap: VEIN_SNAP, minlen: VEIN_MINLEN };
+    },
+    /* the pass-one maps the graph pins from, as copies, with the clock
+       they are read against: where the ridges are, when each cell became
+       one, and what the graph already covers */
+    /* the phase timings above, as ms per rebuild since last read; zeros
+       without ?prof */
+    veinProf: function () {
+      var n = profVeinN || 1, o = { rebuilds: profVeinN, trace: profVein[0] / n, dist: profVein[1] / n,
+        pass1: profVein[2] / n, pass2: profVein[3] / n, widths: profVein[4] / n, bake: profVein[5] / n,
+        stroke: profVein[6] / n };
+      profVein.fill(0); profVeinN = 0;
+      return o;
+    },
+    ridgeMaps: function () {
+      return { rdir: new Uint8Array(rdir), rage: new Float32Array(rage), vcov: new Uint8Array(vcov),
+               bodyV: new Float32Array(bodyV), bodyD: new Float32Array(bodyD), simT: S.simT };
+    },
     veins: function () {
       var ch = 0, pt = 0;
+      /* under the body the lines are the graph, and these are its veins */
+      if (BODY) return { chains: veinN, points: vpN, mean: veinN ? +(vpN / veinN).toFixed(2) : 0 };
       for (var b = 0; b < vsegN.length; b++) {
         var r = 0, end = vsegN[b];
         while (r < end) { r++; var c = vseg[b][r++]; ch++; pt += c; r += c * 2; }
