@@ -605,9 +605,17 @@ var COND_LEVEL = 34.0;     // the tube a fully conductive cell maintains
    so from the food end, not from the core.
 
    Two signals, then, meeting in the middle. fedF is the find: every feeding
-   agent stamps its cell with the share of the flake's food still there, so
-   a fresh flake shouts and a nearly-spent one whispers, along the same line
-   the hold and the pull already run down. bodyF is the body: the cytoplasm
+   agent stamps its cell 1 while the flake has food in it. At 1 and not at
+   the share of food left, which was the first form: the fields keep one
+   value and one label per cell, so where two flakes' signals overlap the
+   louder wins, and a flake half eaten was being shouted down by a fresher
+   one across the last forty cells of its own route — the connection cut
+   from the core end while the pad was still feeding (measured on EXP-01 at
+   fifty seconds: link 0.002 at the pad end of flake a's path, 0.4 at the
+   core end, with a's pad at 0.44 and c's at 0.55). At 1 the boundary
+   between two flakes' signals is the midline between them, each keeps its
+   route to the core, and a route lapses when its flake is done and not
+   before. bodyF is the body: the cytoplasm
    within FED_CORE_R of the inoculation point, stamped 1 every sweep, which
    is the mass the culture was seeded from and where nearly all of it still
    sits. Each PROPAGATES as a relaxation: every pass a cytoplasm cell takes
@@ -722,7 +730,8 @@ var FED_FADE     = 0.90;  // what a cell keeps of its own value per pass, on cyt
 var FED_OFF      = 0.50;  // ...and off it, where a signal dies in a few passes
 var FED_PASSES   = 2;     // relaxation passes per slow sweep: cells per KNOT_EVERY steps
 var FED_CORE_R   = 16;    // cells around the inoculation point that are the body signal's source
-var FED_SHARP    = 16;    // exponent on the detour ratio: how tight a corridor the trunk is
+var FED_SHARP_LOG = 4;    // the exponent on the detour ratio is 2 to this: squarings, not Math.pow
+var FED_SHARP    = 1 << FED_SHARP_LOG; // ...which is 16: how tight a corridor the trunk is
 var FED_GAIN     = 2.0;   // flux multiplier on the connection, before the feedback
 var FED_LAY_GAIN = 0.50;  // extra deposit per step on the connection
 var FED_R        = 8;     // cells: how far the connection's shade reaches
@@ -2090,6 +2099,7 @@ var padF = new Float32Array(NCELL), padB = new Float32Array(NCELL);
 var bodyF = new Float32Array(NCELL), bodyB = new Float32Array(NCELL);
 var linkF = new Float32Array(NCELL);
 var shadeF = new Uint8Array(NCELL);
+var fedLastY = new Int16Array(GW);     // the column pass of the shade's dilation: last row written, per column
 var nodeAt = new Int16Array(NCELL);    // cell -> node index, -1 for none
 /* And the same map at the fan's radius: which flake an agent standing here is
    feeding on, which is a wider disc than the flake itself because a pad
@@ -3512,10 +3522,16 @@ function slowFields() {
    the scan order is one the determinism guarantee (section 0b) cannot
    cover. Two arrays and a swap cost nothing the sim notices.
 
-   Almost all of the dish is agar carrying no signal, and the loop pays for
-   that as it does for the other slow fields: one load and a test. The
-   eight neighbour reads are spent only on cytoplasm. */
-function fedRelax(src, dst, lsrc, ldst) {
+   Both signals in the one pass, since they ride the same cytoplasm: the
+   cell test, the row offsets and the neighbour indices are shared, and
+   that halves what the pass costs (measured: 7.1 ms a step with the two
+   fields swept separately against 5.7 on main, and the two relaxations
+   were most of the difference). Almost all of the dish is agar carrying no
+   signal, and the loop pays for that as it does for the other slow fields:
+   a load and a test per field. The neighbour reads are spent only on
+   cytoplasm. */
+function fedRelax() {
+  var fs = fedF, fd = fedB, ls = padF, ld = padB, bs = bodyF, bd = bodyB;
   var i, x, y, row;
   for (y = 0; y < GH; y++) {
     row = y * GW;
@@ -3523,65 +3539,68 @@ function fedRelax(src, dst, lsrc, ldst) {
     var dn = y < GH - 1 ? row + GW : -1;
     for (x = 0; x < GW; x++) {
       i = row + x;
-      var v = src[i];
+      var v = fs[i], b = bs[i];
       if (trail[i] < FED_BODY || wallM[i]) {
-        /* off cytoplasm: the signal has nothing to ride and dies */
-        v *= FED_OFF;
-        dst[i] = v < 0.004 ? 0 : v;
-        if (ldst) ldst[i] = lsrc[i];
+        /* off cytoplasm: a signal has nothing to ride and dies */
+        if (v > 0) { v *= FED_OFF; fd[i] = v < 0.004 ? 0 : v; } else fd[i] = 0;
+        if (b > 0) { b *= FED_OFF; bd[i] = b < 0.004 ? 0 : b; } else bd[i] = 0;
+        ld[i] = ls[i];
         continue;
       }
-      /* the strongest neighbour, and which — the label follows it. Straight
-         neighbours first at the straight step, then the diagonals at the
-         diagonal one, and the neighbour order is fixed, so a tie is broken
-         the same way on every machine, which is what the label needs to be
-         deterministic. */
-      var m = 0, mi = -1, n;
-      if (up >= 0) { n = src[up + x]; if (n > m) { m = n; mi = up + x; } }
-      if (x > 0) { n = src[i - 1]; if (n > m) { m = n; mi = i - 1; } }
-      if (x < GW - 1) { n = src[i + 1]; if (n > m) { m = n; mi = i + 1; } }
-      if (dn >= 0) { n = src[dn + x]; if (n > m) { m = n; mi = dn + x; } }
-      m *= FED_STEP;
-      var md = 0, mdi = -1;
+      /* the strongest neighbour of each, and which — the find's label
+         follows its own. Straight neighbours first at the straight step,
+         then the diagonals at the diagonal one, and the neighbour order is
+         fixed, so a tie is broken the same way on every machine, which is
+         what the label needs to be deterministic. */
+      var m = 0, mi = -1, mb = 0, n, j;
+      if (up >= 0) { j = up + x; n = fs[j]; if (n > m) { m = n; mi = j; } n = bs[j]; if (n > mb) mb = n; }
+      if (x > 0) { j = i - 1; n = fs[j]; if (n > m) { m = n; mi = j; } n = bs[j]; if (n > mb) mb = n; }
+      if (x < GW - 1) { j = i + 1; n = fs[j]; if (n > m) { m = n; mi = j; } n = bs[j]; if (n > mb) mb = n; }
+      if (dn >= 0) { j = dn + x; n = fs[j]; if (n > m) { m = n; mi = j; } n = bs[j]; if (n > mb) mb = n; }
+      m *= FED_STEP; mb *= FED_STEP;
+      var md = 0, mdi = -1, mdb = 0;
       if (up >= 0) {
-        if (x > 0) { n = src[up + x - 1]; if (n > md) { md = n; mdi = up + x - 1; } }
-        if (x < GW - 1) { n = src[up + x + 1]; if (n > md) { md = n; mdi = up + x + 1; } }
+        if (x > 0) { j = up + x - 1; n = fs[j]; if (n > md) { md = n; mdi = j; } n = bs[j]; if (n > mdb) mdb = n; }
+        if (x < GW - 1) { j = up + x + 1; n = fs[j]; if (n > md) { md = n; mdi = j; } n = bs[j]; if (n > mdb) mdb = n; }
       }
       if (dn >= 0) {
-        if (x > 0) { n = src[dn + x - 1]; if (n > md) { md = n; mdi = dn + x - 1; } }
-        if (x < GW - 1) { n = src[dn + x + 1]; if (n > md) { md = n; mdi = dn + x + 1; } }
+        if (x > 0) { j = dn + x - 1; n = fs[j]; if (n > md) { md = n; mdi = j; } n = bs[j]; if (n > mdb) mdb = n; }
+        if (x < GW - 1) { j = dn + x + 1; n = fs[j]; if (n > md) { md = n; mdi = j; } n = bs[j]; if (n > mdb) mdb = n; }
       }
-      md *= FED_STEP_D;
+      md *= FED_STEP_D; mdb *= FED_STEP_D;
       if (md > m) { m = md; mi = mdi; }
+      if (mdb > mb) mb = mdb;
       /* and the receiving cell's thickness: a thin cell passes a little less on */
       var tw = trail[i];
-      if (tw < FED_THICK) m *= 1 - FED_THIN * (1 - tw / FED_THICK);
+      if (tw < FED_THICK) { tw = 1 - FED_THIN * (1 - tw / FED_THICK); m *= tw; mb *= tw; }
+      /* the find, with its label: the largest product the path has crossed,
+         this cell included — the body field read is the one being read,
+         not the one being written, so it is the same for every cell
+         however the scan is ordered. A cell keeping its own value keeps its
+         label, raised to its own product if the body signal under it has
+         risen since, so the ratio is bounded by one rather than clamped. */
+      var lb, pr;
       v *= FED_FADE;
       if (m > v) {
-        dst[i] = m < 0.004 ? 0 : m;
-        if (ldst) {
-          /* the label: the largest product the path has crossed, this cell
-             included — bodyF is not written by this pass, so it is the
-             same field for every cell however the scan is ordered */
-          var lb = lsrc[mi], pr = m * bodyF[i];
-          ldst[i] = pr > lb ? pr : lb;
-        }
+        fd[i] = m < 0.004 ? 0 : m;
+        lb = ls[mi]; pr = m * b;
       } else {
-        dst[i] = v < 0.004 ? 0 : v;
-        if (ldst) {
-          /* a cell keeping its own value keeps its label, raised to its own
-             product if the body signal under it has risen since — so the
-             ratio is bounded by one everywhere, rather than clamped there */
-          var lk2 = lsrc[i], pr2 = v * bodyF[i];
-          ldst[i] = pr2 > lk2 ? pr2 : lk2;
-        }
+        fd[i] = v < 0.004 ? 0 : v;
+        lb = ls[i]; pr = v * b;
       }
+      ld[i] = pr > lb ? pr : lb;
+      /* the body, no label */
+      b *= FED_FADE;
+      if (mb > b) b = mb;
+      bd[i] = b < 0.004 ? 0 : b;
     }
   }
+  /* swap: the written halves become the fields */
+  fedF = fd; fedB = fs; padF = ld; padB = ls; bodyF = bd; bodyB = bs;
 }
 
 function fedSweep() {
-  var i, x, y, pass, row, t;
+  var i, x, y, pass, row;
   /* The body's source: cytoplasm within FED_CORE_R of the inoculation point
      is the body, at 1, every sweep. */
   var inoc = S.exp.inoc, cx = inoc.x | 0, cy = inoc.y | 0, r2 = FED_CORE_R * FED_CORE_R;
@@ -3597,18 +3616,17 @@ function fedSweep() {
       if (dx * dx + dy * dy <= r2 && trail[row + x] >= FED_BODY && !wallM[row + x]) bodyF[row + x] = 1;
     }
   }
-  for (pass = 0; pass < FED_PASSES; pass++) {
-    fedRelax(fedF, fedB, padF, padB);
-    t = fedF; fedF = fedB; fedB = t;
-    t = padF; padF = padB; padB = t;
-    fedRelax(bodyF, bodyB, null, null);
-    t = bodyF; bodyF = bodyB; bodyB = t;
-  }
+  for (pass = 0; pass < FED_PASSES; pass++) fedRelax();
 
   /* The connection: the product of the two signals against the label, to
      the FED_SHARP. Cells with either signal missing, or no label, are not
      on any connection and get 0; a ratio over 1 — a label stamped on the
-     far side of a pad — is a trunk and is clamped to one. */
+     far side of a pad — is a trunk and is clamped to one. The power is
+     FED_SHARP_LOG squarings rather than Math.pow, for two reasons that
+     point the same way: pow was a fifth of the whole sweep (measured: 2.3
+     ms of 11.4), and it is not specified to the bit across engines, where
+     an IEEE multiply is — so this is the form the determinism guarantee
+     (section 0b) can actually make. */
   for (i = 0; i < NCELL; i++) {
     var f = fedF[i], lk = 0;
     if (f > 0) {
@@ -3616,7 +3634,7 @@ function fedSweep() {
       if (b > 0 && pd > 0) {
         lk = f * b / pd;
         if (lk > 1) lk = 1;
-        lk = Math.pow(lk, FED_SHARP);
+        for (var sq = 0; sq < FED_SHARP_LOG; sq++) lk *= lk;
         if (lk < 0.001) lk = 0;
       }
     }
@@ -3627,29 +3645,35 @@ function fedSweep() {
      separable passes, a row pass into bodyB and a column pass into fedB,
      like rnear in buildVeins — both spare halves are free until the next
      sweep. Each pass spreads only from cells that have something to spread,
-     so the cost is a window per trunk cell rather than a window per cell of
-     the dish. */
-  var nearH = bodyB, near = fedB;
+     and each remembers how far along its row (its column) it has already
+     written, so a run of trunk cells writes each cell of the band once
+     rather than FED_R times over. The mask is the same union of windows
+     either way; this is only the cost of stamping it. */
+  var nearH = bodyB, near = fedB, lastX, xa, xb, ya, yb, xx, yy;
   nearH.fill(0);
   for (y = 0; y < GH; y++) {
     row = y * GW;
+    lastX = -1;
     for (x = 0; x < GW; x++) {
       if (linkF[row + x] < FED_HI) continue;
-      var xa = x - FED_R, xb = x + FED_R;
-      if (xa < 0) xa = 0;
+      xa = x - FED_R; xb = x + FED_R;
+      if (xa <= lastX) xa = lastX + 1;
       if (xb > GW - 1) xb = GW - 1;
-      for (var xx = xa; xx <= xb; xx++) nearH[row + xx] = 1;
+      for (xx = xa; xx <= xb; xx++) nearH[row + xx] = 1;
+      lastX = xb;
     }
   }
   near.fill(0);
+  fedLastY.fill(-1);
   for (y = 0; y < GH; y++) {
     row = y * GW;
     for (x = 0; x < GW; x++) {
       if (nearH[row + x] === 0) continue;
-      var ya = y - FED_R, yb = y + FED_R;
-      if (ya < 0) ya = 0;
+      ya = y - FED_R; yb = y + FED_R;
+      if (ya <= fedLastY[x]) ya = fedLastY[x] + 1;
       if (yb > GH - 1) yb = GH - 1;
-      for (var yy = ya; yy <= yb; yy++) near[yy * GW + x] = 1;
+      for (yy = ya; yy <= yb; yy++) near[yy * GW + x] = 1;
+      fedLastY[x] = yb;
     }
   }
 
@@ -4153,13 +4177,12 @@ function step() {
     var dep = 0;
     if (feeding) {
       dep = stepDeposit * FEED_LAY;
-      /* and the return signal is sourced here: the pad says how much of the
-         flake is still there, and the rest of the plate hears it, labelled
-         with the body signal standing at this cell so that the connection
-         normalises to this flake. A max and a copy, so the order the pad's
-         agents are visited in cannot matter. */
-      var fsrc = foodLeft(fi);
-      if (fedF[cell] < fsrc) { fedF[cell] = fsrc; padF[cell] = fsrc * bodyF[cell]; }
+      /* and the return signal is sourced here: the pad says there is food,
+         and the rest of the plate hears it, labelled with the body signal
+         standing at this cell so that the connection normalises to this
+         flake. Set to a constant and copied from a field neither agent
+         writes, so the order the pad's agents are visited in cannot matter. */
+      if (fedF[cell] < 1) { fedF[cell] = 1; padF[cell] = bodyF[cell]; }
     }
     else if (!blocked) dep = stepDeposit * ((tip || agoal[k]) ? TIP_LAY : spd / SPEED);
     /* The connection to a flake thickens under the traffic it carries, and
