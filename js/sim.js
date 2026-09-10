@@ -3862,6 +3862,7 @@ function step() {
 
   diffuseTrail();
   if (stepsRun % KNOT_EVERY === 0) slowFields();
+  if (VEIN_TREE && stepsRun % TREE_EVERY === 0) treeGrow();
 
   var i, k;
   /* Last step's contact counts, kept before this step's are zeroed: the fan
@@ -5093,6 +5094,7 @@ function snapshotVeinTemporal(fs) {
   fs.vBorn = vBorn.slice(0, veinN); fs.vState = vState.slice(0, veinN);
   fs.vAtt = vAtt.slice(0, veinN * 4);
   fs.vNext = vNext.slice(0, veinN); fs.vPrev = vPrev.slice(0, veinN);
+  if (VEIN_TREE) snapshotTree(fs);
 }
 
 /* The graph out of a snapshot; a snapshot without one (taken before the
@@ -5123,6 +5125,7 @@ function restoreVeinGraph(fs) {
 function restoreVeinTemporal(fs) {
   if (!fs || !fs.shpV) { resetVeinTemporal(); return; }
   restoreVeinGraph(fs);
+  if (VEIN_TREE) restoreTree(fs);
   shpV.set(fs.shpV);
   if (fs.shpVB) shpVB.set(fs.shpVB);
   if (fs.bodyV) bodyV.set(fs.bodyV); else bodyV.set(fs.shpV);
@@ -6180,6 +6183,9 @@ var VEIN_TUBE_Q   = 4;
    kept, off, for the record it can make and for a day the picture wants
    a fixed skeleton again. */
 var VEIN_GRAPH = true;                  // pin and paint the frozen graph
+/* ...or grow the veins as a tree into the tissue instead of pinning
+   the trail's skeleton — see the backbone section before resetVeinGraph. */
+var VEIN_TREE = true;
 /* ...and whether the tubes are stroked at all. They are not: the user
    wants LINES — the veins as a drawing, the pinned graph's strokes at
    the band widths on the bare plate — not the tissue as a shape. The
@@ -6203,6 +6209,9 @@ function tubeKey(d) {
    are kept. Read before this rebuild's pinning, so a piece is outlined
    for one rebuild after its first vein — a blink no one sees. */
 function bodyOutlines() {
+  /* the tree draws the drop's veins from the first second, so there is
+     no vein-less piece to outline */
+  if (VEIN_TREE) { outlinePath = null; return; }
   var p, i;
   for (i = 0; i <= compN; i++) { compVein[i] = 0; compPts[i] = 0; }
   for (p = 0; p < vpN; p++) {
@@ -6778,6 +6787,358 @@ var profVein = new Float64Array(8), profVeinN = 0, pvT = 0;
 function pvMark(k) { var t = performance.now(); profVein[k] += t - pvT; pvT = t; }
 
 /* Forget the graph: a new dish. */
+/* ---- the backbone: an explicit vein tree grown from the drop ----
+
+   The reference (a Physarum dish photographed from above, and the
+   ten-hour time-lapse) shows one thing the trail field's skeleton never
+   gave: HIERARCHY. Two to four trunks leave the inoculum, each tapering
+   as it branches, the branches tapering again, down to a lace of
+   hairlines behind the front. Trunk to lace is ten to one in width. The
+   lace between trunks thins away over the hours, leaving pale ghosts;
+   the trunks to food stay.
+
+   So the veins are not read off the tissue any more. They are GROWN
+   into it, as a tree, by space colonisation (Runions et al. 2005, the
+   leaf-venation algorithm): the tissue supplies attractors, every
+   attractor pulls the nearest vein node within reach, and a node that is
+   pulled extends one step toward the mean of its pulls. A node never
+   moves once placed, growth happens only at existing nodes, and nothing
+   appears on its own — the three rules the picture has to keep.
+
+   Width is the pipe model: a node is as wide as the leaves it carries,
+   to the power one over PIPE_N, so a trunk carrying a thousand tips is
+   fifteen times a hairline, and a twig carrying two is barely more than
+   one. The return signal shows up in what is kept: a tip that has
+   nothing left to pull it, and stands neither on food nor on the fed
+   corridor to food, retracts — its node turns ghost, then its parent a
+   moment later — and the lace coarsens the way the time-lapse's does. A
+   ghost is still drawn, pale: a vein is never erased.
+
+   Everything here is in grid cells and sim-seconds and reads sim.js's
+   globals (bodyV, wallM, feedAt, linkF, S, BODY_LEVELS, VEIN_BANDS, the
+   mask box bmX0..bmY1); buildVeins calls treeGrow, the composite's
+   painter paintTree, and the snapshot carries the arrays. */
+
+var TREE_MAX  = 60000;        /* nodes */
+var TREE_STEP = 2.0;          /* cells a node extends per growth */
+var TREE_INF  = 12;           /* cells: how far an attractor reaches for a node */
+var TREE_KILL = 2.5;          /* cells: an attractor this close to a node is spent */
+var TREE_SP   = 3;            /* cells: attractor lattice spacing (the lace spacing) */
+var TREE_LV   = 1;            /* index into BODY_LEVELS: trail at which a cell is tissue the tree grows into */
+var TREE_EVERY = 4;           /* sim steps between growth passes: the tree is on the sim's clock, not the frame's */
+var TREE_MIN_COS = 0.77;      /* ~40 degrees: a node does not grow a second child this close to one it has */
+var TREE_BINS = 8;            /* angular bins the pulls on a node are sorted into */
+var TREE_INERTIA = 0.6;       /* share of the parent segment's heading kept by a continuing tip: a vein bends, it does not zigzag */
+var PIPE_N    = 2.4;          /* pipe-model exponent: w = W0 * leaves^(1/PIPE_N) */
+var TREE_W0   = 0.32;         /* cells: a hairline */
+var TREE_WMAX = 4.4;          /* cells: the widest trunk */
+var TREE_W_TAU = 0.8;         /* seconds the width eases over */
+var RET_IDLE  = 5.0;          /* seconds a tip stands unpulled before it retracts */
+var RET_DT    = 0.25;         /* seconds between one node's retraction and its parent's */
+var TREE_GHOST_A = 0.34;      /* a ghost's alpha */
+var TREE_GHOST_W = 0.5;       /* cells: a ghost's width, at most */
+var TREE_REPAINT = 0.2;       /* seconds between repaints while running */
+var TREE_WQ   = 4;            /* width quantisation, steps a cell */
+
+var tx = new Float32Array(TREE_MAX), ty = new Float32Array(TREE_MAX);
+var tpar = new Int32Array(TREE_MAX);
+var tw = new Float32Array(TREE_MAX);          /* eased width */
+var tleaf = new Int32Array(TREE_MAX);         /* live tips under this node, itself included if a tip */
+var tkids = new Int16Array(TREE_MAX);         /* live children */
+var tstate = new Uint8Array(TREE_MAX);        /* 1 live, 0 ghost */
+var tidle = new Float32Array(TREE_MAX);       /* seconds since last pulled */
+var tborn = new Float32Array(TREE_MAX);
+var tN = 0;
+/* growth accumulators, per node and angular bin, for one pass: a node
+   with tissue all round it (the root in the drop) has pulls that cancel
+   as one sum, so they are sorted by direction and the fullest bin wins,
+   one child per pass; the next pass the rest still pull and the next
+   sector gets its child. That is how the drop sprouts its spokes. */
+var tgx = new Float32Array(TREE_MAX * TREE_BINS), tgy = new Float32Array(TREE_MAX * TREE_BINS);
+var tgn = new Int32Array(TREE_MAX * TREE_BINS);
+var tgAny = new Uint8Array(TREE_MAX);
+var tPulled = new Int32Array(TREE_MAX), tPulledN = 0;
+/* the last-placed live node in each cell, -1 for none; and the cells
+   already spent by a node's kill disc */
+var tAt = new Int32Array(GW * GH);
+var tcov = new Uint8Array(GW * GH);
+var treeT = 0, treePaintT = -1e9, treeDirty = true;
+
+function treeReset() {
+  tN = 0; treeT = S.simT; treePaintT = -1e9; treeDirty = true;
+  tAt.fill(-1); tcov.fill(0);
+  if (S.exp) {
+    var ix = (S.exp.inoc.x | 0) + 0.5, iy = (S.exp.inoc.y | 0) + 0.5;
+    treeAdd(ix, iy, -1);
+  }
+}
+
+function treeAdd(x, y, parent) {
+  if (tN >= TREE_MAX) return -1;
+  var i = tN++;
+  tx[i] = x; ty[i] = y; tpar[i] = parent;
+  tw[i] = TREE_W0; tleaf[i] = 1; tkids[i] = 0;
+  tstate[i] = 1; tidle[i] = 0; tborn[i] = S.simT;
+  if (parent >= 0) { tkids[parent]++; tidle[parent] = 0; }
+  treeCover(i);
+  return i;
+}
+
+/* the kill disc: attractors inside it are spent; the cell map keeps the
+   node for the nearest-node search */
+function treeCover(i) {
+  var cx = tx[i] | 0, cy = ty[i] | 0, r = Math.ceil(TREE_KILL), r2 = TREE_KILL * TREE_KILL;
+  if (cx >= 0 && cy >= 0 && cx < GW && cy < GH) tAt[cy * GW + cx] = i;
+  for (var dy = -r; dy <= r; dy++) {
+    var y = cy + dy; if (y < 0 || y >= GH) continue;
+    for (var dx = -r; dx <= r; dx++) {
+      var x = cx + dx; if (x < 0 || x >= GW) continue;
+      var ox = x + 0.5 - tx[i], oy = y + 0.5 - ty[i];
+      if (ox * ox + oy * oy <= r2) tcov[y * GW + x] = 1;
+    }
+  }
+}
+
+/* the nearest live node to a cell within TREE_INF, by expanding square
+   rings on the cell map: the first ring with a node is within a cell of
+   the nearest, which is all the pull needs */
+function treeNearest(cx, cy) {
+  var c0 = cy * GW + cx, n0 = tAt[c0];
+  if (n0 >= 0 && tstate[n0]) return n0;
+  var best = -1, bd = 1e9, R = TREE_INF;
+  for (var r = 1; r <= R; r++) {
+    var y0 = cy - r, y1 = cy + r, x0 = cx - r, x1 = cx + r, x, y, n;
+    for (x = x0; x <= x1; x++) {
+      if (x < 0 || x >= GW) continue;
+      if (y0 >= 0) { n = tAt[y0 * GW + x]; if (n >= 0 && tstate[n]) { var d = (tx[n] - cx - 0.5) * (tx[n] - cx - 0.5) + (ty[n] - cy - 0.5) * (ty[n] - cy - 0.5); if (d < bd) { bd = d; best = n; } } }
+      if (y1 < GH) { n = tAt[y1 * GW + x]; if (n >= 0 && tstate[n]) { var d2 = (tx[n] - cx - 0.5) * (tx[n] - cx - 0.5) + (ty[n] - cy - 0.5) * (ty[n] - cy - 0.5); if (d2 < bd) { bd = d2; best = n; } } }
+    }
+    for (y = y0 + 1; y <= y1 - 1; y++) {
+      if (y < 0 || y >= GH) continue;
+      if (x0 >= 0) { n = tAt[y * GW + x0]; if (n >= 0 && tstate[n]) { var d3 = (tx[n] - cx - 0.5) * (tx[n] - cx - 0.5) + (ty[n] - cy - 0.5) * (ty[n] - cy - 0.5); if (d3 < bd) { bd = d3; best = n; } } }
+      if (x1 < GW) { n = tAt[y * GW + x1]; if (n >= 0 && tstate[n]) { var d4 = (tx[n] - cx - 0.5) * (tx[n] - cx - 0.5) + (ty[n] - cy - 0.5) * (ty[n] - cy - 0.5); if (d4 < bd) { bd = d4; best = n; } } }
+    }
+    if (best >= 0) return best;
+  }
+  return -1;
+}
+
+/* One growth pass, every TREE_EVERY sim steps, from step(). On the sim's
+   clock and reading the sim's own trail rather than the painter's eased
+   body, so the tree a run grows is a function of the run alone: the
+   same seed and step count grow the same tree at x1 and at x16, and a
+   replay puts back the tree the original had. Read at render cadence it
+   was not — a frame at x16 runs sixteen steps and grew one. */
+var treeMs = 0, treePasses = 0;
+function treeGrow() {
+  if (!S.exp) return;
+  if (tN === 0) treeReset();
+  var dt = S.simT - treeT;
+  treeT = S.simT;
+  if (dt <= 0) return;
+  var t0 = PROF ? performance.now() : 0;
+  var lv = BODY_LEVELS[TREE_LV], i, x, y, c, n;
+
+  /* --- the pulls: every unspent attractor cell on the plate --- */
+  tPulledN = 0;
+  var sp = TREE_SP;
+  for (y = 0; y < GH; y += sp) {
+    for (x = 0; x < GW; x += sp) {
+      /* the lattice, jittered by a hash so it is not a grid the tree can see */
+      var h = mix32(x, y, 7);
+      var jx = x + (h % sp), jy = y + ((h >>> 8) % sp);
+      if (jx < 2 || jy < 2 || jx >= GW - 2 || jy >= GH - 2) continue;
+      c = jy * GW + jx;
+      if (tcov[c] || wallM[c] || trail[c] < lv) continue;
+      n = treeNearest(jx, jy);
+      if (n < 0) continue;
+      var dx = jx + 0.5 - tx[n], dy = jy + 0.5 - ty[n];
+      var d = Math.sqrt(dx * dx + dy * dy);
+      if (d < 1e-3) continue;
+      if (!tgAny[n]) { tgAny[n] = 1; tPulled[tPulledN++] = n; }
+      var bin = ((Math.atan2(dy, dx) / (2 * Math.PI) * TREE_BINS + TREE_BINS + 0.5) | 0) % TREE_BINS;
+      var bi = n * TREE_BINS + bin;
+      tgx[bi] += dx / d; tgy[bi] += dy / d; tgn[bi]++;
+    }
+  }
+
+  /* --- the growth: a pulled node extends one step toward its pulls --- */
+  for (i = 0; i < tN; i++) tidle[i] += dt;
+  var grown = 0;
+  for (var k = 0; k < tPulledN; k++) {
+    n = tPulled[k];
+    var gx = 0, gy = 0, cnt = 0, b0 = n * TREE_BINS;
+    for (var bb = 0; bb < TREE_BINS; bb++) {
+      if (tgn[b0 + bb] > cnt) { cnt = tgn[b0 + bb]; gx = tgx[b0 + bb]; gy = tgy[b0 + bb]; }
+      tgn[b0 + bb] = 0; tgx[b0 + bb] = 0; tgy[b0 + bb] = 0;
+    }
+    tgAny[n] = 0;
+    tidle[n] = 0;
+    var gl = Math.sqrt(gx * gx + gy * gy);
+    if (gl < 1e-3) continue;
+    gx /= gl; gy /= gl;
+    /* a tip continues its own heading, bent toward the pull: the
+       reference's trunks curve, and a step that turns to whatever
+       attractor happens to be nearest zigzags at every cell */
+    if (tkids[n] === 0 && tpar[n] >= 0) {
+      var pp = tpar[n], hx = tx[n] - tx[pp], hy = ty[n] - ty[pp], hl = Math.sqrt(hx * hx + hy * hy);
+      if (hl > 1e-3) {
+        gx = gx * (1 - TREE_INERTIA) + hx / hl * TREE_INERTIA;
+        gy = gy * (1 - TREE_INERTIA) + hy / hl * TREE_INERTIA;
+        gl = Math.sqrt(gx * gx + gy * gy);
+        if (gl < 1e-3) continue;
+        gx /= gl; gy /= gl;
+      }
+    }
+    /* not a second child within TREE_MIN_COS of one it already has: two
+       twigs a few degrees apart are one twig drawn twice */
+    var dup = false;
+    for (var j = n + 1; j < tN; j++) {
+      if (tpar[j] !== n || !tstate[j]) continue;
+      var kx = tx[j] - tx[n], ky = ty[j] - ty[n], kl = Math.sqrt(kx * kx + ky * ky);
+      if (kl > 1e-3 && (kx * gx + ky * gy) / kl > TREE_MIN_COS) { dup = true; break; }
+    }
+    if (dup) continue;
+    var nx = tx[n] + gx * TREE_STEP, ny = ty[n] + gy * TREE_STEP;
+    var cx = nx | 0, cy = ny | 0;
+    if (cx < 1 || cy < 1 || cx >= GW - 1 || cy >= GH - 1) continue;
+    c = cy * GW + cx;
+    if (wallM[c] || trail[c] < lv) continue;
+    /* not into another vein's cell: the tree does not anastomose */
+    var occ = tAt[c];
+    if (occ >= 0 && occ !== n && tstate[occ]) continue;
+    if (treeAdd(nx, ny, n) < 0) break;
+    grown++;
+  }
+
+  /* --- the widths: leaves under each node, children before parents --- */
+  for (i = 0; i < tN; i++) tleaf[i] = (tstate[i] && tkids[i] === 0) ? 1 : 0;
+  for (i = tN - 1; i > 0; i--) if (tstate[i]) tleaf[tpar[i]] += tleaf[i];
+  var kw = 1 - Math.exp(-dt / TREE_W_TAU);
+  for (i = 0; i < tN; i++) {
+    if (!tstate[i]) continue;
+    var target = TREE_W0 * Math.pow(tleaf[i] > 0 ? tleaf[i] : 1, 1 / PIPE_N);
+    if (target > TREE_WMAX) target = TREE_WMAX;
+    tw[i] += (target - tw[i]) * kw;
+  }
+
+  /* --- the retraction: an idle tip not on food or the fed corridor;
+     and any node a wall has come down on, tip or not, at once --- */
+  var retracted = 0;
+  for (i = tN - 1; i > 0; i--) {
+    if (!tstate[i]) continue;
+    c = (ty[i] | 0) * GW + (tx[i] | 0);
+    if (!wallM[c]) {
+      if (tkids[i] !== 0 || tidle[i] < RET_IDLE) continue;
+      if (feedAt[c] >= 0) continue;
+      if (linkF[c] >= FED_LOW) continue;
+    }
+    tstate[i] = 0;
+    var p = tpar[i];
+    tkids[p]--;
+    /* the parent is a tip now, and retracts RET_DT after this one unless
+       something pulls it first */
+    if (tkids[p] === 0 && tidle[p] < RET_IDLE - RET_DT) tidle[p] = RET_IDLE - RET_DT;
+    retracted++;
+  }
+  if (grown || retracted) treeDirty = true;
+  /* widths ease every pass, so the paint is due on its own clock */
+  if (PROF) { treeMs += performance.now() - t0; treePasses++; }
+}
+
+/* the band whose hairline is nearest below this width, for its colour */
+function treeBand(w) {
+  var b = 0;
+  for (var k = 1; k < VEIN_BANDS.length; k++) if (VEIN_BANDS[k].w <= w) b = k;
+  return b;
+}
+
+/* The picture: every node's segment to its parent, batched by quantised
+   width, widest first so hairlines land on the trunks they leave.
+   Ghosts under everything, pale. Into vgc, which the composite lays
+   over the veil once a frame. */
+function paintTree() {
+  if (!veil || !veil.width) return;
+  if (!vgc) { vgc = document.createElement('canvas'); vgctx = vgc.getContext('2d'); }
+  var due = !S.running || S.simT - treePaintT >= TREE_REPAINT;
+  if (vgc.width !== veil.width || vgc.height !== veil.height) { vgc.width = veil.width; vgc.height = veil.height; due = true; }
+  if (!due && !treeDirty) return;
+  treePaintT = S.simT; treeDirty = false;
+  var sx = vgc.width / GW, sy = vgc.height / GH, i, p;
+  var keys = (TREE_WMAX * TREE_WQ | 0) + 2, paths = new Array(keys), ghost = null, k;
+  for (k = 0; k < keys; k++) paths[k] = null;
+  for (i = 1; i < tN; i++) {
+    p = tpar[i];
+    /* drawn from the midpoint of the parent's segment to the midpoint of
+       this one, curving through the parent: the nodes are the control
+       polygon and the line is its quadratic spline, so a chain of
+       two-cell steps reads as one bending vein. The root and a branch
+       point's first segment start at the node itself. */
+    /* nothing is drawn under a wall, live or ghost: the graph is laid
+       over the walls, and a wall poured across a branch would otherwise
+       show the branch through it */
+    if (wallM[(ty[i] | 0) * GW + (tx[i] | 0)] || wallM[(ty[p] | 0) * GW + (tx[p] | 0)]) continue;
+    var g = tpar[p], x0, y0;
+    if (g >= 0) { x0 = (tx[g] + tx[p]) * 0.5; y0 = (ty[g] + ty[p]) * 0.5; } else { x0 = tx[p]; y0 = ty[p]; }
+    var x1 = (tx[p] + tx[i]) * 0.5, y1 = (ty[p] + ty[i]) * 0.5;
+    var tip = tkids[i] === 0 || !tstate[i];
+    var path;
+    if (!tstate[i]) {
+      if (!ghost) ghost = new Path2D();
+      path = ghost;
+    } else {
+      /* a segment is as wide as its child end: the width steps down at
+         every branch point rather than the trunk carrying its twig's width */
+      var w = tw[i];
+      k = Math.round(w * TREE_WQ); if (k < 1) k = 1; if (k >= keys) k = keys - 1;
+      if (!paths[k]) paths[k] = new Path2D();
+      path = paths[k];
+    }
+    path.moveTo(x0, y0);
+    path.quadraticCurveTo(tx[p], ty[p], x1, y1);
+    if (tip) path.lineTo(tx[i], ty[i]);
+  }
+  vgctx.save();
+  vgctx.setTransform(1, 0, 0, 1, 0, 0);
+  vgctx.clearRect(0, 0, vgc.width, vgc.height);
+  vgctx.setTransform(sx, 0, 0, sy, 0, 0);
+  vgctx.lineCap = 'round';
+  vgctx.lineJoin = 'round';
+  if (ghost) {
+    vgctx.globalAlpha = TREE_GHOST_A;
+    vgctx.lineWidth = TREE_GHOST_W;
+    vgctx.strokeStyle = VEIN_BANDS[0].style;
+    vgctx.stroke(ghost);
+    vgctx.globalAlpha = 1;
+  }
+  for (k = keys - 1; k >= 1; k--) {
+    if (!paths[k]) continue;
+    var w2 = k / TREE_WQ;
+    vgctx.lineWidth = w2;
+    vgctx.strokeStyle = VEIN_BANDS[treeBand(w2)].style;
+    vgctx.stroke(paths[k]);
+  }
+  vgctx.restore();
+}
+
+function snapshotTree(fs) {
+  fs.tN = tN;
+  fs.tx = tx.slice(0, tN); fs.ty = ty.slice(0, tN); fs.tpar = tpar.slice(0, tN);
+  fs.tw = tw.slice(0, tN); fs.tstate = tstate.slice(0, tN); fs.tidle = tidle.slice(0, tN);
+  fs.tborn = tborn.slice(0, tN); fs.tkids = tkids.slice(0, tN);
+}
+
+function restoreTree(fs) {
+  treeReset();
+  if (!fs.tx) return;
+  tN = fs.tN;
+  tx.set(fs.tx); ty.set(fs.ty); tpar.set(fs.tpar); tw.set(fs.tw);
+  tstate.set(fs.tstate); tidle.set(fs.tidle); tborn.set(fs.tborn); tkids.set(fs.tkids);
+  tAt.fill(-1); tcov.fill(0);
+  for (var i = 0; i < tN; i++) treeCover(i);
+  treeDirty = true;
+}
+
 function resetVeinGraph() {
   vpN = 0; veinN = 0;
   rootT0 = S.simT; rootLoopN = 0;
@@ -6787,6 +7148,7 @@ function resetVeinGraph() {
   if (vgc && vgc.width) vgctx.clearRect(0, 0, vgc.width, vgc.height);
   vRecPath = null; vRecDirty = true;
   veinWT = S.simT;
+  if (VEIN_TREE) treeReset();
 }
 
 /* The coverage disc around one pinned point, and its entry in the point
@@ -8394,7 +8756,7 @@ function buildVeins() {
       if (n < RIDGE_MINPTS) continue;
       /* under the body the chain is a candidate for the graph and nothing
          else: no runs, no envelope, no ends for the joins to reach from */
-      if (BODY) { if (VEIN_GRAPH) pinChain(n); if (TUBES) emitTube(n); continue; }
+      if (BODY) { if (VEIN_GRAPH && !VEIN_TREE) pinChain(n); if (TUBES) emitTube(n); continue; }
 
       var mean = sum / n;
       b = pickBand(mean, chi, n);
@@ -8440,7 +8802,7 @@ function buildVeins() {
   /* --- the graph: widths, and the paths --- */
   if (BODY) {
     if (PROF) pvMark(3);
-    if (VEIN_GRAPH) reachFreeEnds();
+    if (VEIN_GRAPH && !VEIN_TREE) reachFreeEnds();
     veinWidths();
     if (PROF) { pvMark(4); profVeinN++; }
     buildWhiskers();
@@ -8738,7 +9100,7 @@ function buildWhiskers() {
        a speck on the outline, and the drop began as a ring of specks. A
        tip that has left the outline, or stands in a piece with veins, is
        the front. */
-    if (BODY && VEIN_GRAPH) {
+    if (BODY && VEIN_GRAPH && !VEIN_TREE) {
       var wl = compL[((ay0 | 0) >> 1) * LW + ((ax0 | 0) >> 1)];
       if (wl > 0 && !compVein[wl]) continue;
     }
@@ -8858,7 +9220,7 @@ function strokeVeins(tc, sx, sy, mono) {
        every antialiased edge a little more solid each time. It is
        composited straight onto the frame, after the veil; see the
        composite. */
-    if (VEIN_GRAPH) paintVeinGraph();
+    if (VEIN_TREE) paintTree(); else if (VEIN_GRAPH) paintVeinGraph();
   }
   if (lobePath && !BODY) {
     ctx.fillStyle = LOBE_STYLE;
@@ -11681,6 +12043,13 @@ function init() {
        RUNS since the envelope split chains at tier boundaries, so the count is
        an upper bound on chains rather than the thing itself. */
     veinIslands: function () { return veinIslands; },
+    /* the backbone, as copies, for the harness */
+    tree: function () {
+      var live = 0, wmax = 0, tips = 0;
+      for (var i = 0; i < tN; i++) { if (tstate[i]) { live++; if (tw[i] > wmax) wmax = tw[i]; if (tkids[i] === 0) tips++; } }
+      return { n: tN, live: live, tips: tips, wmax: wmax, ms: treeMs, passes: treePasses,
+               x: tx.slice(0, tN), y: ty.slice(0, tN), par: tpar.slice(0, tN), w: tw.slice(0, tN), state: tstate.slice(0, tN) };
+    },
     /* the pinned graph, as copies: the harness differences two samples to
        check that no point ever moves, and reads the attachments to check
        that no vein was pinned adrift. att is four per vein — [vein,
