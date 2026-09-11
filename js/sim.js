@@ -10552,9 +10552,22 @@ function updateHUD(force) {
      a replay the slot is empty only AT the reference — a run being watched at
      ×1/4 has to say so as plainly as one at ×4, or a dish crawling because the
      dial is down reads as a dish crawling because it is dying. */
+  /* The ask, and — when the dish is not managing it — what it is managing
+     instead. The ask stays first because it is the control's state and the
+     ladder has to agree with the clock; the achieved rate follows it in
+     parentheses, which is the smallest way to say "this is a request" without
+     making the common case (a dish that is keeping up) any noisier.
+
+     "The ask stays first" has to be true of x1 as well, which is why the ask
+     is shown whenever the rate is short and not only when it is off the
+     reference. Suppressed at x1 the way it was, a slow dish rendered
+     "01:23 (x0.5)" — a parenthetical qualifying nothing, against a figure it
+     silently disagreed with. */
+  var askShort = rateShort();
   $('h-time').textContent = fmtTime(S.simT) +
     (REPLAY.on ? ' · REPLAY ×' + fmtSpeed(TURBO)
-               : (TURBO !== 1 ? ' ×' + fmtSpeed(TURBO) : ''));
+               : ((TURBO !== 1 || askShort) ? ' ×' + fmtSpeed(TURBO) : '')) +
+    (askShort ? ' (×' + fmtRate(rateNow) + ')' : '');
 
   if ((hudTick++ % 4) !== 0) return;
 
@@ -11027,25 +11040,154 @@ var raf = 0, lastTs = 0, acc = 0;
    control can reach runs slower than the mould does, which is the honest
    thing to say about a dial whose lowest stop is still a time-lapse.
 
-   Powers of two either side of the reference: every stop is exactly
-   representable, indexOf on the array is therefore exact, and a stop and its
-   inverse are the same distance from ×1 in the direction that matters. */
+   Powers of two either side of the reference — every stop is exactly
+   representable, indexOf on the array is therefore exact — though no longer
+   symmetric about ×1: the slow half runs to ×1/16 and the fast half stops at
+   ×4, because the slow stops are all deliverable and the fast ones were not.
+   Asking for less work than a frame can do always succeeds. */
 var TURBO = 1;
-var SPEEDS = [1 / 16, 1 / 8, 1 / 4, 1 / 2, 1, 2, 4, 8, 16];
+/* The ladder tops out at x4, and it used to top out at x16. Two stops came
+   off because the dish cannot serve them and, now that the clock says so out
+   loud, keeping them would mostly be a way of displaying that fact.
+
+   Measured with ?prof on EXP-01, a step costs 7 to 9 ms — call it 111 to 146
+   steps a second, which is x1.9 to x2.4. What each stop needs, and how much
+   faster than that a device would have to be to serve it:
+
+       x4    240 steps/s   2.2x faster
+       x8    480 steps/s   4.3x faster
+       x16   960 steps/s   8.6x faster, or about 1.1 ms a step
+
+   x16 is not reachable on any hardware this runs on: a millisecond a step
+   buys nothing for four thousand agents, a vein trace and ten body contours.
+   x8 wants a machine four times this one and is unlikely on a desktop, let
+   alone the tablets this is played on. x4 wants a bit over twice, which a
+   good desktop plausibly has, so x4 stays and is the honest top.
+
+   Worth being exact about what was lost, because the first telling of this
+   overstated it: the upper stops were not delivering NOTHING. Matched at 4,200
+   agents the asks came out at 129, 123, 136 and 164 steps a second for x4, x8,
+   x16 and x24 — sublinear and noisy, but rising. Trimming costs something like
+   20% of the throughput available at the very top, in exchange for a dial
+   whose stops are all things that can happen. */
+var SPEEDS = [1 / 16, 1 / 8, 1 / 4, 1 / 2, 1, 2, 4];
+
+/* ---- what the dish is ACTUALLY running at ----
+   The multiplier is a request, not a promise, and until now the clock stated
+   it as though it were one.
+
+   Two caps sit above it in the frame loop: a per-frame step budget, and a
+   STEP_MS wall-clock box that breaks the loop mid-frame on a device that
+   cannot run the steps in time. What the box leaves behind is then DISCARDED
+   — `acc = 0`, deliberately, so a slow device runs fewer steps a second
+   instead of spiralling — which means the shortfall is never made up. x16
+   wants 960 steps a second and x24 wants 1440; a phone or a tablet running
+   four thousand agents, a vein trace and ten body contours will not serve
+   that, so the dish runs at whatever it can and the label goes on saying
+   x16.
+
+   Nothing about the RUN is wrong when that happens. A step is a step, the
+   order is fixed, and two runs that have executed the same number of them
+   hold the same dish whatever the wall clock did. What is wrong is the
+   caption, which is the same fault REAL_X had when it claimed a hundred:
+   a number shown with more confidence than it has earned.
+
+   So the achieved rate is measured, over a window long enough not to jitter
+   with one slow frame, and the label says so when the dish is not keeping
+   up. Measured from steps, not from a timer: steps are what sim time IS. */
+var RATE_WIN = 0.5;      // seconds of wall clock a rate sample covers, at least
+var RATE_STEPS = 12;     // ...and steps it must contain before it is a rate
+var RATE_GAP = 1.0;      // seconds a window may overrun before it was not being stepped
+var RATE_MIN = 2;        // windows that must close before the label says anything
+var RATE_EASE = 0.25;    // how hard a new sample pulls the reported rate
+var RATE_TOL = 0.85;     // below this share of the ask, the label says so
+var rateT0 = 0, rateS0 = 0, rateNow = 0, rateHad = 0;
+
+/* rateHad counts closed windows, and counting them rather than testing
+   `rateNow > 0` is deliberate twice over. A dish stepping at zero measures
+   zero, so keying "no sample yet" on the value suppressed the warning in
+   exactly the case it is most wanted — a total stall reported as no data. And
+   the first window is unsmoothed by construction, so one hitch straight after
+   a stop is chosen would put the label up on its own; at x1/16 that window is
+   3.2s, which is a long time to be told a lie. Two windows have to close. */
+function rateReset() { rateT0 = 0; rateS0 = stepsRun; rateNow = 0; rateHad = 0; }
+
+/* How long a window has to be. Half a second is enough at the top of the
+   ladder and nowhere near it at the bottom: x1/16 asks for under two steps in
+   that time, and one step either side of the boundary is a 50% error, which
+   reported a healthy machine as short about half the time it was asked. So the
+   window is whichever is longer — RATE_WIN, or however long the ASK would take
+   to produce RATE_STEPS of them. Twelve steps is 8% quantisation, comfortably
+   inside RATE_TOL. */
+function rateWin() {
+  var need = RATE_STEPS / (TURBO * 60);
+  return need > RATE_WIN ? need : RATE_WIN;
+}
+
+/* The rate the dish is actually managing, in sim-seconds per real second. */
+function rateSample(now) {
+  if (!rateT0) { rateT0 = now; rateS0 = stepsRun; return; }
+  var win = rateWin(), dt = (now - rateT0) / 1000;
+  if (dt < win) return;
+  /* A window that overran is not a slow dish; it is a dish that was not being
+     stepped at all. A hidden tab stops rAF and the frame loop with it, so the
+     first window on return spans the whole time away and measures the absence
+     rather than the rate — a x4 dish reading (x0.3) for seconds because it had
+     been in the background. Rebaseline and take no reading. The guard is on
+     the clock rather than on visibilitychange because the same thing happens
+     to a paused debugger and a stalled device.
+
+     Overran by a fixed SECOND, not by a multiple of the window, and that is
+     the whole of a bug worth keeping written down: as a multiple it scaled
+     with the window, and the window had just been made longer at the slow
+     stops to fix the quantisation. At x1/16 the two together put the guard at
+     12.8s, so a tab hidden for five seconds sailed under it and reported the
+     absence as a shortfall — one fix quietly undoing the other. A window
+     closes within a frame of its due time on any dish that is running at all,
+     so a second of overrun is slack no honest sample uses. */
+  if (dt > win + RATE_GAP) { rateT0 = now; rateS0 = stepsRun; return; }
+  var got = (stepsRun - rateS0) * DT / dt;
+  rateNow = rateHad ? rateNow + (got - rateNow) * RATE_EASE : got;
+  rateHad++;
+  rateT0 = now; rateS0 = stepsRun;
+}
+
+/* Whether the dish is meaningfully short of what the ladder is asking for.
+   Never while paused or stopped — a still dish is not a slow one — and never
+   before a window has closed. */
+function rateShort() {
+  return S.running && !S.paused && rateHad >= RATE_MIN && rateNow < TURBO * RATE_TOL;
+}
+
+/* A measured rate, as a label. Not fmtSpeed: that names STOPS on the ladder,
+   where 1/8 is what the stop is called, and it carries three decimals besides.
+   This is a measurement, so it reads as one — but never as a bare "0", which
+   is what one decimal did to everything under 0.05 and is the one reading that
+   must not be rounded away. */
+function fmtRate(t) {
+  if (!isFinite(t) || t < 0) t = 0;
+  return String(t < 0.1 ? Math.round(t * 100) / 100 : Math.round(t * 10) / 10);
+}
 var TURBO_MIN = SPEEDS[0];
-var TURBO_MAX = 24;
+/* The ladder's own top. It was 24, for a harness that wanted more than the
+   dial offered; there is no more to want — 24 measured 164 steps a second
+   against x4's 129, which is not a multiplier, it is noise with a bigger
+   number on it. */
+var TURBO_MAX = 4;
 
 /* REAL_X itself is derived in section 1, next to the plate scale it is
    measured against — it has to exist before the feeding rate, which is now
    computed through it. Changing it no longer changes only captions. */
 function realX(t) { return fmtNum(t * REAL_X); }
 
-/* The verdict screen offers three stops rather than all nine. It is a row of
-   one button each, not a cycle, and a recap has no use for the slow half of
+/* The verdict screen offers three stops rather than all of them. It is a row
+   of one button each, not a cycle, and a recap has no use for the slow half of
    the ladder: you are choosing how long to spend watching a run you have
    already played, and the fastest useful answer to that is a stop the dial
-   also has. ×4 stays the suggested one. */
-var REPLAY_SPEEDS = [1, 4, 16];
+   also has. That last clause is why this line moved with the ladder: ×16 is no
+   longer a stop the dial has, so offering it here would be offering a rate
+   nothing else on the plate will agree to. ×4 stays the suggested one. */
+var REPLAY_SPEEDS = [1, 2, 4];
 
 /* Ceiling on the stepping work ONE frame may do, in milliseconds of wall
    clock. The step budget below it is a COUNT, and a count is the wrong unit
@@ -11548,6 +11690,8 @@ function setSpeed(n) {
   n = +n;
   if (!isFinite(n) || n <= 0) n = 1;
   TURBO = clamp(n, TURBO_MIN, TURBO_MAX);
+  /* a new ask is a new question: the old rate answered a different one */
+  rateReset();
   var b = $('s-speed'), fig = $('s-speedn');
   /* Only the figure is rewritten: the word in front of it is markup the sheet
      drops where the row has to be narrow, and the aria-label — which wins over
@@ -11556,7 +11700,7 @@ function setSpeed(n) {
   if (b) {
     /* Lit at every stop but the reference. It used to mean "faster than this
        dish normally runs"; it means "not the dish's own clock" now, and a run
-       being watched at ×1/8 is exactly as much not-the-clock as one at ×8. */
+       being watched at ×1/4 is exactly as much not-the-clock as one at ×4. */
     b.classList.toggle('lapse-on', TURBO !== 1);
     b.setAttribute('aria-label', 'Time-lapse, currently ' + fmtSpeed(TURBO) +
       ' times the dish clock — about ' + realX(TURBO) + ' times real time');
@@ -11577,9 +11721,9 @@ function nearestSpeed(t) {
   return best;
 }
 
-/* Nine stops through one button, so the cycle wraps. A touch player has no
+/* Seven stops through one button, so the cycle wraps. A touch player has no
    modifier to hold and reaches the whole ladder through this control alone,
-   which means ×1/16 has to be reachable from ×16 the same way ×2 is from ×1;
+   which means ×1/16 has to be reachable from ×4 the same way ×2 is from ×1;
    on a keyboard F walks up and Shift+F walks down, which is the shorter way
    round for anyone who has the keys.
 
@@ -11801,6 +11945,8 @@ function startRun(i, seed, trace) {
   S.shockWarned = -1; S.shockCycle = 0;
   S.quinTime = 0; S.slow = 1; S.anticipated = false;
   S.ambientAt = 14 * PACE; S.scriptIdx = 0; S.failReason = '';
+  /* a fresh plate measures its own rate, not the last plate's */
+  rateReset();
   /* The active plate, before anything reads it: buildDish stamps from these. */
   S.walls = e.walls; S.hazards = e.hazards; S.eventIdx = 0;
   SLIME_W = e.slimeAvoid || 0;
@@ -11869,6 +12015,8 @@ function setPausedLabel(p) {
 
 function setPaused(p) {
   if (!S.running || S.over) return;
+  /* a paused dish runs no steps, so the window it would close is not a rate */
+  rateReset();
   S.paused = !!p;
   $('pauseveil').classList.toggle('on', S.paused);
   setPausedLabel(S.paused);
@@ -12336,6 +12484,8 @@ function frame(ts) {
        because two per cent was visible. */
     if ((boxed && acc >= DT) || acc > DT * budget) acc = 0;
     if (PROF) { profStep += performance.now() - boxT0; profSteps += steps; }
+    /* what that frame actually managed — see RATE_WIN */
+    rateSample(performance.now());
     if (stepTarget && stepsRun >= stepTarget && S.running && !S.over) {
       /* one-shot: consume the target so Resume resumes and later runs run */
       stepTarget = 0;
@@ -12876,6 +13026,10 @@ function init() {
        label and HUD follow a harness that sets it directly, and fractional
        rates are taken as given rather than rounded onto a whole number. */
     turbo: function (n) { if (n != null) setSpeed(n); return TURBO; },
+    /* sim-seconds per real second the dish is ACTUALLY managing, 0 before the
+       first window closes, and whether that is short of what TURBO asked for —
+       the pair the clock's label is built from */
+    rate: function () { return { ask: TURBO, got: rateNow, short: rateShort() }; },
     speeds: function () { return SPEEDS.slice(); },
     /* the estimated real-time factor of ×1, for a caption that has to agree
        with the one the buttons print */
