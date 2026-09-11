@@ -4576,8 +4576,13 @@ function step() {
     S.nodeProg[i] = clamp(S.nodeProg[i] + gain, 0, 1);
     if (S.nodeProg[i] >= 1) {
       S.nodeDone[i] = true;
-      /* taken with the pad still on it, so it starts held */
-      S.nodeHeld[i] = 1;
+      /* Held only if what finished it is actually a pad. Starting a taken node
+         held is the obvious thing and it is wrong by one step: winMet runs
+         later in THIS step, while the threshold above is not applied until the
+         next one, so a flake banked at 0.999 and pushed over by a couple of
+         stray agents would count toward "six at once" on a pad that never
+         existed. Same predicate, same step. */
+      S.nodeHeld[i] = hits >= HOLD_FILL * Math.PI * nd.r * nd.r ? 1 : 0;
       S.nodeIdle[i] = 0;
       S.engulfed++;
       buildFood();
@@ -11070,8 +11075,11 @@ var GHOST_ENT = 9;
    8: followers stay in the tube, and new cytoplasm arrives on it.
    9: the hold on a flake and its pull run down with the food left.
    10: the return signal — a find travels back through the cytoplasm, holds
-       the route it came by and shades the tubes beside it. */
-var SIM_V = 11;   /* the drop is a disc, not a diamond: every run starts differently */
+       the route it came by and shades the tubes beside it.
+   11: the drop is a disc, not a diamond: every run starts differently. */
+var SIM_V = 12;   /* the feeding rate is calibrated and PACE is 3: every dish's
+                     clock moves, so no time set under 11 is a time this
+                     organism can be asked to beat */
 
 function ghostSig() {
   var h = mix32(SIM_V, Math.round(CUE_CAP * 1000), Math.round(CUE_REGEN * 1000));
