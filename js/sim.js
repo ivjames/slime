@@ -1025,6 +1025,16 @@ var FEED_OUT   = 0.34; // share of the way toward the rim taken per step, at the
 var FEED_HOLD  = 0.55; // ...and back toward the centre, at the edge of the fan
 var FEED_FILL  = 0.55; // share of the flake's own area, in agents, that opens the valve
 var FEED_LAY   = 1.30; // trail a feeding agent lays per step (multiple of DEPOSIT)
+/* The trail a covered flake holds — the level at which an agent standing on
+   the flake counts as standing on sheet rather than on bare food, and so goes
+   looking for thin ground instead of settling. It is deliberately above the
+   level the puddle is drawn at (BODY_LEVELS[PUDDLE_LV], 32) and not equal to
+   it: the dependency runs sim first and picture second, so a flake the
+   organism has actually covered draws as covered with room to spare, rather
+   than the render threshold and the fill rule chasing each other. */
+var FEED_FULL  = 40;   // trail at which flake ground counts as covered
+var FEED_SEEK  = 4.0;  // cells: how far the sheet looks for thinner ground
+var FEED_SEEK_K = 0.75; // ...and how much thinner it has to be to be worth moving to
 var FEED_SPEED = 0.30; // floor under a feeding agent's speed, so the pad can fill
 
 /* ---- the pad thins as the food goes ----
@@ -4224,27 +4234,102 @@ function step() {
       var fdd = Math.sqrt(fdx * fdx + fdy * fdy);
       if (fdd > 0.001) {
         var fturn = 0, fwant = 0;
+        /* The flake's own radius, squared — the seek below will not leave it,
+           and the flake rather than the fan is deliberate. Ranging the seek
+           over the fan's 1.35r spread the same cytoplasm across 1.82x the
+           area: measured, every band on the worst flake fell under the fill
+           level at once (b went 0.92 at its centre to 0.08) while the flake
+           that had been an annulus came out perfect. Thinnest-anywhere is a
+           recipe for a sheet that covers nothing evenly. The overhang past the
+           rim is the hold's job, below, not the fill's.
+
+           A seek-length of margin past the rim was tried, to answer the
+           inward bias a hard bound gives an agent standing at r - 1, and it
+           does raise total coverage — area-weighted over the disc, 0.68
+           against 0.57. It was still the wrong trade: what it buys at the rim
+           it takes from the middle, and two of EXP-01's four flakes came back
+           with nothing in their inner third at all. A flake covered
+           everywhere but its centre is the ring this whole change is here to
+           stop drawing, however good its average looks. */
+        var frim2 = fnd.r * fnd.r;
         if (fdd < fnd.r) {
-          fturn = FEED_OUT * (1 - fdd / fnd.r);
-          fwant = Math.atan2(fdy, fdx);            /* outward */
+          /* Spread to where the sheet is THIN, not simply outward. The rule
+             here used to be radial — push hardest at the centre, fading to
+             nothing at the rim — on the reasoning that a front arriving at one
+             edge has to be got across the flake somehow. It does, but a push
+             keyed to centrality cannot ever leave anything in the middle: the
+             one place it shoves hardest is the place the pad most needs to
+             hold. Measured on EXP-01 at the step all four went down, that is
+             exactly the picture — the flakes a trunk happens to cross are
+             covered at the centre (a reads 1.00 of its inner band) and the
+             flakes the front reaches tangentially are annuli with nothing in
+             the middle at all (b and d both read 0.00 across their inner
+             third). Two of four drawn as rings, and the organism does not do
+             that: an engulfed oat flake is covered.
+
+             So the push is gated on the ground instead of on the geometry. An
+             agent standing where the sheet is already at FEED_FULL is standing
+             on covered flake and goes looking for uncovered flake; an agent on
+             thin ground stays and lays. That fills the disc and then spreads
+             past the rim into the fan, which is the order a sheet actually
+             covers food in, and it needs no term for where the centre is. */
+          if (trail[here] >= FEED_FULL) {
+            /* ...and THIN is a direction to be found, not a synonym for
+               outward. Gating the old radial push on the ground got three of
+               EXP-01's four flakes covered and left the fourth exactly as it
+               was, which is the tell: on a flake whose rim is thick and whose
+               middle is empty, "away from the centre" points at the one part
+               already covered and marches the sheet off the food. So the
+               direction is sampled — eight ways at FEED_SEEK cells, take the
+               thinnest — and the same rule then covers both cases without
+               knowing which it is in: it reads outward on a flake a trunk
+               crosses, inward on a flake the front met at one edge. */
+            var fbv = 1e9, fba = 0;
+            for (var fs = 0; fs < 8; fs++) {
+              var fsa = fs * Math.PI / 4;
+              var fsx = (x + Math.cos(fsa) * FEED_SEEK) | 0;
+              var fsy = (y + Math.sin(fsa) * FEED_SEEK) | 0;
+              if (fsx < 0 || fsy < 0 || fsx >= GW || fsy >= GH) continue;
+              var fsc = fsy * GW + fsx;
+              if (wallM[fsc]) continue;
+              /* only ground this flake's own fan could hold: wandering off to
+                 the thinnest cell on the plate is exploring, not covering */
+              var fsdx = fsx - fnd.x, fsdy = fsy - fnd.y;
+              if (fsdx * fsdx + fsdy * fsdy > frim2) continue;
+              if (trail[fsc] < fbv) { fbv = trail[fsc]; fba = fsa; }
+            }
+            /* and only for ground meaningfully thinner, or the sheet chases
+               its own deposit around the flake and never settles */
+            if (fbv < trail[here] * FEED_SEEK_K) {
+              fturn = FEED_OUT;
+              fwant = fba;
+            }
+          }
         } else {
           var frim = fnd.r * FEED_R;
           var fout = (fdd - fnd.r) / (frim - fnd.r);
           if (fout > 1) fout = 1;
-          /* ...against a pad sized to the food LEFT, not to the flake: what
-             remains of a three-quarters-eaten flake is covered by a quarter
-             of the agents the whole took, so the valve opens at a quarter of
-             the load, and the pad thins as the food goes instead of
-             collapsing when it is gone. Sized, not scaled: scaling the hold
-             itself by the food left loosened it on a pad that was nowhere
-             near full, and on the fire drill, where the shocks leave a
-             hundred agents to finish a flake, the survivors let go of one at
-             nine tenths and the culture starved with nothing engulfed. That
-             was worse still when progress could run back down; it no longer
-             can, but a pad that lets go at nine tenths is a pad that is not
-             eating, which is reason enough. A pad that is under the reduced
-             capacity is held as hard as ever. */
-          var fcap = FEED_FILL * Math.PI * fnd.r * fnd.r * (SPENT_FOOD + (1 - SPENT_FOOD) * foodLeft(fi));
+          /* ...against a pad sized to the FLAKE, and no longer to the food
+             left on it. The old sizing scaled this cap by the same
+             SPENT_FOOD ramp the pull uses, on the reasoning that what remains
+             of a three-quarters-eaten flake is covered by a quarter of the
+             agents the whole took. That reads well and does not survive the
+             arithmetic: at SPENT_FOOD the cap on EXP-01's flakes is 88 agents
+             over a 531-cell disc, a sixth of an agent a cell, and no
+             arrangement of a sixth of an agent a cell holds FEED_FULL
+             anywhere but in the few cells a trunk happens to cross. So a
+             flake went down looking like a ring, or a crescent, or on the
+             flakes a tube crossed a disc with a bright middle and nothing
+             round it — three different pictures of the same shortage.
+
+             An engulfed oat flake is covered by the plasmodium; that is what
+             the organism does, and it is why a fed culture is re-flaked at
+             all rather than scraped. So the flake's own area is the cap, the
+             pad holds what it takes to cover the thing, and what makes the
+             culture let go of a flake is the pull running down (SPENT_FOOD,
+             where it still belongs) rather than the pad being squeezed off
+             ground it is standing on. */
+          var fcap = FEED_FILL * Math.PI * fnd.r * fnd.r;
           var froom = 1 - nodeLoad[fi] / fcap;
           if (froom > 0) fturn = FEED_HOLD * fout * froom;
           fwant = Math.atan2(-fdy, -fdx);          /* back toward the middle */
