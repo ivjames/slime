@@ -4358,10 +4358,13 @@ function step() {
        charging only the ones that found a free cell builds the pad at a
        fraction of the rate the front is actually delivering cytoplasm at.
        Safe against the grey wash that per-step deposit otherwise causes,
-       because it is confined to the footprint of a flake that still has food
-       in it — an area the dish itself defines and that stops existing the
-       moment the flake is engulfed. */
+       because it is confined to the footprint of a FLAKE — an area the dish
+       itself defines, and one that does not stop existing when the food in it
+       does. That is the whole of the note below. */
     var kn = knotF[cell];
+    /* which flake's own disc this cell is, if any: read before the deposit
+       because the pad's per-step charge below is defined over exactly it */
+    var ni = nodeAt[cell];
     var dep = 0;
     if (feeding) {
       dep = stepDeposit * FEED_LAY;
@@ -4373,6 +4376,30 @@ function step() {
       if (fedF[cell] < 1) { fedF[cell] = 1; padF[cell] = bodyF[cell]; }
     }
     else if (!blocked) dep = stepDeposit * ((tip || agoal[k]) ? TIP_LAY : spd / SPEED);
+    /* And the same charge over a flake that has already been taken. The
+       argument above for charging a pad per step is about DENSITY, not about
+       food: a sheet lying on a flake is packed tight enough that most of its
+       agents are blocked by their neighbours on any given step, and a rule
+       that pays only the ones that found a free cell reads that sheet as a
+       fraction of the cytoplasm actually standing in it. None of that changes
+       when the last of the oat goes. Tying it to `feeding` did, so a taken
+       flake fell back to movement-only deposit in the same step it was
+       engulfed and the pad on it thinned to whatever its traffic maintained —
+       which is why a taken flake drew as a ring or a crescent rather than as
+       the covered disc a real one is. Measured, matched on the agents actually
+       standing on the disc: while feeding, a hundred of them cover 0.56 of it;
+       once taken, the same hundred cover 0.35, and it takes nearer three
+       hundred to get back to where one hundred stood. The cytoplasm was
+       arriving. It simply stopped being counted as tissue.
+
+       Over the flake's own disc (nodeAt), not the wider fan (feedAt): what is
+       meant to be covered is the flake, and the fan is a steering radius
+       rather than a footprint. And as a floor rather than an assignment, so a
+       tip crossing a spent flake keeps its own heavier lay. */
+    if (ni >= 0) {
+      var padDep = stepDeposit * FEED_LAY;
+      if (dep < padDep) dep = padDep;
+    }
     /* The connection to a flake thickens under the traffic it carries, and
        a cell in its shade thins under its own. Both read the last slow
        sweep's answer, which is the only one there is. */
@@ -4407,7 +4434,6 @@ function step() {
        already the thing a lobe is trying to be. */
     if (!tip && !feeding && rnd() < KNOT_P) markKnot(cell);
 
-    var ni = nodeAt[cell];
     if (ni >= 0) nodeHits[ni]++;
 
     /* The mat is laid wherever the organism IS, not only where it moved: a
