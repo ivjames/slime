@@ -11097,16 +11097,20 @@ var SPEEDS = [1 / 16, 1 / 8, 1 / 4, 1 / 2, 1, 2, 4];
    up. Measured from steps, not from a timer: steps are what sim time IS. */
 var RATE_WIN = 0.5;      // seconds of wall clock a rate sample covers, at least
 var RATE_STEPS = 12;     // ...and steps it must contain before it is a rate
-var RATE_GAP = 4;        // a window this many times overlong was not being stepped
+var RATE_GAP = 1.0;      // seconds a window may overrun before it was not being stepped
+var RATE_MIN = 2;        // windows that must close before the label says anything
 var RATE_EASE = 0.25;    // how hard a new sample pulls the reported rate
 var RATE_TOL = 0.85;     // below this share of the ask, the label says so
-var rateT0 = 0, rateS0 = 0, rateNow = 0, rateHas = false;
+var rateT0 = 0, rateS0 = 0, rateNow = 0, rateHad = 0;
 
-/* rateHas, and not `rateNow > 0`, is what says a measurement exists. They look
-   interchangeable and are not: a dish that is stepping at zero measures zero,
-   and keying "no sample yet" on the same value suppressed the warning in
-   exactly the case it is most wanted — a total stall reported as no data. */
-function rateReset() { rateT0 = 0; rateS0 = stepsRun; rateNow = 0; rateHas = false; }
+/* rateHad counts closed windows, and counting them rather than testing
+   `rateNow > 0` is deliberate twice over. A dish stepping at zero measures
+   zero, so keying "no sample yet" on the value suppressed the warning in
+   exactly the case it is most wanted — a total stall reported as no data. And
+   the first window is unsmoothed by construction, so one hitch straight after
+   a stop is chosen would put the label up on its own; at x1/16 that window is
+   3.2s, which is a long time to be told a lie. Two windows have to close. */
+function rateReset() { rateT0 = 0; rateS0 = stepsRun; rateNow = 0; rateHad = 0; }
 
 /* How long a window has to be. Half a second is enough at the top of the
    ladder and nowhere near it at the bottom: x1/16 asks for under two steps in
@@ -11125,17 +11129,26 @@ function rateSample(now) {
   if (!rateT0) { rateT0 = now; rateS0 = stepsRun; return; }
   var win = rateWin(), dt = (now - rateT0) / 1000;
   if (dt < win) return;
-  /* A window far longer than it asked to be is not a slow dish; it is a dish
-     that was not being stepped at all. A hidden tab stops rAF and the frame
-     loop with it, so the first window on return spans the whole time away and
-     measures the absence rather than the rate — a x4 dish reading (x0.3) for
-     several seconds because the tab was in the background. Rebaseline and take
-     no reading. The same guard covers a paused debugger and a stalled device,
-     which is why it is on the clock rather than on visibilitychange. */
-  if (dt > win * RATE_GAP) { rateT0 = now; rateS0 = stepsRun; return; }
+  /* A window that overran is not a slow dish; it is a dish that was not being
+     stepped at all. A hidden tab stops rAF and the frame loop with it, so the
+     first window on return spans the whole time away and measures the absence
+     rather than the rate — a x4 dish reading (x0.3) for seconds because it had
+     been in the background. Rebaseline and take no reading. The guard is on
+     the clock rather than on visibilitychange because the same thing happens
+     to a paused debugger and a stalled device.
+
+     Overran by a fixed SECOND, not by a multiple of the window, and that is
+     the whole of a bug worth keeping written down: as a multiple it scaled
+     with the window, and the window had just been made longer at the slow
+     stops to fix the quantisation. At x1/16 the two together put the guard at
+     12.8s, so a tab hidden for five seconds sailed under it and reported the
+     absence as a shortfall — one fix quietly undoing the other. A window
+     closes within a frame of its due time on any dish that is running at all,
+     so a second of overrun is slack no honest sample uses. */
+  if (dt > win + RATE_GAP) { rateT0 = now; rateS0 = stepsRun; return; }
   var got = (stepsRun - rateS0) * DT / dt;
-  rateNow = rateHas ? rateNow + (got - rateNow) * RATE_EASE : got;
-  rateHas = true;
+  rateNow = rateHad ? rateNow + (got - rateNow) * RATE_EASE : got;
+  rateHad++;
   rateT0 = now; rateS0 = stepsRun;
 }
 
@@ -11143,7 +11156,7 @@ function rateSample(now) {
    Never while paused or stopped — a still dish is not a slow one — and never
    before a window has closed. */
 function rateShort() {
-  return S.running && !S.paused && rateHas && rateNow < TURBO * RATE_TOL;
+  return S.running && !S.paused && rateHad >= RATE_MIN && rateNow < TURBO * RATE_TOL;
 }
 
 /* A measured rate, as a label. Not fmtSpeed: that names STOPS on the ladder,
@@ -11687,7 +11700,7 @@ function setSpeed(n) {
   if (b) {
     /* Lit at every stop but the reference. It used to mean "faster than this
        dish normally runs"; it means "not the dish's own clock" now, and a run
-       being watched at ×1/8 is exactly as much not-the-clock as one at ×8. */
+       being watched at ×1/4 is exactly as much not-the-clock as one at ×4. */
     b.classList.toggle('lapse-on', TURBO !== 1);
     b.setAttribute('aria-label', 'Time-lapse, currently ' + fmtSpeed(TURBO) +
       ' times the dish clock — about ' + realX(TURBO) + ' times real time');
@@ -11708,9 +11721,9 @@ function nearestSpeed(t) {
   return best;
 }
 
-/* Nine stops through one button, so the cycle wraps. A touch player has no
+/* Seven stops through one button, so the cycle wraps. A touch player has no
    modifier to hold and reaches the whole ladder through this control alone,
-   which means ×1/16 has to be reachable from ×16 the same way ×2 is from ×1;
+   which means ×1/16 has to be reachable from ×4 the same way ×2 is from ×1;
    on a keyboard F walks up and Shift+F walks down, which is the shorter way
    round for anyone who has the keys.
 
