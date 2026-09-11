@@ -981,6 +981,37 @@ var ENGULF_SOFT = 0.077;
 var HOLD_FILL = 0.012;  // share of a flake's area, in agents, that counts as held
 var HOLD_DROP = 1.5;    // seconds under that before the station is let go
 
+/* The crumb the culture wakes on, as a multiple of the size it wakes at.
+   A dish used to open on a "reserve": a clock, e.grace, during which
+   starvation was simply switched off, and a nebulous halo drawn at the
+   inoculation to say so. Nothing was being eaten, and the culture could not
+   grow either, because the growth target is min(engulfed * sustain, cap) and
+   engulfed is zero until the first flake is finished. That zero is the root
+   of three separate complaints: a flake reads thin for its whole meal, a
+   runner that reaches a second flake cannot be supplied behind it, and the
+   trunks into EXP-03's nine depots end bluntly a few cells short. Measured
+   on EXP-02, the culture sits at exactly 5000 from t=0 to t=160 and the
+   route to the second block thickens in the same sample that the first one
+   finishes. The organism was not failing to commit; it had nothing to commit.
+
+   So the origin is food, and the floor under the target is what that food
+   supports, coming down as it is eaten. It is NOT an objective: it is not in
+   e.nodes, it does not count toward a win, and no dish's count changes.
+
+   Expressed against e.start rather than in sustain units, which is the trap.
+   Sixteen of the twenty dishes have start ABOVE sustain — EXP-01 4500 to
+   3200, EXP-03 4200 to 1500 — so a crumb worth "one engulfed node" would set
+   the target below the size the culture opens at and shrink it from the
+   first step, which is the opposite of the point.
+
+   At 1.0 the crumb holds the culture exactly at its opening size and the
+   floor reaches zero as the crumb does. That is deliberately the smallest
+   version: it changes WHEN starvation arrives (gradually, as the food goes,
+   rather than all at once when a clock expires) without handing out any
+   biomass that was not there before. Anything above 1.0 is a difficulty
+   change and has to be measured against all twenty dishes before it ships. */
+var ORIGIN_HOLD = 1.0;
+
 /* ---- the fan on a flake ----
    A plasmodium that reaches food does not file past it. It stops advancing
    there and spreads over the flake as a sheet: a fan, then a pad of cytoplasm
@@ -2668,8 +2699,10 @@ var S = {
      the ones deliberately not logged */
   logged: false,
   nodeProg: null, nodeDone: null, nodeIdle: null, nodeHeld: null, engulfed: 0,
-  /* sim time the first flake landed, or -1 — the reserve drop at the origin
-     eases out from here; see reserveFrac */
+  /* sim time the first flake landed, or -1. It used to ease the reserve drop
+     out from here; the crumb that replaced it is food and runs down on its
+     own, so nothing reads this now — kept because FINAL_STATE carries it and
+     a stored verdict should not change shape for a field going quiet. */
   resFedT: -1,
   hab: 0, habPeak: 0, habBuilt: -1, fused: false,
   dietP: 0, dietC: 0, dietDoomedT: 0,
@@ -4747,10 +4780,18 @@ function step() {
       if (S.streamAcc > 4) S.streamAcc = 4;
     }
   }
+  /* The crumb the culture woke on, while there is any of it left — see
+     ORIGIN_HOLD. It is a floor under the target rather than a term in it:
+     whichever of the two feeds the organism better is what it lives on, so
+     the crumb carries the opening and the flakes take over the moment they
+     are worth more than it. The grace clock that used to switch starvation
+     off is gone with it; the floor coming down IS the crumb running out. */
+  var crumb = originFrac(e) * e.start * ORIGIN_HOLD;
+  if (crumb > target) target = crumb;
   if (nAgents < target) {
     S.growAcc += (e.grow * DT);
     while (S.growAcc >= 1 && nAgents < target && nAgents < MAXA) { spawnAgent(); S.growAcc -= 1; }
-  } else if ((S.simT > e.grace || S.refineT0 >= 0) && nAgents > target) {
+  } else if (nAgents > target) {
     S.starveAcc += (starveRate * DT);
     while (S.starveAcc >= 1 && nAgents > 0) {
       killWeakest();
@@ -7255,7 +7296,6 @@ var PUDDLE_PL = 0.25;         /* share of the disc the alpha holds flat before f
    is living on, which is a different thing and takes a moment to look
    like one. */
 var RES_R    = 14;            /* cells: the drop's radius at a full reserve */
-var RES_FADE = 3.0;           /* seconds to ease the drop out once fed */
 /* Its own alpha, well under a pad's, and the reason is what is already
    underneath. A flake's pad is painted over ordinary tissue; the drop is
    painted over the CORE, where every one of the body layer's ten contour
@@ -7618,23 +7658,20 @@ function treeFlow() {
   }
 }
 
-/* How much of the drop the culture arrived with is still under it: 1 at
-   inoculation, 0 when the grace clock runs out, which is the moment
-   starvation starts. Once a flake is down the reserve stops being what the
-   culture lives on, so it eases away over RES_FADE rather than vanishing on
-   the frame the dial closed. */
-function reserveFrac(e) {
+/* Replaced reserveFrac, which faded the drop out on the first flake because
+   a grace clock stopped mattering once you were fed. A crumb does not stop
+   mattering when you find something else: it is food, and it is there until
+   it is eaten. So the drop follows the crumb and nothing eases it away. */
+/* What is left of the crumb: 1 at the inoculation, 0 when it is eaten. The
+   clock is e.grace, which is what that number already measured — the time
+   the culture could live without finding anything. It is food now rather
+   than a grace, so nothing switches off at the end of it; the floor it puts
+   under the target simply reaches zero. */
+function originFrac(e) {
   var g = e.grace || 0;
   if (g <= 0) return 0;
   var f = 1 - S.simT / g;
-  if (f <= 0) return 0;
-  if (f > 1) f = 1;
-  if (S.resFedT >= 0) {
-    var k = 1 - (S.simT - S.resFedT) / RES_FADE;
-    if (k <= 0) return 0;
-    f *= k;
-  }
-  return f;
+  return f <= 0 ? 0 : (f > 1 ? 1 : f);
 }
 
 /* One puddle: the body's contour, clipped to a fading disc and filled in the
@@ -7684,7 +7721,7 @@ function paintPuddles(c) {
        there is. */
     puddleAt(c, path, nd.x, nd.y, nd.r * PUDDLE_R, PUDDLE_A);
   }
-  var rf = reserveFrac(e);
+  var rf = originFrac(e);   /* the tissue on the crumb goes as the crumb does */
   if (rf > 0) {
     if (!path) { path = traceIso(bodyV, BODY_LEVELS[PUDDLE_LV], false, null); if (!path) return; }
     /* by area: half a reserve is half a puddle, not half a width */
@@ -10376,6 +10413,15 @@ function render() {
     ctx.globalAlpha = 1;
   }
 
+  /* The crumb the culture woke on, drawn as what it is: food, going by area
+     as it is eaten, in the same ink a flake's dot uses. No ring and no dial
+     around it — those say "this is an objective", and this one is not. */
+  var of = originFrac(e);
+  if (of > 0) {
+    var orad = RES_R * 0.34 * Math.sqrt(of);
+    if (orad > markCase * 0.5) casedDisc(ctx, e.inoc.x, e.inoc.y, orad, MARK_OBJ);
+  }
+
   if (ptr.down) {
     casedRing(ctx, ptr.gx, ptr.gy, CUE_R, 1.3,
               ptr.mode === 2 ? MARK_RETRACT : ACC_CUE);
@@ -10495,7 +10541,7 @@ function onEngulf(i) {
   var e = S.exp, nd = e.nodes[i];
   var dir = dirWord(e.inoc.x, e.inoc.y, nd.x, nd.y);
   var left = e.nodes.length - S.engulfed;
-  /* the first flake is what the reserve stops mattering at — see reserveFrac */
+  /* stamped for the record; nothing reads it since the crumb — see ORIGIN_HOLD */
   if (S.resFedT < 0) S.resFedT = S.simT;
   /* What the flake actually was, in the two numbers the organism balances */
   if (nd.nut) { S.dietP += nd.nut[0]; S.dietC += nd.nut[1]; }
@@ -10749,8 +10795,8 @@ function noteText(e) {
   }
   if (e.hab && S.hab > 0.02 && S.hab < 0.99) return 'the bitterness is mattering less';
   if (e.hab && S.hab >= 0.99) return 'quinine: noted, ignored';
-  if (S.engulfed === 0 && S.simT > e.grace) return 'starving — nothing engulfed';
-  if (S.engulfed === 0) return 'grace period — ' + Math.max(0, Math.ceil(e.grace - S.simT)) + 's of reserves';
+  if (S.engulfed === 0 && originFrac(e) <= 0) return 'starving — nothing engulfed';
+  if (S.engulfed === 0) return 'the crumb you woke on — ' + Math.ceil(originFrac(e) * 100) + '% left';
   if (nAgents < e.cap * 0.12) return 'cytoplasm critically low';
   return S.engulfed + ' of ' + e.nodes.length + ' engulfed · biomass holding';
 }
