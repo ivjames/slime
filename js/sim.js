@@ -2643,6 +2643,9 @@ var S = {
      the ones deliberately not logged */
   logged: false,
   nodeProg: null, nodeDone: null, nodeIdle: null, nodeHeld: null, engulfed: 0,
+  /* sim time the first flake landed, or -1 — the reserve drop at the origin
+     eases out from here; see reserveFrac */
+  resFedT: -1,
   hab: 0, habPeak: 0, habBuilt: -1, fused: false,
   dietP: 0, dietC: 0, dietDoomedT: 0,
   growAcc: 0, starveAcc: 0,
@@ -7117,10 +7120,82 @@ var TREE_SRC_MAX = 16;        /* flakes the flow walk can take */
    around a pad is the loop around the whole network, and a first try
    that kept whole loops filled the plate. The flake's own dot fades as
    it is eaten; the ring and dial stay, since they are the instrument
-   and not the food. */
-var PUDDLE_LV = 5;            /* index into BODY_LEVELS: trail 26, the fan and the trunk that feeds it */
-var PUDDLE_R  = 2.4;          /* flake radii: where the puddle has faded to nothing */
+   and not the food.
+
+   That paragraph has been right for a while and the code under it was
+   not, in three ways that all read on the plate as the same complaint:
+   the puddles are funny shapes that do not meet their tubes.
+
+   TONE. "In the trunk's tone" is what it says and PLASMODIUM is what it
+   filled with — the raw palette constant, before applyPalette has solved
+   the tissue tone into TINT and before tintVeins has mixed a band's `hot`
+   into it. So the puddle came out at hot 0.00, the coldest tone on the
+   plate, exactly where the trunks are drawn at 0.44 to 0.64, the hottest.
+   The brightest thing on the dish ran into the dullest and stopped. It is
+   the trunk's tone now, and taken the way the trunk takes it: the band
+   for the tissue's own half-width where the puddle stands, so a mature
+   pad reads as the fat cream it is and a thin one does not pretend to.
+
+   LEVEL. The line layer draws where the network is a LINE and correctly
+   draws nothing on a plateau, which is what the puddle is here to cover.
+   But the two disagreed about where that was. The puddle took trail 26
+   while the lines take their axis from the mask at 9, and a pinned vein
+   has to clear VEIN_MINLEN and the spur test besides — so tissue over 26
+   that no line ever claimed got a puddle lobe with no tube in it, which
+   is the wedge that tapers to a point and ends in mid-air. At 32 the
+   puddle keeps to the pad, which is the mass it was always about.
+
+   REACH. 2.4 flake radii reached well past the fan (FEED_R is 1.35) and
+   cropped whatever trunk happened to be passing, so a tube got painted
+   fat for a couple of radii and then stopped dead against its own drawn
+   width. 1.7 clears the fan and little else.
+
+   PLATEAU. The alpha held flat to 0.55 of the disc and then spent the
+   whole falloff in the outer 45%, which over a mask that is itself
+   ending reads as a halo rather than a fade. Falling from 0.25 spends it
+   across the disc. */
+var PUDDLE_LV = 6;            /* index into BODY_LEVELS: trail 32, the pad itself */
+var PUDDLE_R  = 1.7;          /* flake radii: where the puddle has faded to nothing */
 var PUDDLE_A  = 0.92;         /* the fill's alpha at the flake */
+var PUDDLE_PL = 0.25;         /* share of the disc the alpha holds flat before falling */
+
+/* ---- the reserve at the origin ----
+   A plasmodium is inoculated as a DROP, and the drop is food. Before the
+   first flake goes down the culture is living on what it arrived with —
+   the dish log says so in as many words, "grace period, N seconds of
+   reserves" — and a drop being spent gets visibly thinner. The plate drew
+   none of that: the origin got a root loop for the vein graph to attach
+   to and nothing else, so the one mass on the dish that is being consumed
+   was the one mass never drawn.
+
+   It is the same painter as a flake's pad, which is the point: it is the
+   same substance, and it should thin the same way. What differs is what
+   sizes it. A pad is sized by the food under it; the drop is sized by the
+   reserve, so it runs down on the grace clock and is gone when the clock
+   is, which is exactly when starvation starts — the picture and the rule
+   arrive together rather than the rule arriving unannounced.
+
+   By AREA, not radius. The reserve is an amount of cytoplasm and a drop
+   holding half of it is half the puddle, not half as wide, so the radius
+   goes as the square root. Straight radius empties the middle of the run
+   far too fast and then crawls, which reads as a drop that gave up early.
+
+   And it eases out rather than vanishing when the first flake lands. The
+   reserve is not spent at that moment — it stops being what the culture
+   is living on, which is a different thing and takes a moment to look
+   like one. */
+var RES_R    = 14;            /* cells: the drop's radius at a full reserve */
+var RES_FADE = 3.0;           /* seconds to ease the drop out once fed */
+/* Its own alpha, well under a pad's, and the reason is what is already
+   underneath. A flake's pad is painted over ordinary tissue; the drop is
+   painted over the CORE, where every one of the body layer's ten contour
+   fills is stacked and the plate is already at its brightest. At a pad's
+   0.92 the same cream that reads as mass on a flake reads as a lamp at the
+   origin — measured against the same frame with the drop off, the core went
+   from tissue to a white blowout and the trunks appeared to radiate from a
+   light source. The drop is not adding light, it is saying the core is full;
+   it only has to be the difference between full and spent. */
+var RES_A    = 0.42;          /* the drop's alpha at a full reserve */
 
 var tx = new Float32Array(TREE_MAX), ty = new Float32Array(TREE_MAX);
 var tpar = new Int32Array(TREE_MAX);
@@ -7473,24 +7548,77 @@ function treeFlow() {
   }
 }
 
-/* the puddles: the body's contour, filled within a fading disc around
-   each flake that is being eaten or is eaten */
+/* How much of the drop the culture arrived with is still under it: 1 at
+   inoculation, 0 when the grace clock runs out, which is the moment
+   starvation starts. Once a flake is down the reserve stops being what the
+   culture lives on, so it eases away over RES_FADE rather than vanishing on
+   the frame the dial closed. */
+function reserveFrac(e) {
+  var g = e.grace || 0;
+  if (g <= 0) return 0;
+  var f = 1 - S.simT / g;
+  if (f <= 0) return 0;
+  if (f > 1) f = 1;
+  if (S.resFedT >= 0) {
+    var k = 1 - (S.simT - S.resFedT) / RES_FADE;
+    if (k <= 0) return 0;
+    f *= k;
+  }
+  return f;
+}
+
+/* One puddle: the body's contour, clipped to a fading disc and filled in the
+   tone of the tissue it is standing on. The band is chosen from the mask's
+   own half-width here — the same measure the line layer picks a trunk's band
+   from — so a pad and the trunk running into it are the same colour and read
+   as one piece of cytoplasm. Outside the mask bodyD is 0, which is not a thin
+   tube but no tube; the clip draws nothing there anyway, so the widest band
+   is the right answer for the pixels that do get painted. */
+function puddleAt(c, path, x, y, r, a) {
+  if (!(r > 0) || !(a > 0)) return;
+  var cell = (y | 0) * GW + (x | 0);
+  /* the tissue's own width here, in cells, through the LIVE renderer's ramp —
+     see puddleBand. Outside the mask bodyD is 0, which is not a thin tube but
+     no tube: the clip paints nothing there, so the widest reading is right for
+     whatever pixels do land. */
+  var half = bodyD[cell] || 0;
+  var band = puddleBand(half > 0 ? half * 2 : TUBE_W_HI);
+  var m = mixLamp(TINT, band.hot);
+  var col = [Math.round(m[0] * band.dim), Math.round(m[1] * band.dim), Math.round(m[2] * band.dim)];
+  var g = c.createRadialGradient(x, y, 0, x, y, r);
+  g.addColorStop(0, rgba(col, a));
+  g.addColorStop(PUDDLE_PL, rgba(col, a));
+  g.addColorStop(1, rgba(col, 0));
+  c.save();
+  c.beginPath(); c.arc(x, y, r, 0, Math.PI * 2); c.clip();
+  c.fillStyle = g;
+  c.fill(path, 'evenodd');
+  c.restore();
+}
+
+/* the puddles: the pads on the flakes, and the drop at the origin that the
+   culture is living on until the first of those lands */
 function paintPuddles(c) {
   var e = S.exp, path = null, i;
   for (i = 0; i < e.nodes.length; i++) {
     if (!S.nodeDone[i] && !(S.nodeProg[i] > 0.01)) continue;
     if (!path) { path = traceIso(bodyV, BODY_LEVELS[PUDDLE_LV], false, null); if (!path) return; }
-    var nd = e.nodes[i], r = nd.r * PUDDLE_R;
-    var g = c.createRadialGradient(nd.x, nd.y, 0, nd.x, nd.y, r);
-    var col = PLASMODIUM;
-    g.addColorStop(0, 'rgba(' + col[0] + ',' + col[1] + ',' + col[2] + ',' + PUDDLE_A + ')');
-    g.addColorStop(0.55, 'rgba(' + col[0] + ',' + col[1] + ',' + col[2] + ',' + PUDDLE_A + ')');
-    g.addColorStop(1, 'rgba(' + col[0] + ',' + col[1] + ',' + col[2] + ',0)');
-    c.save();
-    c.beginPath(); c.arc(nd.x, nd.y, r, 0, Math.PI * 2); c.clip();
-    c.fillStyle = g;
-    c.fill(path, 'evenodd');
-    c.restore();
+    var nd = e.nodes[i];
+    /* Flat alpha, and resisting the obvious tempting thing. A pad DOES recede
+       as the flake goes, but the simulation is already doing that — FEED_FILL
+       sizes the pad by the food left, so the tissue thins and the contour this
+       traces thins with it. Fading the paint by foodLeft as well counts the
+       same recession twice, and measurably: at PUDDLE_A x SPENT_FOOD an eaten
+       flake came out at alpha 0.28 of a lamp-mixed cream, which over the dish
+       is not thin cytoplasm but grey haze. Let the mass say how much mass
+       there is. */
+    puddleAt(c, path, nd.x, nd.y, nd.r * PUDDLE_R, PUDDLE_A);
+  }
+  var rf = reserveFrac(e);
+  if (rf > 0) {
+    if (!path) { path = traceIso(bodyV, BODY_LEVELS[PUDDLE_LV], false, null); if (!path) return; }
+    /* by area: half a reserve is half a puddle, not half a width */
+    puddleAt(c, path, e.inoc.x, e.inoc.y, RES_R * Math.sqrt(rf), RES_A);
   }
 }
 
@@ -8174,6 +8302,48 @@ function paintVeinGraph() {
   vDrawn = veinN;
 }
 
+/* Tissue width in cells, as the plate's two line renderers see it. A trunk off
+   the core is fourteen to eighteen cells of tissue across, a mesh edge four to
+   eight, and two or under is film. */
+var TUBE_W_LO = 2, TUBE_W_HI = 16;     /* cells across */
+function tubeT(wCells) {
+  var t = (wCells - TUBE_W_LO) / (TUBE_W_HI - TUBE_W_LO);
+  return t < 0 ? 0 : (t > 1 ? 1 : t);
+}
+
+/* A tube's tone by its width, for the TUBES renderer: the tissue tone at two
+   across and under, the widest band's lamp at sixteen and beyond. */
+var TUBE_HOT_LO = 0.04, TUBE_HOT_HI = 0.50;
+function tubeHot(wCells) {
+  return TUBE_HOT_LO + (TUBE_HOT_HI - TUBE_HOT_LO) * tubeT(wCells);
+}
+
+/* And the same width as the TREE renderer sees it, which is the one that is
+   actually on. This distinction is the whole of a bug worth writing down.
+
+   There are two line renderers and they do not share a ramp. TUBES strokes
+   TUBE_STYLE, whose tone runs on tubeHot and tops out at 0.50. VEIN_TREE
+   strokes VEIN_BANDS[treeBand(w)], which tops out at 0.64. The plate ships
+   VEIN_TREE true and TUBES false, and the TUBES loop is written
+   `for (k = TUBES ? TUBE_KEYS - 1 : -1; ...)` — so it never runs and
+   TUBE_STYLE is dead. Matching the puddle to tubeHot therefore matched it to
+   a renderer nobody can see: a pad capped at 0.50 while the trunk crossing it
+   sat at 0.64, which is the same "doesn't quite join" this was meant to end,
+   just quieter than before.
+
+   The tree's width is not tissue width — it is a pipe-model number, TREE_W0
+   times leaves to 1/PIPE_N, capped at TREE_WMAX — so there is no width to
+   read off bodyD and hand straight to treeBand. What there is, is the two
+   ends: film is drawn at TREE_W0 and the fattest trunk at TREE_WMAX. Mapping
+   tissue across that span and taking treeBand of the result puts a pad, which
+   is wider than any trunk, in exactly the band the widest trunk is painted
+   in — which is the join, stated as the thing it is.
+
+   If TUBES is ever switched back on, this is the line that has to follow it. */
+function puddleBand(wCells) {
+  return VEIN_BANDS[treeBand(TREE_W0 + (TREE_WMAX - TREE_W0) * tubeT(wCells))];
+}
+
 function tintVeins(vein) {
   for (var i = 0; i < VEIN_BANDS.length; i++) {
     var band = VEIN_BANDS[i];
@@ -8207,13 +8377,11 @@ function tintVeins(vein) {
   for (var kb = 0; kb < BODY_LEVELS.length; kb++) {
     BODY_STYLE[kb] = rgba(kb === 0 ? mixWhite(vein, 0.42) : mixLamp(vein, BODY_HOT[kb]), '' + BODY_ALPHA[kb]);
   }
-  /* a tube's tone by its width: the tissue tone at two cells and under,
-     the widest band's lamp at sixteen and beyond — a trunk off the core
-     is fourteen to eighteen across, a mesh edge four to eight */
+  /* a tube's tone by its width — see tubeHot. Only the TUBES renderer, which
+     the plate ships off; the puddles follow the tree's ramp instead, for the
+     reason written at puddleBand. */
   for (var kt = 0; kt < TUBE_KEYS; kt++) {
-    var tw = (kt / VEIN_TUBE_Q - 2) / 14;
-    if (tw < 0) tw = 0; else if (tw > 1) tw = 1;
-    TUBE_STYLE[kt] = rgba(mixLamp(vein, 0.04 + 0.46 * tw), '1');
+    TUBE_STYLE[kt] = rgba(mixLamp(vein, tubeHot(kt / VEIN_TUBE_Q)), '1');
   }
   REC_STYLE = rgba(vein, '1');
   /* the graph's canvas holds the old styles until it is painted whole */
@@ -10257,6 +10425,8 @@ function onEngulf(i) {
   var e = S.exp, nd = e.nodes[i];
   var dir = dirWord(e.inoc.x, e.inoc.y, nd.x, nd.y);
   var left = e.nodes.length - S.engulfed;
+  /* the first flake is what the reserve stops mattering at — see reserveFrac */
+  if (S.resFedT < 0) S.resFedT = S.simT;
   /* What the flake actually was, in the two numbers the organism balances */
   if (nd.nut) { S.dietP += nd.nut[0]; S.dietC += nd.nut[1]; }
   /* Reachability only changes when a flake goes in, so this is the one place
@@ -11615,6 +11785,7 @@ function startRun(i, seed, trace) {
   S.nodeProg = new Float32Array(e.nodes.length);
   S.nodeIdle = new Float32Array(e.nodes.length);
   S.nodeHeld = new Uint8Array(e.nodes.length);
+  S.resFedT = -1;
   S.nodeDone = new Array(e.nodes.length);
   for (var q = 0; q < e.nodes.length; q++) S.nodeDone[q] = false;
   if (nodeHits.length < e.nodes.length) nodeHits = new Int32Array(e.nodes.length);
