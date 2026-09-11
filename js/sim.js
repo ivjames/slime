@@ -1046,6 +1046,31 @@ var FEED_SPEED = 0.30; // floor under a feeding agent's speed, so the pad can fi
    crosses one of FOOD_Q steps, not every step. */
 var FOOD_Q = 8;        // progress steps between rebuilds of the food field
 
+/* How long the plate goes on moving after the dish is won. A flake is engulfed
+   the instant its last crumb goes, but the sheet that covers it arrives over
+   the seconds AFTER that — the pad's own trail holds the disc up (see the
+   floor under FEED_LAY), cytoplasm follows it in, and measured on EXP-06 a
+   taken flake went from a tenth covered to fully covered over about eighteen
+   seconds, forty agents standing on it becoming four hundred. A dish whose win
+   fires on its last flake used to stop dead inside that window and paint its
+   verdict over a pad that had not formed, which is why a taken flake on the
+   result screen drew as a ring however well the simulation covered it a moment
+   later. Sixteen of the twenty dishes end that way.
+
+   The clock stops where this starts, exactly as it does for EXP-03's settling
+   and for the same reason — see runClock: an interval the dish imposes after
+   the last node is not time the player spent, and scoring it would push every
+   best time out by the length of the hold. The brush is locked for the same
+   reason: the run is decided, and a cue painted here would be spending a
+   reserve the autonomy axis is no longer dividing.
+
+   It is NOT the settling regime. That is a different thing with rules of its
+   own — no tips, longer sensors, idle tubes let go — and a dish that has one
+   keeps it. This is the ordinary dish, still running, for exactly long enough
+   to finish what the win interrupted. */
+var WIN_HOLD = 6 * PACE;   // sim seconds the plate keeps moving after the win (paced,
+                           // like every other schedule — see paceDish and the pace block)
+
 /* ---- lobes at the corners ----
    The other structure the filament rule would not draw. A physarum network is
    not tubes meeting at mathematical points: where three tubes meet, and where
@@ -2650,6 +2675,7 @@ var S = {
   dietP: 0, dietC: 0, dietDoomedT: 0,
   growAcc: 0, starveAcc: 0,
   refineT0: -1,   /* sim time the settling began, or -1 — see EXP-03's refine */
+  holdT0: -1,     /* sim time the win landed, or -1 — see WIN_HOLD */
   flowAcc: 0, streamAcc: 0,
   shockNext: 0, shockActive: false, shockWarn: false, shocksSurvived: 0,
   shockWarned: -1, shockCycle: 0, shockPeriod: 0,
@@ -4570,7 +4596,12 @@ function step() {
       if (nodeHits[i] >= hfloor) {
         S.nodeIdle[i] = 0;
         if (!S.nodeHeld[i]) { S.nodeHeld[i] = true; refreshNodeRows(); }
-      } else if (S.nodeHeld[i]) {
+      } else if (S.nodeHeld[i] && S.holdT0 < 0) {
+        /* Not during the hold: the win was decided on the stations standing at
+           that moment, and the plate is only being allowed to finish settling.
+           Letting one lapse here printed "you have left flake N" into the log
+           of a dish already won, and counted the readout back down to 4 / 6
+           beside the note saying it was taken. */
         S.nodeIdle[i] += DT;
         if (S.nodeIdle[i] >= HOLD_DROP) {
           S.nodeIdle[i] = 0;
@@ -4732,14 +4763,18 @@ function step() {
   if (nAgents > S.peak) S.peak = nAgents;
 
   /* --- shock cycle (EXP-05) --- */
-  if (e.shocks) updateShocks(e);
+  if (e.shocks && S.holdT0 < 0) updateShocks(e);
 
   /* --- narration --- */
   updateNarration(e);
 
   /* --- end conditions --- */
-  if (nAgents <= 0) { finish(false, 'starved'); return; }
-  if (S.refineT0 >= 0) {
+  /* The hold runs before every other end test, and outranks them: the dish is
+     already won, so nothing that happens inside the window can take it back. */
+  if (S.holdT0 >= 0) {
+    if (S.simT - S.holdT0 >= WIN_HOLD) { finish(true, ''); return; }
+  } else if (nAgents <= 0) { finish(false, 'starved'); return; }
+  else if (S.refineT0 >= 0) {
     /* settling: the run ends when the settling does, whatever the win test
        says on the way — the ninth depot has been taken, the verdict is the
        network */
@@ -4748,15 +4783,24 @@ function step() {
     if (e.refine) {
       S.refineT0 = S.simT;
       if (e.refine.text) logLine(e.refine.text, true);
-    } else { finish(true, ''); return; }
+    } else {
+      S.holdT0 = S.simT;
+      /* Clear the warn rather than merely stopping the clock on it. winMet
+         only refuses a win while a shock is ACTIVE, so one can land inside a
+         warn window; a warn frozen true there holds the anticipation slowdown
+         at 0.45 and paints the falling-humidity wash across the verdict — on
+         the four shock dishes the hold would run at half speed and still look
+         like weather. Nothing is coming: the dish is won. */
+      S.shockWarn = false; S.anticipated = false;
+    }
   }
   /* the beat is narrative, not mechanical: the outcome was decided the
      moment the flake went in */
-  if (S.dietDoomedT && S.simT >= S.dietDoomedT + 4) { finish(false, 'ratio'); return; }
+  if (S.holdT0 < 0 && S.dietDoomedT && S.simT >= S.dietDoomedT + 4) { finish(false, 'ratio'); return; }
   /* a clock that runs out during the beat does not change what happened:
      the ratio verdict stands once the plate is past saving */
   /* not during settling: the plate is spoken for, the clock has done its job */
-  if (e.timeLimit && S.refineT0 < 0 && S.simT >= e.timeLimit) { finish(false, S.dietDoomedT ? 'ratio' : 'timeout'); return; }
+  if (e.timeLimit && S.refineT0 < 0 && S.holdT0 < 0 && S.simT >= e.timeLimit) { finish(false, S.dietDoomedT ? 'ratio' : 'timeout'); return; }
 }
 
 /* What the dish actually asks for. Every dish asks for the food gate and, if
@@ -10675,6 +10719,8 @@ function noteText(e) {
   /* Above the shock warning on purpose. A player who cannot steer needs to be
      told that before being told what to steer away from — and the fix (let go)
      is one word, so it costs the warning almost nothing to wait a beat. */
+  if (S.holdT0 >= 0) return 'taken — the sheet closes over the last flake · ' +
+    Math.max(0, Math.ceil(WIN_HOLD - (S.simT - S.holdT0))) + 's';
   if (S.refineT0 >= 0 && e.refine) return 'settling — ' + Math.max(0, Math.ceil(e.refine.dur - (S.simT - S.refineT0))) + 's · the idle tubes lapse';
   if (cueCapOf(e) && S.cueRes <= 0) return 'reserve spent — release to recover it';
   if (S.shockActive) return 'DRY SHOCK — hold the refuges';
@@ -10794,7 +10840,11 @@ function markFor(score) {
    so the clock stops where the settling starts. Scoring the settling would
    have cut EXP-03's best possible mark below marks already saved from runs
    that ended at the ninth depot. */
-function runClock() { return S.refineT0 >= 0 ? S.refineT0 : S.simT; }
+function runClock() {
+  if (S.refineT0 >= 0) return S.refineT0;
+  if (S.holdT0 >= 0) return S.holdT0;
+  return S.simT;
+}
 
 function runScore(e) {
   var rt = runClock();
@@ -11414,10 +11464,14 @@ var GHOST_ENT = 9;
    9: the hold on a flake and its pull run down with the food left.
    10: the return signal — a find travels back through the cytoplasm, holds
        the route it came by and shades the tubes beside it.
-   11: the drop is a disc, not a diamond: every run starts differently. */
-var SIM_V = 12;   /* the feeding rate is calibrated and PACE is 3: every dish's
-                     clock moves, so no time set under 11 is a time this
-                     organism can be asked to beat */
+   11: the drop is a disc, not a diamond: every run starts differently.
+   12: the feeding rate is calibrated and PACE is 3.
+   13: every dish runs on past its last node, not only one with `refine`
+       — see WIN_HOLD. Entry 6 is the same change for EXP-03 alone. */
+var SIM_V = 13;   /* Best times are unaffected by the hold — runClock stops at
+                     the win, measured identical to a tenth of a second across
+                     all twenty dishes — but the plate a seed and tape produce
+                     is different, which is what this byte is the contract for. */
 
 function ghostSig() {
   var h = mix32(SIM_V, Math.round(CUE_CAP * 1000), Math.round(CUE_REGEN * 1000));
@@ -11964,7 +12018,7 @@ function startRun(i, seed, trace) {
   S.engulfed = 0;
   S.hab = 0; S.habPeak = 0; S.habBuilt = -1; S.fused = false;
   S.dietP = 0; S.dietC = 0; S.dietDoomedT = 0;
-  S.growAcc = 0; S.starveAcc = 0; reabCursor = 0; idleCursor = 0; mainOK = false; S.refineT0 = -1; S.flowAcc = 0; S.streamAcc = 0; tubeDist = [];
+  S.growAcc = 0; S.starveAcc = 0; reabCursor = 0; idleCursor = 0; mainOK = false; S.refineT0 = -1; S.holdT0 = -1; S.flowAcc = 0; S.streamAcc = 0; tubeDist = [];
   S.shockNext = e.shock ? e.shock.first : 0;
   S.shockPeriod = e.shock ? e.shock.period : 0;
   S.shockActive = false; S.shockWarn = false; S.shocksSurvived = 0;
@@ -12465,7 +12519,7 @@ function frame(ts) {
          the same steps and denies the same ones, so recording the outcome
          would store a decision the replay is about to make for itself — and
          store it in a form that could not survive a change to the rates. */
-      var want = ptr.down;
+      var want = ptr.down && S.holdT0 < 0;   /* decided: see WIN_HOLD */
       if (cueTick(want, ptr.mode)) paintBrush(ptr.gx, ptr.gy, ptr.mode);
       if (want && !REPLAY.on) recordBrush(stepsRun, ptr.mode, ptr.gx, ptr.gy);
       step(); stepsRun++; acc -= DT; steps++;
@@ -12642,7 +12696,10 @@ function bindInput() {
     ptr.down = true;
     primaryId = ev.pointerId;
     ptr.gx = g.x; ptr.gy = g.y;
-    if (ptr.mode === 1) S.cues++;
+    /* not after the win: the step loop refuses the brush during the hold
+       (see WIN_HOLD), so counting the press here would put cues in the
+       result panel and the ghost header that painted nothing */
+    if (ptr.mode === 1 && S.holdT0 < 0) S.cues++;
     try { stage.setPointerCapture(ev.pointerId); } catch (err) { /* not fatal */ }
   });
 
