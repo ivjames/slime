@@ -1068,7 +1068,8 @@ var FOOD_Q = 8;        // progress steps between rebuilds of the food field
    own — no tips, longer sensors, idle tubes let go — and a dish that has one
    keeps it. This is the ordinary dish, still running, for exactly long enough
    to finish what the win interrupted. */
-var WIN_HOLD = 18;     // sim seconds the plate keeps moving after the win
+var WIN_HOLD = 6 * PACE;   // sim seconds the plate keeps moving after the win (paced,
+                           // like every other schedule — see paceDish and the pace block)
 
 /* ---- lobes at the corners ----
    The other structure the filament rule would not draw. A physarum network is
@@ -4595,7 +4596,12 @@ function step() {
       if (nodeHits[i] >= hfloor) {
         S.nodeIdle[i] = 0;
         if (!S.nodeHeld[i]) { S.nodeHeld[i] = true; refreshNodeRows(); }
-      } else if (S.nodeHeld[i]) {
+      } else if (S.nodeHeld[i] && S.holdT0 < 0) {
+        /* Not during the hold: the win was decided on the stations standing at
+           that moment, and the plate is only being allowed to finish settling.
+           Letting one lapse here printed "you have left flake N" into the log
+           of a dish already won, and counted the readout back down to 4 / 6
+           beside the note saying it was taken. */
         S.nodeIdle[i] += DT;
         if (S.nodeIdle[i] >= HOLD_DROP) {
           S.nodeIdle[i] = 0;
@@ -4777,7 +4783,16 @@ function step() {
     if (e.refine) {
       S.refineT0 = S.simT;
       if (e.refine.text) logLine(e.refine.text, true);
-    } else { S.holdT0 = S.simT; }
+    } else {
+      S.holdT0 = S.simT;
+      /* Clear the warn rather than merely stopping the clock on it. winMet
+         only refuses a win while a shock is ACTIVE, so one can land inside a
+         warn window; a warn frozen true there holds the anticipation slowdown
+         at 0.45 and paints the falling-humidity wash across the verdict — on
+         the four shock dishes the hold would run at half speed and still look
+         like weather. Nothing is coming: the dish is won. */
+      S.shockWarn = false; S.anticipated = false;
+    }
   }
   /* the beat is narrative, not mechanical: the outcome was decided the
      moment the flake went in */
@@ -10704,7 +10719,8 @@ function noteText(e) {
   /* Above the shock warning on purpose. A player who cannot steer needs to be
      told that before being told what to steer away from — and the fix (let go)
      is one word, so it costs the warning almost nothing to wait a beat. */
-  if (S.holdT0 >= 0) return 'taken — the sheet closes over the last flake';
+  if (S.holdT0 >= 0) return 'taken — the sheet closes over the last flake · ' +
+    Math.max(0, Math.ceil(WIN_HOLD - (S.simT - S.holdT0))) + 's';
   if (S.refineT0 >= 0 && e.refine) return 'settling — ' + Math.max(0, Math.ceil(e.refine.dur - (S.simT - S.refineT0))) + 's · the idle tubes lapse';
   if (cueCapOf(e) && S.cueRes <= 0) return 'reserve spent — release to recover it';
   if (S.shockActive) return 'DRY SHOCK — hold the refuges';
@@ -11448,10 +11464,14 @@ var GHOST_ENT = 9;
    9: the hold on a flake and its pull run down with the food left.
    10: the return signal — a find travels back through the cytoplasm, holds
        the route it came by and shades the tubes beside it.
-   11: the drop is a disc, not a diamond: every run starts differently. */
-var SIM_V = 12;   /* the feeding rate is calibrated and PACE is 3: every dish's
-                     clock moves, so no time set under 11 is a time this
-                     organism can be asked to beat */
+   11: the drop is a disc, not a diamond: every run starts differently.
+   12: the feeding rate is calibrated and PACE is 3.
+   13: every dish runs on past its last node, not only one with `refine`
+       — see WIN_HOLD. Entry 6 is the same change for EXP-03 alone. */
+var SIM_V = 13;   /* Best times are unaffected by the hold — runClock stops at
+                     the win, measured identical to a tenth of a second across
+                     all twenty dishes — but the plate a seed and tape produce
+                     is different, which is what this byte is the contract for. */
 
 function ghostSig() {
   var h = mix32(SIM_V, Math.round(CUE_CAP * 1000), Math.round(CUE_REGEN * 1000));
@@ -12676,7 +12696,10 @@ function bindInput() {
     ptr.down = true;
     primaryId = ev.pointerId;
     ptr.gx = g.x; ptr.gy = g.y;
-    if (ptr.mode === 1) S.cues++;
+    /* not after the win: the step loop refuses the brush during the hold
+       (see WIN_HOLD), so counting the press here would put cues in the
+       result panel and the ghost header that painted nothing */
+    if (ptr.mode === 1 && S.holdT0 < 0) S.cues++;
     try { stage.setPointerCapture(ev.pointerId); } catch (err) { /* not fatal */ }
   });
 
