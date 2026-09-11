@@ -7229,20 +7229,29 @@ var TREE_SRC_MAX = 16;        /* flakes the flow walk can take */
    tissue and nothing. */
 var PUDDLE_LV = 6;            /* index into BODY_LEVELS: trail 32, the pad itself */
 var PUDDLE_R  = 1.7;          /* flake radii: where the puddle has come down to the body */
-/* The tone the puddle's rim lands on: the body fill's own colour at the level
-   the puddle is traced from. It used to land on alpha zero, and that was wrong
-   twice over. The fill is clipped to the body's contour, so what the ramp was
-   fading out was TISSUE — a pad's outer half dissolved into the agar as a
-   vignette while the body's lines, which never fade, ran up to it and stopped.
-   A pad read as a separate object with a soft edge, sitting near the network
-   rather than being part of it.
-   Landing it on BODY_STYLE[PUDDLE_LV]'s colour instead makes the rim the same
-   tone as the ground it is painted over, so the clip circle disappears and the
-   pad grows out of the body — hotter in the middle where the tissue is deep,
-   the body's own colour by the time it reaches the edge. Derived from
-   BODY_HOT rather than written as a number, for the reason spelled out at
-   LOBE_STYLE: a constant would drift the moment the body's ramp moved, and go
-   on claiming it matched. */
+/* The tone the puddle's rim lands on: the faintest tissue there is, which is
+   the thinnest vein band's. It used to land on alpha zero, and the fill is
+   clipped to the body's contour, so what that ramp faded out was TISSUE — a
+   pad's outer half dissolved into the agar as a vignette while the body's
+   lines, which never fade, ran up to it and stopped. A pad read as a separate
+   object with a soft edge sitting near the network rather than part of it,
+   and the annulus between the two came out as a dark smudge: BODY_FILL is
+   off, so a plateau has no ridge for the line layer to find and nothing is
+   drawn under the pad at all. Where the alpha ran out there was the plate.
+
+   Read off VEIN_BANDS[0] rather than written as a number, for the reason
+   spelled out at LOBE_STYLE. It has to be the DIMMEST band and not a mid one:
+   the centre takes its tone from the tissue's own width, so a rim brighter
+   than a thin pad's centre draws a dark core inside a bright ring — the halo
+   this is here to remove, inverted. Against band 0 the ramp only ever runs
+   downward, and a pad ends as the faintest tissue rather than as nothing.
+
+   What this does NOT do is make the clip circle vanish. Nothing paints the
+   body's mass under the pad, so the rim is still an edge where the contour
+   crosses PUDDLE_R — a trunk running into a pad is cut off square there. It
+   is the lowest-contrast edge available rather than no edge, and that is the
+   honest claim. Filling the body's levels (BODY_FILL) is what would remove
+   it, and that is a different change. */
 var PUDDLE_EDGE = [0, 0, 0];
 var PUDDLE_A  = 0.92;         /* the fill's alpha at the flake */
 var PUDDLE_PL = 0.25;         /* share of the disc the alpha holds flat before falling */
@@ -8462,8 +8471,11 @@ function tintVeins(vein) {
      BRIGHTEST thing on the plate while the comment went on claiming they
      matched. Derived, it cannot drift from what it says it is. */
   LOBE_STYLE = rgba(mixLamp(vein, VEIN_BANDS[3].hot), '1');
-  /* the puddle's rim, at the body level the puddle is traced from */
-  PUDDLE_EDGE = mixLamp(vein, BODY_HOT[PUDDLE_LV]);
+  /* the puddle's rim: the thinnest band's tone, dimmed as that band is */
+  var pe = mixLamp(vein, VEIN_BANDS[0].hot);
+  PUDDLE_EDGE = [Math.round(pe[0] * VEIN_BANDS[0].dim),
+                 Math.round(pe[1] * VEIN_BANDS[0].dim),
+                 Math.round(pe[2] * VEIN_BANDS[0].dim)];
   for (var kb = 0; kb < BODY_LEVELS.length; kb++) {
     BODY_STYLE[kb] = rgba(kb === 0 ? mixWhite(vein, 0.42) : mixLamp(vein, BODY_HOT[kb]), '' + BODY_ALPHA[kb]);
   }
@@ -10399,9 +10411,13 @@ function render() {
        By AREA, like the reserve drop: half the food left is half the disc,
        not half the radius. Dropped entirely below the width its own casing
        would swallow — a disc thinner than the dark edge drawn around it is
-       a ring, not a crumb — which is also what clears the plate at done. */
+       a ring, not a crumb — which is also what clears the plate at done.
+       That edge is markCase/2 thick (see casedDisc) and the test is against
+       exactly that: at markCase it was twice as strict as the sentence above,
+       and on the smallest canvas the dot left the plate at 78% eaten while
+       the dial beside it still read 78. */
     var fr = nd.r * 0.34 * Math.sqrt(1 - prog);
-    if (fr > markCase) casedDisc(ctx, nd.x, nd.y, fr, MARK_OBJ);
+    if (fr > markCase * 0.5) casedDisc(ctx, nd.x, nd.y, fr, MARK_OBJ);
   }
 
   if (ptr.down) {
