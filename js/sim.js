@@ -10389,11 +10389,19 @@ function render() {
                -Math.PI / 2 + Math.PI * 2 * prog, 2.2, MARK_DIAL);
     }
 
-    /* the flake itself fades as it is eaten: under the puddle it is
-       becoming, the dot is the food and the food is going */
-    if (prog > 0.01) ctx.globalAlpha = 1 - prog;
-    casedDisc(ctx, nd.x, nd.y, nd.r * 0.34, MARK_OBJ);
-    ctx.globalAlpha = 1;
+    /* The flake itself goes as it is eaten, and it GOES rather than fading:
+       the dot is the food, and food that is half eaten is half as much food,
+       not the same food half transparent. Fading said the wrong thing twice —
+       a translucent dot over a bright pad read as a dot behind the tissue
+       rather than a dot being consumed by it, and at three-quarters gone it
+       was a full-sized smudge on a plate whose every other mark is solid.
+
+       By AREA, like the reserve drop: half the food left is half the disc,
+       not half the radius. Dropped entirely below the width its own casing
+       would swallow — a disc thinner than the dark edge drawn around it is
+       a ring, not a crumb — which is also what clears the plate at done. */
+    var fr = nd.r * 0.34 * Math.sqrt(1 - prog);
+    if (fr > markCase) casedDisc(ctx, nd.x, nd.y, fr, MARK_OBJ);
   }
 
   if (ptr.down) {
