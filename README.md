@@ -82,14 +82,14 @@ seed might name is still there, now as a guard on that one palette.
 | hold left / drag | growth cue — the exploratory front flows toward it |
 | hold right / shift | retract — pull cytoplasm back out of a region |
 | space | pause (hold the clock) |
-| F | time-lapse — step the dish clock up the ladder, ×1/16 to ×16 (shift+F steps back down) |
+| F | time-lapse — step the dish clock up the ladder, ×1/16 to ×4 (shift+F steps back down) |
 | R | reset the dish |
 | Escape | close the key list, leave a replay, abandon the dish — in that order |
 
 ### The dish clock
 
-The time-lapse ladder is nine stops — ×1/16, ×1/8, ×1/4, ×1/2, ×1, ×2, ×4, ×8,
-×16 — and ×1 is the dish's own clock rather than real time. A *Physarum*
+The time-lapse ladder is seven stops — ×1/16, ×1/8, ×1/4, ×1/2, ×1, ×2, ×4 —
+and ×1 is the dish's own clock rather than real time. A *Physarum*
 network that takes the better part of a day in a real plate is built here in a
 few sim minutes, so ×1 is already about **400 times life**. What that buys the
 bottom half of the ladder is worth stating plainly: ×1/16 is slow motion of the
@@ -107,6 +107,27 @@ agar at 25 °C manages 2–3 cm/h. The ratio is the number.
 It matters more than a caption because the feeding rate is now derived through
 it (see below), so the dish clock is load-bearing. It read "about a hundred"
 for a long time, and a hundred was a guess.
+
+### What the dish is actually running at
+
+The multiplier is a request, not a promise. Two caps sit above it in the frame
+loop — a per-frame step budget and a wall-clock box — and whatever the box
+leaves behind is discarded rather than carried, deliberately, so a slow device
+runs fewer steps a second instead of spiralling. Nothing about the *run* is
+wrong when that happens: a step is a step, the order is fixed, and two runs
+that have executed the same number of them hold the same dish. But the label
+used to go on claiming a rate the device was not serving.
+
+It says so now. When the dish is short of the ask, the clock appends what it is
+actually managing — `00:21 ×4 (×2.1)` — and stays quiet when it is keeping up.
+
+The same measurement is why the ladder stops at ×4. With `?prof` a step costs
+7–9 ms here, which is ×1.9–2.4; ×8 would want a machine four times as fast and
+×16 about nine, or roughly a millisecond a step for four thousand agents, a
+vein trace and ten body contours. Those two stops were removed because they
+could not be served, not because they did nothing — matched on agent count they
+were still worth something like 20% at the very top — but a dial whose stops
+are all achievable is worth more than the 20%.
 
 The multiplier scales sim time, not playback: the dish clock, the shock
 schedule and every rate in the model move together, so a run watched at ×1/4 is
@@ -183,7 +204,7 @@ wins scored .999 or better. It was weight handed over for nothing.
 
 Every run records the cues that produced it, and the dish is a pure function
 of its seed and those cues — so the verdict screen can replay the run you just
-finished, at ×1, ×4 or ×16.
+finished, at ×1, ×2 or ×4.
 
 - **Ghosts.** The run that earned your best mark on a dish is kept, and
   **Best run** on the verdict screen plays it back. It replays cell for cell,
