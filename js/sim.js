@@ -7223,9 +7223,27 @@ var TREE_SRC_MAX = 16;        /* flakes the flow walk can take */
    PLATEAU. The alpha held flat to 0.55 of the disc and then spent the
    whole falloff in the outer 45%, which over a mask that is itself
    ending reads as a halo rather than a fade. Falling from 0.25 spends it
-   across the disc. */
+   across the disc — a COLOUR ramp now rather than an alpha one, see
+   PUDDLE_EDGE, so what it spends across the disc is the difference
+   between the pad's tone and the body's, not the difference between
+   tissue and nothing. */
 var PUDDLE_LV = 6;            /* index into BODY_LEVELS: trail 32, the pad itself */
-var PUDDLE_R  = 1.7;          /* flake radii: where the puddle has faded to nothing */
+var PUDDLE_R  = 1.7;          /* flake radii: where the puddle has come down to the body */
+/* The tone the puddle's rim lands on: the body fill's own colour at the level
+   the puddle is traced from. It used to land on alpha zero, and that was wrong
+   twice over. The fill is clipped to the body's contour, so what the ramp was
+   fading out was TISSUE — a pad's outer half dissolved into the agar as a
+   vignette while the body's lines, which never fade, ran up to it and stopped.
+   A pad read as a separate object with a soft edge, sitting near the network
+   rather than being part of it.
+   Landing it on BODY_STYLE[PUDDLE_LV]'s colour instead makes the rim the same
+   tone as the ground it is painted over, so the clip circle disappears and the
+   pad grows out of the body — hotter in the middle where the tissue is deep,
+   the body's own colour by the time it reaches the edge. Derived from
+   BODY_HOT rather than written as a number, for the reason spelled out at
+   LOBE_STYLE: a constant would drift the moment the body's ramp moved, and go
+   on claiming it matched. */
+var PUDDLE_EDGE = [0, 0, 0];
 var PUDDLE_A  = 0.92;         /* the fill's alpha at the flake */
 var PUDDLE_PL = 0.25;         /* share of the disc the alpha holds flat before falling */
 
@@ -7658,7 +7676,7 @@ function puddleAt(c, path, x, y, r, a) {
   var g = c.createRadialGradient(x, y, 0, x, y, r);
   g.addColorStop(0, rgba(col, a));
   g.addColorStop(PUDDLE_PL, rgba(col, a));
-  g.addColorStop(1, rgba(col, 0));
+  g.addColorStop(1, rgba(PUDDLE_EDGE, a));   /* the body's tone, not nothing — see PUDDLE_EDGE */
   c.save();
   c.beginPath(); c.arc(x, y, r, 0, Math.PI * 2); c.clip();
   c.fillStyle = g;
@@ -8444,6 +8462,8 @@ function tintVeins(vein) {
      BRIGHTEST thing on the plate while the comment went on claiming they
      matched. Derived, it cannot drift from what it says it is. */
   LOBE_STYLE = rgba(mixLamp(vein, VEIN_BANDS[3].hot), '1');
+  /* the puddle's rim, at the body level the puddle is traced from */
+  PUDDLE_EDGE = mixLamp(vein, BODY_HOT[PUDDLE_LV]);
   for (var kb = 0; kb < BODY_LEVELS.length; kb++) {
     BODY_STYLE[kb] = rgba(kb === 0 ? mixWhite(vein, 0.42) : mixLamp(vein, BODY_HOT[kb]), '' + BODY_ALPHA[kb]);
   }
