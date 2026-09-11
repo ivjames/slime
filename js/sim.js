@@ -10637,9 +10637,15 @@ function updateHUD(force) {
      a replay the slot is empty only AT the reference — a run being watched at
      ×1/4 has to say so as plainly as one at ×4, or a dish crawling because the
      dial is down reads as a dish crawling because it is dying. */
+  /* The ask, and — when the dish is not managing it — what it is managing
+     instead. The ask stays first because it is the control's state and the
+     ladder has to agree with the clock; the achieved rate follows it in
+     parentheses, which is the smallest way to say "this is a request" without
+     making the common case (a dish that is keeping up) any noisier. */
   $('h-time').textContent = fmtTime(S.simT) +
     (REPLAY.on ? ' · REPLAY ×' + fmtSpeed(TURBO)
-               : (TURBO !== 1 ? ' ×' + fmtSpeed(TURBO) : ''));
+               : (TURBO !== 1 ? ' ×' + fmtSpeed(TURBO) : '')) +
+    (rateShort() ? ' (×' + (Math.round(rateNow * 10) / 10) + ')' : '');
 
   if ((hudTick++ % 4) !== 0) return;
 
@@ -11117,6 +11123,54 @@ var raf = 0, lastTs = 0, acc = 0;
    inverse are the same distance from ×1 in the direction that matters. */
 var TURBO = 1;
 var SPEEDS = [1 / 16, 1 / 8, 1 / 4, 1 / 2, 1, 2, 4, 8, 16];
+
+/* ---- what the dish is ACTUALLY running at ----
+   The multiplier is a request, not a promise, and until now the clock stated
+   it as though it were one.
+
+   Two caps sit above it in the frame loop: a per-frame step budget, and a
+   STEP_MS wall-clock box that breaks the loop mid-frame on a device that
+   cannot run the steps in time. What the box leaves behind is then DISCARDED
+   — `acc = 0`, deliberately, so a slow device runs fewer steps a second
+   instead of spiralling — which means the shortfall is never made up. x16
+   wants 960 steps a second and x24 wants 1440; a phone or a tablet running
+   four thousand agents, a vein trace and ten body contours will not serve
+   that, so the dish runs at whatever it can and the label goes on saying
+   x16.
+
+   Nothing about the RUN is wrong when that happens. A step is a step, the
+   order is fixed, and two runs that have executed the same number of them
+   hold the same dish whatever the wall clock did. What is wrong is the
+   caption, which is the same fault REAL_X had when it claimed a hundred:
+   a number shown with more confidence than it has earned.
+
+   So the achieved rate is measured, over a window long enough not to jitter
+   with one slow frame, and the label says so when the dish is not keeping
+   up. Measured from steps, not from a timer: steps are what sim time IS. */
+var RATE_WIN = 0.5;      // seconds of wall clock a rate sample covers
+var RATE_EASE = 0.25;    // how hard a new sample pulls the reported rate
+var RATE_TOL = 0.85;     // below this share of the ask, the label says so
+var rateT0 = 0, rateS0 = 0, rateNow = 0;
+
+/* The rate the dish is actually managing, in sim-seconds per real second, or
+   0 before the first window has closed. Reset whenever the ask changes or a
+   run starts, so a stop on the ladder is never reported through the last
+   one's number. */
+function rateReset() { rateT0 = 0; rateS0 = stepsRun; rateNow = 0; }
+function rateSample(now) {
+  if (!rateT0) { rateT0 = now; rateS0 = stepsRun; return; }
+  var dt = (now - rateT0) / 1000;
+  if (dt < RATE_WIN) return;
+  var got = (stepsRun - rateS0) * DT / dt;
+  rateNow = rateNow ? rateNow + (got - rateNow) * RATE_EASE : got;
+  rateT0 = now; rateS0 = stepsRun;
+}
+/* Whether the dish is meaningfully short of what the ladder is asking for.
+   Never while paused or stopped — a still dish is not a slow one — and never
+   before a window has closed. */
+function rateShort() {
+  return S.running && !S.paused && rateNow > 0 && rateNow < TURBO * RATE_TOL;
+}
 var TURBO_MIN = SPEEDS[0];
 var TURBO_MAX = 24;
 
@@ -11633,6 +11687,8 @@ function setSpeed(n) {
   n = +n;
   if (!isFinite(n) || n <= 0) n = 1;
   TURBO = clamp(n, TURBO_MIN, TURBO_MAX);
+  /* a new ask is a new question: the old rate answered a different one */
+  rateReset();
   var b = $('s-speed'), fig = $('s-speedn');
   /* Only the figure is rewritten: the word in front of it is markup the sheet
      drops where the row has to be narrow, and the aria-label — which wins over
@@ -11886,6 +11942,8 @@ function startRun(i, seed, trace) {
   S.shockWarned = -1; S.shockCycle = 0;
   S.quinTime = 0; S.slow = 1; S.anticipated = false;
   S.ambientAt = 14 * PACE; S.scriptIdx = 0; S.failReason = '';
+  /* a fresh plate measures its own rate, not the last plate's */
+  rateReset();
   /* The active plate, before anything reads it: buildDish stamps from these. */
   S.walls = e.walls; S.hazards = e.hazards; S.eventIdx = 0;
   SLIME_W = e.slimeAvoid || 0;
@@ -11954,6 +12012,8 @@ function setPausedLabel(p) {
 
 function setPaused(p) {
   if (!S.running || S.over) return;
+  /* a paused dish runs no steps, so the window it would close is not a rate */
+  rateReset();
   S.paused = !!p;
   $('pauseveil').classList.toggle('on', S.paused);
   setPausedLabel(S.paused);
@@ -12421,6 +12481,8 @@ function frame(ts) {
        because two per cent was visible. */
     if ((boxed && acc >= DT) || acc > DT * budget) acc = 0;
     if (PROF) { profStep += performance.now() - boxT0; profSteps += steps; }
+    /* what that frame actually managed — see RATE_WIN */
+    rateSample(performance.now());
     if (stepTarget && stepsRun >= stepTarget && S.running && !S.over) {
       /* one-shot: consume the target so Resume resumes and later runs run */
       stepTarget = 0;
@@ -12961,6 +13023,10 @@ function init() {
        label and HUD follow a harness that sets it directly, and fractional
        rates are taken as given rather than rounded onto a whole number. */
     turbo: function (n) { if (n != null) setSpeed(n); return TURBO; },
+    /* sim-seconds per real second the dish is ACTUALLY managing, 0 before the
+       first window closes, and whether that is short of what TURBO asked for —
+       the pair the clock's label is built from */
+    rate: function () { return { ask: TURBO, got: rateNow, short: rateShort() }; },
     speeds: function () { return SPEEDS.slice(); },
     /* the estimated real-time factor of ×1, for a caption that has to agree
        with the one the buttons print */
