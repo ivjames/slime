@@ -7577,12 +7577,14 @@ function reserveFrac(e) {
 function puddleAt(c, path, x, y, r, a) {
   if (!(r > 0) || !(a > 0)) return;
   var cell = (y | 0) * GW + (x | 0);
-  /* the tissue's own width here, in cells, through the tube ramp. Outside the
-     mask bodyD is 0, which is not a thin tube but no tube: the clip paints
-     nothing there, so the widest reading is right for the pixels that land. */
+  /* the tissue's own width here, in cells, through the LIVE renderer's ramp —
+     see puddleBand. Outside the mask bodyD is 0, which is not a thin tube but
+     no tube: the clip paints nothing there, so the widest reading is right for
+     whatever pixels do land. */
   var half = bodyD[cell] || 0;
-  var m = mixLamp(TINT, tubeHot(half > 0 ? half * 2 : TUBE_W_HI));
-  var col = [Math.round(m[0]), Math.round(m[1]), Math.round(m[2])];
+  var band = puddleBand(half > 0 ? half * 2 : TUBE_W_HI);
+  var m = mixLamp(TINT, band.hot);
+  var col = [Math.round(m[0] * band.dim), Math.round(m[1] * band.dim), Math.round(m[2] * band.dim)];
   var g = c.createRadialGradient(x, y, 0, x, y, r);
   g.addColorStop(0, rgba(col, a));
   g.addColorStop(PUDDLE_PL, rgba(col, a));
@@ -8300,23 +8302,46 @@ function paintVeinGraph() {
   vDrawn = veinN;
 }
 
-/* A tube's tone by its width, in cells: the tissue tone at two across and
-   under, the widest band's lamp at sixteen and beyond — a trunk off the core
-   is fourteen to eighteen across, a mesh edge four to eight.
-
-   Two callers, and that is the point of it being a function. tintVeins bakes
-   it into TUBE_STYLE for the tube layer; puddleAt reads it live for the mass
-   under a pad. They used to be different ramps by accident — the puddle took
-   a VEIN_BANDS crest tone, which is keyed to DRAWN LINE WIDTH (0.34 to 3.20)
-   rather than to tissue width in cells, so every pad on the plate landed in
-   the top band and came out at the crest highlight instead of the tube tone.
-   A mass painted in a crest's colour is what made the origin read as a lamp. */
+/* Tissue width in cells, as the plate's two line renderers see it. A trunk off
+   the core is fourteen to eighteen cells of tissue across, a mesh edge four to
+   eight, and two or under is film. */
 var TUBE_W_LO = 2, TUBE_W_HI = 16;     /* cells across */
+function tubeT(wCells) {
+  var t = (wCells - TUBE_W_LO) / (TUBE_W_HI - TUBE_W_LO);
+  return t < 0 ? 0 : (t > 1 ? 1 : t);
+}
+
+/* A tube's tone by its width, for the TUBES renderer: the tissue tone at two
+   across and under, the widest band's lamp at sixteen and beyond. */
 var TUBE_HOT_LO = 0.04, TUBE_HOT_HI = 0.50;
 function tubeHot(wCells) {
-  var t = (wCells - TUBE_W_LO) / (TUBE_W_HI - TUBE_W_LO);
-  if (t < 0) t = 0; else if (t > 1) t = 1;
-  return TUBE_HOT_LO + (TUBE_HOT_HI - TUBE_HOT_LO) * t;
+  return TUBE_HOT_LO + (TUBE_HOT_HI - TUBE_HOT_LO) * tubeT(wCells);
+}
+
+/* And the same width as the TREE renderer sees it, which is the one that is
+   actually on. This distinction is the whole of a bug worth writing down.
+
+   There are two line renderers and they do not share a ramp. TUBES strokes
+   TUBE_STYLE, whose tone runs on tubeHot and tops out at 0.50. VEIN_TREE
+   strokes VEIN_BANDS[treeBand(w)], which tops out at 0.64. The plate ships
+   VEIN_TREE true and TUBES false, and the TUBES loop is written
+   `for (k = TUBES ? TUBE_KEYS - 1 : -1; ...)` — so it never runs and
+   TUBE_STYLE is dead. Matching the puddle to tubeHot therefore matched it to
+   a renderer nobody can see: a pad capped at 0.50 while the trunk crossing it
+   sat at 0.64, which is the same "doesn't quite join" this was meant to end,
+   just quieter than before.
+
+   The tree's width is not tissue width — it is a pipe-model number, TREE_W0
+   times leaves to 1/PIPE_N, capped at TREE_WMAX — so there is no width to
+   read off bodyD and hand straight to treeBand. What there is, is the two
+   ends: film is drawn at TREE_W0 and the fattest trunk at TREE_WMAX. Mapping
+   tissue across that span and taking treeBand of the result puts a pad, which
+   is wider than any trunk, in exactly the band the widest trunk is painted
+   in — which is the join, stated as the thing it is.
+
+   If TUBES is ever switched back on, this is the line that has to follow it. */
+function puddleBand(wCells) {
+  return VEIN_BANDS[treeBand(TREE_W0 + (TREE_WMAX - TREE_W0) * tubeT(wCells))];
 }
 
 function tintVeins(vein) {
@@ -8352,8 +8377,9 @@ function tintVeins(vein) {
   for (var kb = 0; kb < BODY_LEVELS.length; kb++) {
     BODY_STYLE[kb] = rgba(kb === 0 ? mixWhite(vein, 0.42) : mixLamp(vein, BODY_HOT[kb]), '' + BODY_ALPHA[kb]);
   }
-  /* a tube's tone by its width — see tubeHot, which the puddles read too so
-     a pad and the tube running into it cannot drift apart */
+  /* a tube's tone by its width — see tubeHot. Only the TUBES renderer, which
+     the plate ships off; the puddles follow the tree's ramp instead, for the
+     reason written at puddleBand. */
   for (var kt = 0; kt < TUBE_KEYS; kt++) {
     TUBE_STYLE[kt] = rgba(mixLamp(vein, tubeHot(kt / VEIN_TUBE_Q)), '1');
   }
