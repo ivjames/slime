@@ -80,12 +80,23 @@ async function runBuild(root, label, speed) {
         window.SLIME.runTo(a.steps);
       }, { idx, seed: c.seed, steps: STEPS, speed });
       /* Wait on the STEP COUNT, never on a clock: a slow machine runs fewer
-         steps per second and the same number of them all the same. */
+         steps per second and the same number of them all the same.
+         S.over is in the condition because a dish can END before the target —
+         starved, or won on a short seed — and then runTo's pause never comes.
+         Without it the wait sat on a finished dish until the timeout, which
+         reads as a hang rather than as the answer it is. */
       await page.waitForFunction(
-        n => window.SLIME.steps() >= n && window.SLIME.S.paused,
+        n => window.SLIME.S.over || (window.SLIME.steps() >= n && window.SLIME.S.paused),
         STEPS, { timeout: 600000, polling: 250 });
       const h = await page.evaluate(() => window.SLIME.stateHash());
-      if (h.steps !== STEPS) throw new Error(`${c.code}: stopped at ${h.steps}, wanted ${STEPS}`);
+      /* A dish that ended early is still comparable — two builds holding the
+         same dish end on the same step — so this is recorded, not fatal. It is
+         only fatal if the two builds disagree about WHICH step, and compare
+         reports that as a divergence in `steps`. */
+      if (h.steps !== STEPS) {
+        h.endedEarly = true;
+        process.stderr.write(`  ${label} ${c.code}/${c.seed}  ended at step ${h.steps} before the ${STEPS} target\n`);
+      }
       out.cases[`${c.code}/${c.seed}`] = h;
       process.stderr.write(`  ${label} ${c.code}/${c.seed}  steps=${h.steps} agents=${h.agents} all=${h.all}\n`);
     }

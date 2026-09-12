@@ -63,3 +63,18 @@ license it.
 
 A green comparison also says nothing about *speed*. It is the correctness half
 of a performance change; the other half is a measurement.
+
+### One caveat about the double-buffered fields
+
+`fedRelax` ends by swapping which array object each of `fedF`/`fedB`,
+`padF`/`padB` and `bodyF`/`bodyB` names, and `stateHash` reads them through
+those names. Within one build that is consistent — the swap count is fixed by
+`FED_PASSES` — and after an even number of passes each name is back on the array
+it started on.
+
+It only matters if you compare two builds whose `FED_PASSES` differ in
+**parity**: one would be hashing the half the other calls the spare, and every
+one of those six digests would read as moved when nothing had. If you ever need
+that comparison, hash the pair as a set rather than by name. Changing
+`FED_PASSES` at all is a change to the plate, so `determinism.js` is the wrong
+tool for it either way — `outcome.js` is.
