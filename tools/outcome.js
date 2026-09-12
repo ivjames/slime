@@ -71,7 +71,11 @@ async function runOne(browser, port, code, seed) {
        then read poll jitter as a dish finishing sooner or later. */
     await page.evaluate(a => {
       window.SLIME.start(a.idx, a.seed);
-      window.SLIME.turbo(4);
+      /* x8, not x4: the dial's stops are worth half a dish second each since
+         LAPSE_REF, and this harness wants steps rather than a watchable rate.
+         x8 is what the old x4 asked for — 240 a second — and TURBO_MAX allows
+         it precisely so the harness can keep asking. */
+      window.SLIME.turbo(8);
       window.SLIME.runTo(a.cap);
     }, { idx, seed, cap: CAP });
     await page.waitForFunction(

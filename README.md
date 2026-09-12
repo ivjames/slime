@@ -91,10 +91,19 @@ seed might name is still there, now as a guard on that one palette.
 The time-lapse ladder is seven stops — ×1/16, ×1/8, ×1/4, ×1/2, ×1, ×2, ×4 —
 and ×1 is the dish's own clock rather than real time. A *Physarum*
 network that takes the better part of a day in a real plate is built here in a
-few sim minutes, so ×1 is already about **400 times life**. What that buys the
-bottom half of the ladder is worth stating plainly: ×1/16 is slow motion of the
-*model*, not of the organism, and still runs at some twenty-five times life.
-Nothing this control can reach is slower than the mould.
+few sim minutes, so a dish second is about **400 times life**. What that buys
+the bottom half of the ladder is worth stating plainly: ×1/16 is slow motion of
+the *model*, not of the organism, and still runs at a dozen times life. Nothing
+this control can reach is slower than the mould.
+
+A real second buys half a dish second at ×1 (`LAPSE_REF`), so ×1 watched is
+about 200 times life and a step falls due thirty times a second rather than
+sixty. That is a frame-budget decision rather than a fictional one: a step
+costs 7–9 ms here, so sixty of them a second spends a third to a half of every
+real second stepping before anything is painted, and what a device short of
+that loses is not speed but steps — the backlog is discarded, so the dish
+stutters instead of slowing. Thirty leaves the same headroom over again. The
+dish is unchanged: a run of N steps holds exactly the dish it always held.
 
 That 400 is measured rather than asserted, which it was not always. The plate
 scale comes off the dishes themselves — EXP-01's flakes sit 199.5 cells from
@@ -122,9 +131,12 @@ It says so now. When the dish is short of the ask, the clock appends what it is
 actually managing — `00:21 ×4 (×2.1)` — and stays quiet when it is keeping up.
 
 The same measurement is why the ladder stops at ×4. With `?prof` a step costs
-7–9 ms here, which is ×1.9–2.4; ×8 would want a machine four times as fast and
-×16 about nine, or roughly a millisecond a step for four thousand agents, a
-vein trace and ten body contours. Those two stops were removed because they
+7–9 ms here, which is 111–146 steps a second; at the old reference of sixty
+steps to a ×1 second, ×8 would have wanted a machine four times as fast and ×16
+about nine, or roughly a millisecond a step for four thousand agents, a vein
+trace and ten body contours. `LAPSE_REF` halves what every stop asks for — ×4
+wants 120 steps a second now — so the stops that remain sit inside what the
+machine does instead of just past it. Those two stops were removed because they
 could not be served, not because they did nothing — matched on agent count they
 were still worth something like 20% at the very top — but a dial whose stops
 are all achievable is worth more than the 20%.

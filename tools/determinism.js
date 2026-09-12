@@ -164,7 +164,9 @@ function compare(a, b) {
 
   const root = arg('--root') ? path.resolve(arg('--root')) : ROOT;
   const label = arg('--label') || path.basename(root);
-  const speed = +(arg('--speed') || 4);
+  /* x8 for the same reason outcome.js asks for it: LAPSE_REF halved what a
+     stop is worth, and this is a step-rate ask, not a watching speed. */
+  const speed = +(arg('--speed') || 8);
   process.stderr.write(`${label}: ${root}, ${STEPS} steps at x${speed}\n`);
   const r = await runBuild(root, label, speed);
   const out = arg('--out');
