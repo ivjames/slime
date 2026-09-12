@@ -5638,7 +5638,12 @@ function blurPass(src, dst) {
   var x, y, i, row, W1 = GW - 1, H1 = GH - 1;
   /* The columns, into shpT. Peeled at both ends rather than tested per cell:
      the clamp only ever binds within three of an edge, and the middle is by
-     far the longer run. */
+     far the longer run. The peel width and the tap guards are one decision,
+     not two: at a peel of 3 the outermost guard in each end loop is already
+     constant (x > 2 cannot hold below x = 3, x < W1 - 2 cannot hold at or
+     above it), and they are written out so that widening the kernel means
+     editing guards that are visibly there rather than discovering they were
+     assumed. */
   for (y = 0; y < GH; y++) {
     row = y * GW;
     var e0 = src[row], e1 = src[row + W1];
