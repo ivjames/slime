@@ -1303,7 +1303,41 @@ var EXPERIMENTS = [
        keep 0.3 into a few thick tubes between the depots with the plate
        between them bare, which is the paper's second day. The verdict comes
        at the end of the settling, not at the ninth depot. */
-    refine: { dur: 120, keep: 0.3, flow: 60, sense: 3, stream: 250,
+    /* The settling's LENGTH, as against its shape. 120 here is 360 sim-seconds
+       after paceDish, and at LAPSE_REF that is twelve real minutes of watching
+       a dish whose play is over: the clock has already stopped (see runClock),
+       the brush is locked, and what is left is a picture finishing itself.
+       Twelve minutes is not an interval anyone sits through, and nothing about
+       the verdict depends on it — the mark is scored on the run clock, which
+       stops where the settling starts, so this number cannot move a saved best
+       either way.
+
+       Cut to a third of a minute here — 60 sim-seconds, two real ones — with
+       the two RATES scaled by the same factor in the other direction, so what
+       the phase moves is unchanged and only how long it takes to move it is
+       shorter: `flow` and `stream` are per dish-second, and paceDish divides
+       both by PACE as it multiplies dur, so the products (dur x flow, dur x
+       stream) are exactly what they were. The cull needs no such treatment:
+       its rate is derived from dur in the step (`need`), so it follows on its
+       own.
+
+       Measured on seed 12345, the two settlings run to their own verdicts and
+       compared there. The ninth depot goes down at 125.1s in both; the verdict
+       then lands at 485.1s against 185.1s. At it, the population is 3600 in
+       both — the ramp's endpoint is keep x cap and neither run is short of it
+       — and the drawn network is IDENTICAL: 1777 live nodes, 1120 of them
+       carrying, 166 tips. The tree stops moving when the settling starts (no
+       tips, so nothing grows) and what the phase changes is the body, so that
+       is where the two differ: cells of eased body at trail 9 / 20 / 32 / 52
+       come out at 11196 / 7773 / 5136 / 1789 against 10550 / 7352 / 4577 /
+       1402, and total body mass at 405758 against 365687. Six per cent more
+       tissue at the bottom level, twenty-eight at the core, eleven per cent
+       more mass: the short settling ends a little denser, because the field
+       has had a third of a minute to decay under the same descent rather than
+       six. It is the same network with slightly more meat on it, against six
+       times less waiting. See the block comment below for what the settling is
+       FOR, which none of this changes. */
+    refine: { dur: 20, keep: 0.3, flow: 360, sense: 3, stream: 1500,
               text: 'nine on one network. now the network decides which of itself to keep.' },
     script: [
       { t: 2, hi: true, text: 'nine depots. the dish is the wrong shape for a city and you do not care.' },
@@ -4076,11 +4110,6 @@ function step() {
   var e = S.exp;
   S.simT += DT;
   fieldDirty = true;
-  /* the explorers' buffer: where the last step's segments ended, so the
-     flush strokes each step's as one path. Noted at the start rather
-     than the end, since step() returns early on a finish. */
-  if (VEIN_TREE && exSteps < EX_STEPS && exN > (exSteps ? exStepEnd[exSteps - 1] : 0)) exStepEnd[exSteps++] = exN;
-
   /* Dish events, at most one a step and strictly in order, before anything
      else reads the masks — so the trail under a wall that has just appeared is
      zeroed by this step's diffusion rather than the next one's. */
@@ -4413,14 +4442,6 @@ function step() {
       ah[k] = offTube ? h + (L >= R ? -SENS_A : SENS_A) : rnd() * Math.PI * 2;
       cell = oldIdx;
     } else {
-      /* only a tip out ahead of the stalks: one standing in a cell the
-         tree already covers is inside the body, and its wandering there
-         is not exploration */
-      if (atip[k] && VEIN_TREE && exN < EX_CAP && !tcov[idx]) {
-        var exi = exN * 4;
-        exSeg[exi] = ax[k]; exSeg[exi + 1] = ay[k]; exSeg[exi + 2] = nx; exSeg[exi + 3] = ny;
-        exN++;
-      }
       ax[k] = nx; ay[k] = ny; ah[k] = h;
       if (idx !== oldIdx) { occ[oldIdx]--; occ[idx]++; }
       cell = idx;
@@ -5169,8 +5190,6 @@ function initCanvas() {
   vmctx = veilMask.getContext('2d');
   ink = document.createElement('canvas');
   ictx = ink.getContext('2d');
-  exc = document.createElement('canvas');
-  exctx = exc.getContext('2d');
   off = document.createElement('canvas');
   octx = off.getContext('2d', { alpha: false });
   allocField();
@@ -5234,8 +5253,6 @@ function resizeCanvas() {
       ink.width = w; ink.height = h;
       ictx.drawImage(keep, 0, 0, w, h);
     } else if (ink) { ink.width = w; ink.height = h; }
-    /* the explorers' record likewise: a resize must not empty it */
-    exResize(w, h);
   }
 }
 
@@ -5371,8 +5388,6 @@ function resetVeinTemporal() {
   envT = S.simT;
   if (vactx && veilAcc.width) vactx.clearRect(0, 0, veilAcc.width, veilAcc.height);
   if (ictx && ink.width) ictx.clearRect(0, 0, ink.width, ink.height);   /* a new dish has no record */
-  if (exctx && exc.width) exctx.clearRect(0, 0, exc.width, exc.height);
-  exN = 0; exSteps = 0; exSrc = null;
   inked.fill(0);
   recV.fill(0); recPath = null;
   resetVeinGraph();
@@ -5431,14 +5446,6 @@ function snapshotVeinTemporal(fs) {
   fs.vAtt = vAtt.slice(0, veinN * 4);
   fs.vNext = vNext.slice(0, veinN); fs.vPrev = vPrev.slice(0, veinN);
   if (VEIN_TREE) snapshotTree(fs);
-  /* the explorers' record is a picture, not a field: kept as a copy of
-     the canvas, so a replay exit puts the trails back with the rest */
-  if (VEIN_TREE && exc && exc.width) {
-    var exKeep = document.createElement('canvas');
-    exKeep.width = exc.width; exKeep.height = exc.height;
-    exKeep.getContext('2d').drawImage(exc, 0, 0);
-    fs.exc = exKeep;
-  } else fs.exc = null;
 }
 
 /* The graph out of a snapshot; a snapshot without one (taken before the
@@ -5495,12 +5502,6 @@ function restoreVeinTemporal(fs) {
      it. */
   if (ictx && ink.width) ictx.clearRect(0, 0, ink.width, ink.height);
   inked.fill(0);
-  if (exctx && exc.width) {
-    exctx.clearRect(0, 0, exc.width, exc.height);
-    if (fs.exc) exctx.drawImage(fs.exc, 0, 0, exc.width, exc.height);
-  }
-  exSrc = fs.exc || null;
-  exN = 0; exSteps = 0;
 }
 
 function smoothRidgeField() {
@@ -7187,46 +7188,32 @@ var RET_IDLE  = 5.0;          /* seconds a tip stands unpulled before it retract
 var RET_DT    = 0.25;         /* seconds between one node's retraction and its parent's */
 var TREE_GHOST_A = 0.34;      /* a ghost's alpha */
 var TREE_GHOST_W = 0.5;       /* cells: a ghost's width, at most */
-/* ---- the explorers' trails ----
-   The tips are the detached bits out ahead of the stalks, and the
-   whiskers show only where each one is this frame. In the dish the
-   path an explorer took stays: the fine lace behind the front IS those
-   paths. So every step a tip takes is recorded, on the sim's clock, and
-   stroked once onto a record canvas as a ghost line that is never
-   erased. Segments are buffered in step() and flushed by the next
-   render, one path per step. A step is at most a cell (SPEED times a
-   slow factor and a supply factor, both at most one), and the
-   compaction swaps that relocate an agent do not pass through the
-   recording site, so no jump guard is needed. */
-var EX_CAP = 262144;                  /* segments the buffer holds between renders */
-var EX_STEPS = 4096;                  /* step boundaries the buffer holds between renders */
-var EX_A = 0.16;                      /* a trail's alpha: faint, since a well-walked cell is stroked many times */
-var EX_W = 0.34;                      /* cells: a trail's width */
-var exSeg = new Float32Array(EX_CAP * 4), exN = 0;
-/* where each step's segments end: step() notes exN as it begins, so the
-   flush can stroke each step's segments as one path */
-var exStepEnd = new Int32Array(EX_STEPS), exSteps = 0;
-var exc = null, exctx = null;         /* the record canvas */
-/* the record as put back by a restore, at its own size, kept until the
-   next segment is stroked: a resize after a restore draws from this
-   rather than from the once-resampled canvas, so the trails are
-   resampled once and not twice */
-var exSrc = null;
+/* ---- what used to be here: the explorers' trails ----
+   Every step a tip took was stroked onto a record canvas that was never
+   erased — a faint ghost line, laid under the body, of everywhere a tip
+   had been. The claim it rested on was that the fine lace behind the
+   front IS those paths, and on the plate it did not read that way: the
+   record ran AHEAD of the drawn network, so the eye saw a pale scribble
+   arrive first and the tube follow it, two substances rather than one.
+   The tree already tracks a runner's thread — it grows into any cell at
+   BODY_LEVELS[TREE_LV], which a fresh stalk floor clears (STALK_W x the
+   stalk is 10.8 against 9) — so what the record added was not the lace,
+   it was a preview of it.
 
-/* the record resized: through a copy, or from the pristine source if
-   one stands, since sizing a canvas clears it */
-function exResize(w, h) {
-  if (!exc) return;
-  var src = exSrc;
-  if (!src && exc.width && exc.height) {
-    src = document.createElement('canvas');
-    src.width = exc.width; src.height = exc.height;
-    src.getContext('2d').drawImage(exc, 0, 0);
-  }
-  exc.width = w; exc.height = h;
-  if (src) exctx.drawImage(src, 0, 0, w, h);
-}
-var TREE_REPAINT = 0.2;       /* seconds between repaints while running */
+   Removing it also takes back a per-tip-step buffer write in step(), a
+   Path2D built and stroked per sim step per frame, and a full-canvas
+   composite every frame. Nothing in the simulation read it: no RNG draw,
+   no field, no snapshot state the verdict depends on. */
+/* Sim-seconds between repaints while running, so it is a REAL cadence only
+   through LAPSE_REF: a tenth of a dish second is a fifth of a real one at ×1,
+   which is the five-a-second this was set at when a dish second and a real one
+   were the same length. Left at 0.2 the layer repainted 2.5 times a second and
+   the tree moved twice as far between paints — 12 cells of growth rather than
+   6 — which is a stutter in the one layer whose whole job is to look drawn
+   rather than simulated. Halving it costs nothing per REAL second, which is
+   the budget that matters: the same number of paints, on a dish advancing at
+   half the rate. */
+var TREE_REPAINT = 0.1;
 var TREE_WQ   = 4;            /* width quantisation, steps a cell */
 /* ---- anastomosis and flow ----
    A tip that reaches another vein FUSES with it: in the dish the fans
@@ -7245,6 +7232,7 @@ var TREE_JOIN_R = 3.0;        /* cells: a tip this close to another vein fuses w
 var TREE_FLOW_EVERY = 8;      /* growth passes between flow walks */
 var TREE_WLINK = 1.6;         /* cells: a vein carrying one flake pair */
 var TREE_SRC_MAX = 16;        /* flakes the flow walk can take */
+var LANDFALL_MAX = 24;        /* nodes the carry is walked inward over, at most */
 /* ---- the puddle ----
    In the time-lapse an oat the network has reached disappears under a
    mass of plasmodium: the flake becomes a puddle as the lines take it.
@@ -7381,6 +7369,11 @@ var fQueue = new Int32Array(TREE_MAX), fDist = new Int32Array(TREE_MAX), fPrev =
 var fSrcN = new Int32Array(TREE_SRC_MAX);    /* per source: live nodes standing on its pad... */
 var fSrcAt = new Int32Array(TREE_SRC_MAX * 64); /* ...up to 64 of them, so a pad's old detached
                                                     nodes do not stand for a pad the network has reached */
+/* the same, restricted to the flake's OWN disc rather than its fan, and the
+   live node nearest each flake's centre — see the landfall block in treeFlow */
+var fDiscN = new Int32Array(TREE_SRC_MAX);
+var fDiscAt = new Int32Array(TREE_SRC_MAX * 64);
+var fMid = new Int32Array(TREE_SRC_MAX), fMidD = new Float32Array(TREE_SRC_MAX);
 /* growth accumulators, per node and angular bin, for one pass: a node
    with tissue all round it (the root in the drop) has pulls that cancel
    as one sum, so they are sorted by direction and the fullest bin wins,
@@ -7655,8 +7648,10 @@ function treeForeign(cx, cy, n) {
   return best;
 }
 
-/* The flow walk. Sources are the flakes with a live node on their pad,
-   every such node standing for the flake. From each source a
+/* The flow walk. Sources are the flakes with a live node on their pad —
+   on the FLAKE itself where the network has got that far, on the wider
+   feeding fan only where it has not — every such node standing for the
+   flake. From each source a
    breadth-first search over the live network — parent links and joins,
    both ways — gives the hop distance and the step back; for every other
    source the nearest of its pad nodes is found and the path back is
@@ -7670,16 +7665,40 @@ function treeForeign(cx, cy, n) {
 function treeFlow() {
   var i, k, e = S.exp, nsrc = e.nodes.length < TREE_SRC_MAX ? e.nodes.length : TREE_SRC_MAX;
   for (i = 0; i < tN; i++) { tcarry[i] = 0; fDeg[i] = 0; }
-  for (k = 0; k < nsrc; k++) fSrcN[k] = 0;
+  for (k = 0; k < nsrc; k++) { fSrcN[k] = 0; fDiscN[k] = 0; fMid[k] = -1; fMidD[k] = 1e9; }
   var nfound = 0;
   for (i = 0; i < tN; i++) {
     if (!tstate[i]) continue;
-    var fi = feedAt[(ty[i] | 0) * GW + (tx[i] | 0)];
-    if (fi >= 0 && fi < nsrc && fSrcN[fi] < 64) { if (fSrcN[fi] === 0) nfound++; fSrcAt[fi * 64 + fSrcN[fi]++] = i; }
+    var ci = (ty[i] | 0) * GW + (tx[i] | 0);
+    var fi = feedAt[ci];
+    if (fi >= 0 && fi < nsrc) {
+      if (fSrcN[fi] < 64) { if (fSrcN[fi] === 0) nfound++; fSrcAt[fi * 64 + fSrcN[fi]++] = i; }
+      /* on the flake's OWN disc, and how near the middle of it: the pair
+         walk prefers these, and the landfall below runs to the nearest */
+      if (nodeAt[ci] === fi) {
+        if (fDiscN[fi] < 64) fDiscAt[fi * 64 + fDiscN[fi]++] = i;
+        var mdx = tx[i] - e.nodes[fi].x, mdy = ty[i] - e.nodes[fi].y, md2 = mdx * mdx + mdy * mdy;
+        if (md2 < fMidD[fi]) { fMidD[fi] = md2; fMid[fi] = i; }
+      }
+    }
     if (i > 0 && tstate[tpar[i]]) { fDeg[i]++; fDeg[tpar[i]]++; }
     if (tjoin[i] >= 0 && tstate[tjoin[i]]) { fDeg[i]++; fDeg[tjoin[i]]++; }
   }
   if (nfound < 2) return;
+  /* A pad's sources are the nodes on the FLAKE, where the network has
+     reached it, and only the wider fan where it has not yet. The fan is
+     FEED_R — a third of a radius past the rim — so with the fan standing for
+     the pad the pair walk ended at the first node inside it and the calibre
+     the walk buys (TREE_WLINK x sqrt(pairs)) stopped there too. Measured on
+     EXP-01/3039 at 4000 steps: the widest live node in the annulus outside
+     each flake ran 2.77 cells and the widest ON the flake 0.84 to 1.53, over
+     55 to 62 live nodes standing on it. The trunk arrived, stopped a third of
+     a radius short of the ring, and what crossed into the food was lace. */
+  for (k = 0; k < nsrc; k++) {
+    if (fDiscN[k] === 0) continue;
+    fSrcN[k] = fDiscN[k];
+    for (i = 0; i < fDiscN[k]; i++) fSrcAt[k * 64 + i] = fDiscAt[k * 64 + i];
+  }
   fAdjStart[0] = 0;
   for (i = 0; i < tN; i++) fAdjStart[i + 1] = fAdjStart[i] + fDeg[i];
   for (i = 0; i < tN; i++) fDeg[i] = 0;
@@ -7710,6 +7729,37 @@ function treeFlow() {
       for (k = 0; k < fSrcN[b]; k++) { var cb = fSrcAt[b * 64 + k]; if (fDist[cb] >= 0 && fDist[cb] < bd) { bd = fDist[cb]; sb = cb; } }
       if (sb < 0) continue;
       for (var w = sb; w >= 0; w = fPrev[w]) tcarry[w]++;
+    }
+  }
+
+  /* --- landfall: the tube runs INTO the flake, not up to it ---
+     The pair walk ends at one node of a pad, and that node is wherever the
+     breadth-first search happened to arrive — the rim, since that is where
+     the trunk touches. Every node deeper in is a leaf of the fan and draws at
+     the pipe model's hairline, so the picture was a fat tube stopping at the
+     edge of the food with a spray of thread beyond it.
+
+     In the dish the front does not stop at the rim: it crosses the oat and
+     the pad spreads from where it landed. So the calibre the pad's busiest
+     node carries is walked inward, from the live node nearest the flake's
+     centre back up its parents to the rim, and every node on the way is given
+     that carry. One chain, not the whole disc: what this is drawing is the
+     tube arriving, and fattening all sixty of a pad's nodes would draw a
+     starburst where the puddle is meant to be a mass.
+
+     Bounded by the flake's own fan — the walk stops the moment a parent
+     stands off it — so a chain that leaves the food cannot be widened by it,
+     and by LANDFALL_MAX besides, since a pad's chain is a few nodes and
+     anything longer is a walk that has gone wrong. */
+  for (var fl = 0; fl < nsrc; fl++) {
+    var mid = fMid[fl];
+    if (mid < 0 || fSrcN[fl] === 0) continue;
+    var cmax = 0;
+    for (k = 0; k < fSrcN[fl]; k++) { var cs = tcarry[fSrcAt[fl * 64 + k]]; if (cs > cmax) cmax = cs; }
+    if (cmax <= 0) continue;
+    for (var wn = mid, guard = 0; wn >= 0 && guard < LANDFALL_MAX; wn = tpar[wn], guard++) {
+      if (!tstate[wn] || feedAt[(ty[wn] | 0) * GW + (tx[wn] | 0)] !== fl) break;
+      if (tcarry[wn] < cmax) tcarry[wn] = cmax;
     }
   }
 }
@@ -10371,47 +10421,8 @@ function render() {
   ctx.globalAlpha = BODY && VEIN_GRAPH ? REC_A : INK_A;
   ctx.drawImage(ink, 0, 0);
   ctx.globalAlpha = 1;
-  /* the explorers' record, under the walls as the ink is: a wall poured
-     across old tracks covers them */
-  if (VEIN_TREE && exc && exc.width) ctx.drawImage(exc, 0, 0);
   if (!SHEET) paintWalls(ctx, cv.width / GW, cv.height / GH);
   ctx.drawImage(veilAcc, 0, 0);
-  /* the explorers' trails: the steps the tips took since the last frame,
-     stroked onto their record for the NEXT frame to lay; this frame laid
-     the record before the walls, above */
-  if (VEIN_TREE && exc) {
-    if (exc.width !== cv.width || exc.height !== cv.height) exResize(cv.width, cv.height);
-    if (exN) {
-      exctx.save();
-      exctx.setTransform(exc.width / GW, 0, 0, exc.height / GH, 0, 0);
-      exctx.lineCap = 'butt';
-      exctx.globalAlpha = EX_A;
-      exctx.lineWidth = EX_W;
-      /* the opaque ink tone, so EX_A is the whole alpha: the band's
-         style carries an alpha of its own */
-      exctx.strokeStyle = VEIN_BANDS[0].ink;
-      /* one path per STEP, not one for the whole batch and not one per
-         segment: a path is composited once however many of its segments
-         overlap, so a cell walked twice in one frame's steps was as
-         pale as one walked once and the record's darkness depended on
-         how many steps a frame ran; and a stroke per segment was a
-         quarter-million draw calls after a stall. Within one step no
-         tip walks a cell twice, so a step's segments are one path and
-         every walk still counts once. */
-      var exq = 0, exg = 0;
-      while (exq < exN) {
-        var exEnd = exg < exSteps ? exStepEnd[exg++] : exN, exp = new Path2D();
-        if (exEnd > exN) exEnd = exN;
-        for (; exq < exEnd; exq++) {
-          var exb = exq * 4;
-          exp.moveTo(exSeg[exb], exSeg[exb + 1]); exp.lineTo(exSeg[exb + 2], exSeg[exb + 3]);
-        }
-        exctx.stroke(exp);
-      }
-      exN = 0; exSteps = 0; exSrc = null;
-      exctx.restore();
-    }
-  }
   /* the pinned graph, whole, over the veil: opaque where it is drawn and
      laid once per frame onto a frame that is cleared, so nothing
      accumulates */
@@ -10772,7 +10783,7 @@ function updateHUD(force) {
   $('h-time').textContent = fmtTime(S.simT) +
     (REPLAY.on ? ' · REPLAY ×' + fmtSpeed(TURBO)
                : ((TURBO !== 1 || askShort) ? ' ×' + fmtSpeed(TURBO) : '')) +
-    (askShort ? ' (×' + fmtRate(rateNow) + ')' : '');
+    (askShort ? ' (×' + fmtRate(rateNow / LAPSE_REF) + ')' : '');
 
   if ((hudTick++ % 4) !== 0) return;
 
@@ -11233,21 +11244,23 @@ function openBrief(i) {
    15. run lifecycle
    ------------------------------------------------------------ */
 var raf = 0, lastTs = 0, acc = 0;
-/* Sim-time multiplier: sim seconds per real second. It scales the step budget
-   with it, so the clock, the shock schedule and every rate stay in sim time —
-   the dish is not "sped up", it is watched with the shutter open longer. The
-   player cycles it through SPEEDS; the harness can set any rate in range.
+/* Sim-time multiplier, in units of the DISH CLOCK — see LAPSE_REF, which is
+   what a dish second costs in real seconds. It scales the step budget with it,
+   so the clock, the shock schedule and every rate stay in sim time — the dish
+   is not "sped up", it is watched with the shutter open longer. The player
+   cycles it through SPEEDS; the harness can set any rate in range.
 
    ×1 is the DISH clock, and the dish clock was never real time. A Physarum
    network that takes the better part of a day in a real plate is built here in
    a few sim minutes, so the reference this ladder hangs off already runs at
-   about REAL_X times life — measured against the organism's own front speed
-   in section 1, and still an estimate, since the band it is measured against
-   is itself a band.
+   about REAL_X times life per dish second — measured against the organism's
+   own front speed in section 1, and still an estimate, since the band it is
+   measured against is itself a band. Watched at ×1 that is half of REAL_X,
+   some two hundred times life, since a real second now buys half a dish one.
 
    That is what the bottom half of the ladder is for. Stops below ×1 are not
    slow motion of an organism; they are slow motion of the MODEL, and at ×1/16
-   the dish is still moving at some twenty-five times life. Nothing this
+   the dish is still moving at a dozen times life. Nothing this
    control can reach runs slower than the mould does, which is the honest
    thing to say about a dial whose lowest stop is still a time-lapse.
 
@@ -11257,6 +11270,30 @@ var raf = 0, lastTs = 0, acc = 0;
    ×4, because the slow stops are all deliverable and the fast ones were not.
    Asking for less work than a frame can do always succeeds. */
 var TURBO = 1;
+/* What ×1 is worth in real time: dish seconds per real second at the stop the
+   dial calls ×1. It was an implicit 1.0 — sixty steps a second — and the dial
+   read directly as a step rate.
+
+   It is a half now, and the reason is the frame rather than the fiction. A
+   step measured 7 to 9 ms with ?prof on EXP-01, so sixty of them a second is
+   between a third and a half of a real second spent stepping, on the machine
+   these numbers were taken on; every frame's painting, the vein tree, ten body
+   contours and the composite come out of what is left. That is a dish that
+   keeps up on a desktop and drops steps on the tablets this is played on, and
+   a dropped step is not a slower dish — the backlog is discarded (see the
+   frame loop), so the time-lapse stutters instead of slowing.
+
+   Thirty steps a second leaves the same headroom over again. Nothing about
+   the dish changes: a step is a step, every schedule is in sim seconds, and a
+   run of N steps holds exactly the dish it held before. What changes is how
+   long a real minute of watching is worth — half as much — which is why the
+   verdict-screen replay stops and EXP-03's settling were re-cut alongside it
+   rather than after it.
+
+   The dial is NOT relabelled: ×1 still means one dish second per sim second's
+   worth of schedule, which is what every dish constant is written in. The
+   conversion to real time lives here and in realX(), and nowhere else. */
+var LAPSE_REF = 0.5;
 /* The ladder tops out at x4, and it used to top out at x16. Two stops came
    off because the dish cannot serve them and, now that the clock says so out
    loud, keeping them would mostly be a way of displaying that fact.
@@ -11268,6 +11305,13 @@ var TURBO = 1;
        x4    240 steps/s   2.2x faster
        x8    480 steps/s   4.3x faster
        x16   960 steps/s   8.6x faster, or about 1.1 ms a step
+
+   Those asks are what the stops cost at the old reference of sixty steps a
+   second. LAPSE_REF halves every one of them — x4 wants 120 now, which the
+   measured 111 to 146 very nearly serves — so the ladder is comfortably
+   inside what the machine does rather than topping out just past it. The
+   stops that came off are still off: what changed is the headroom under the
+   ones that stayed, which is the whole point of the reference moving.
 
    x16 is not reachable on any hardware this runs on: a millisecond a step
    buys nothing for four thousand agents, a vein trace and ten body contours.
@@ -11331,7 +11375,7 @@ function rateReset() { rateT0 = 0; rateS0 = stepsRun; rateNow = 0; rateHad = 0; 
    to produce RATE_STEPS of them. Twelve steps is 8% quantisation, comfortably
    inside RATE_TOL. */
 function rateWin() {
-  var need = RATE_STEPS / (TURBO * 60);
+  var need = RATE_STEPS / (TURBO * LAPSE_REF * 60);
   return need > RATE_WIN ? need : RATE_WIN;
 }
 
@@ -11367,14 +11411,19 @@ function rateSample(now) {
    Never while paused or stopped — a still dish is not a slow one — and never
    before a window has closed. */
 function rateShort() {
-  return S.running && !S.paused && rateHad >= RATE_MIN && rateNow < TURBO * RATE_TOL;
+  return S.running && !S.paused && rateHad >= RATE_MIN && rateNow < TURBO * LAPSE_REF * RATE_TOL;
 }
 
 /* A measured rate, as a label. Not fmtSpeed: that names STOPS on the ladder,
    where 1/8 is what the stop is called, and it carries three decimals besides.
    This is a measurement, so it reads as one — but never as a bare "0", which
    is what one decimal did to everything under 0.05 and is the one reading that
-   must not be rounded away. */
+   must not be rounded away.
+
+   Handed the rate in DIAL units — rateNow is in dish seconds a real second and
+   the caller divides by LAPSE_REF — because the number beside it is the ask,
+   and a caption that reads "×1 (×0.4)" where 0.5 is what ×1 costs is two
+   different units in one parenthesis. */
 function fmtRate(t) {
   if (!isFinite(t) || t < 0) t = 0;
   return String(t < 0.1 ? Math.round(t * 100) / 100 : Math.round(t * 10) / 10);
@@ -11384,12 +11433,20 @@ var TURBO_MIN = SPEEDS[0];
    dial offered; there is no more to want — 24 measured 164 steps a second
    against x4's 129, which is not a multiplier, it is noise with a bigger
    number on it. */
-var TURBO_MAX = 4;
+var TURBO_MAX = 8;
+/* Eight and not four, and the ladder still stops at four: this clamp is what
+   SLIME.turbo() is held to, and the dial is a subset of it. It was four when
+   ×1 bought sixty steps a second and the harness's ×4 therefore asked for 240;
+   LAPSE_REF halves what every stop is worth, so the same 240 is now ×8. The
+   dial keeps its honest top — a player asking for more than the machine serves
+   gets a stutter and a label saying so — while the harness, which is not
+   watching anything and only wants steps, can still ask for what it used to
+   get. */
 
 /* REAL_X itself is derived in section 1, next to the plate scale it is
    measured against — it has to exist before the feeding rate, which is now
    computed through it. Changing it no longer changes only captions. */
-function realX(t) { return fmtNum(t * REAL_X); }
+function realX(t) { return fmtNum(t * LAPSE_REF * REAL_X); }
 
 /* The verdict screen offers three stops rather than all of them. It is a row
    of one button each, not a cycle, and a recap has no use for the slow half of
@@ -12740,19 +12797,20 @@ function frame(ts) {
   if (dt > 0.25) dt = 0.25;
 
   if (S.running && !S.paused) {
-    acc += dt * TURBO;
+    acc += dt * TURBO * LAPSE_REF;
     /* Four frames' worth of headroom at whatever the multiplier is, so a
        dropped frame is caught up rather than lost. A held brush is painted
        once per STEP, not once per frame — that is what keeps a cued run
        identical between speeds.
 
-       Never less than one step, because below ×1/4 four frames' worth is a
-       FRACTION of a step: at ×1/16 the count comes out at 0.25, the loop's
-       `steps < budget` is false before it has run anything, and the dish never
-       advances at all. The floor binds at exactly two stops — ×1/8 and ×1/16 —
-       and costs nothing at either, since down there a step falls due every
-       eighth or sixteenth frame and a frame has at most one to spend. */
-    var steps = 0, budget = Math.max(1, Math.ceil(4 * TURBO));
+       Never less than one step, because at the slow stops four frames' worth
+       is a FRACTION of a step: at ×1/16 the count comes out at 0.125, the
+       loop's `steps < budget` is false before it has run anything, and the
+       dish never advances at all. With LAPSE_REF at a half the floor binds at
+       three stops — ×1/4, ×1/8 and ×1/16, one more than it used to — and costs
+       nothing at any of them, since down there a step falls due every second,
+       fourth or eighth frame and a frame has at most one to spend. */
+    var steps = 0, budget = Math.max(1, Math.ceil(4 * TURBO * LAPSE_REF));
     var boxT0 = performance.now(), boxed = false;
     while (acc >= DT && steps < budget && S.running &&
            (!stepTarget || stepsRun < stepTarget)) {
@@ -13359,7 +13417,7 @@ function init() {
     /* sim-seconds per real second the dish is ACTUALLY managing, 0 before the
        first window closes, and whether that is short of what TURBO asked for —
        the pair the clock's label is built from */
-    rate: function () { return { ask: TURBO, got: rateNow, short: rateShort() }; },
+    rate: function () { return { ask: TURBO, got: rateNow / LAPSE_REF, short: rateShort() }; },
     speeds: function () { return SPEEDS.slice(); },
     /* the estimated real-time factor of ×1, for a caption that has to agree
        with the one the buttons print */
