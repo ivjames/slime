@@ -93,11 +93,22 @@ function stat(a) {
        pair. */
     const reached = await page.waitForFunction(a => {
       const S = window.SLIME.S;
-      if (window.SLIME.steps() >= a.cap && S.paused) return true;
-      if (S.simT > 2 && !S.running) return true;
-      return a.at ? S.simT >= a.at : (S.holdT0 >= 0 && S.simT - S.holdT0 >= a.after);
+      const due = (window.SLIME.steps() >= a.cap && S.paused)
+               || (S.simT > 2 && !S.running)
+               || (a.at ? S.simT >= a.at : (S.holdT0 >= 0 && S.simT - S.holdT0 >= a.after));
+      /* FREEZE the dish at the moment the sample is due, instead of reading it
+         after the poll interval and a round trip have both elapsed on a
+         running plate. At turbo 8 the dish advances four sim seconds per real
+         second, so a 500 ms poll alone was worth up to two sim seconds of
+         drift — on a figure whose entire claim is the moment it is taken at,
+         and on a default moment (win + 15) that sits only three seconds under
+         WIN_HOLD, close enough that the drift could carry the sample past the
+         end of the run. runTo parks the dish on the step it has reached, so
+         what is left is one frame rather than one poll. */
+      if (due && S.running && !S.paused) { window.SLIME.runTo(window.SLIME.steps()); return false; }
+      return due;
     }, { at: AT, after: AFTER, cap: CAP },
-       { timeout: 900000, polling: 500 }).then(() => true).catch(() => false);
+       { timeout: 900000, polling: 100 }).then(() => true).catch(() => false);
     const r = await page.evaluate(n => {
       const S = window.SLIME.S;
       const o = { t: +S.simT.toFixed(1), won: S.holdT0 >= 0, cover: window.SLIME.cover() };

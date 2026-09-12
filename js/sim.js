@@ -7590,7 +7590,13 @@ var LANDFALL_MAX = 24;        /* nodes the carry is walked inward over, at most 
    pad now is the contour, which is the tissue, and what sizes it is the
    tissue's reach (see PUDDLE_MAX and padReach). */
 var PUDDLE_LV = 6;            /* index into BODY_LEVELS: trail 32, the pad itself */
-var PUDDLE_R  = 1.7;          /* flake radii: where the puddle has come down to the body */
+/* Flake radii. It used to be the pad's clip — how far out the puddle was
+   drawn — and padReach, PUDDLE_MIN and PUDDLE_MAX took that over. What is
+   left is one job: the multiple the origin's fixed reach is expressed in, so
+   RES_R / PUDDLE_R is the station radius the origin hands padReach and the
+   crumb's own dot is taken against. Editing it now resizes the origin, and
+   nothing else. */
+var PUDDLE_R  = 1.7;
 /* The tone the puddle's rim lands on: the faintest tissue there is, which is
    the thinnest vein band's. It used to land on alpha zero, and the fill is
    clipped to the body's contour, so what that ramp faded out was TISSUE — a
@@ -13980,8 +13986,16 @@ function init() {
         out.push({ label: nd.label, prog: S.nodeDone[i] ? 1 : S.nodeProg[i],
                    disc: frac(nd.x, nd.y, nd.r), dot: frac(nd.x, nd.y, nd.r * FOOD_DOT_R) });
       }
+      /* Both of the crumb's radii go through the same conversion, because a
+         column that mixes two scales is the error this tool was written to
+         stop being made. RES_R is the origin's PUDDLE radius — its answer to
+         nd.r * PUDDLE_R, not to nd.r — so the station radius a flake's `disc`
+         is taken over is RES_R / PUDDLE_R, exactly as `dot` and paintFood and
+         paintPuddles all already take it. Against raw RES_R the crumb's disc
+         was a fraction of PUDDLE_R^2 = 2.89 times the comparable area, so the
+         crumb row could not be read beside the flake rows above it. */
       out.push({ label: 'crumb', prog: 1 - originFrac(e),
-                 disc: frac(e.inoc.x, e.inoc.y, RES_R),
+                 disc: frac(e.inoc.x, e.inoc.y, RES_R / PUDDLE_R),
                  dot: frac(e.inoc.x, e.inoc.y, (RES_R / PUDDLE_R) * FOOD_DOT_R) });
       return out;
     },
