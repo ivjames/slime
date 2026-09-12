@@ -1004,12 +1004,13 @@ var HOLD_DROP = 1.5;    // seconds under that before the station is let go
    the target below the size the culture opens at and shrink it from the
    first step, which is the opposite of the point.
 
-   At 1.0 the crumb holds the culture exactly at its opening size and the
-   floor reaches zero as the crumb does. That is deliberately the smallest
-   version: it changes WHEN starvation arrives (gradually, as the food goes,
-   rather than all at once when a clock expires) without handing out any
-   biomass that was not there before. Anything above 1.0 is a difficulty
-   change and has to be measured against all twenty dishes before it ships. */
+   At 1.0 the crumb holds the culture at exactly its opening size for exactly
+   as long as the old grace gate did, and lets go when the food is gone — the
+   same dish, reached by saying "there is food here" instead of "starvation is
+   switched off". That is the null on purpose, so the refactor can be measured
+   before any balance moves. Anything above 1.0 hands the culture biomass it
+   did not have, which is what would actually let it supply a second front,
+   and has to be measured against all twenty dishes before it ships. */
 var ORIGIN_HOLD = 1.0;
 
 /* ---- the fan on a flake ----
@@ -4784,9 +4785,20 @@ function step() {
      ORIGIN_HOLD. It is a floor under the target rather than a term in it:
      whichever of the two feeds the organism better is what it lives on, so
      the crumb carries the opening and the flakes take over the moment they
-     are worth more than it. The grace clock that used to switch starvation
-     off is gone with it; the floor coming down IS the crumb running out. */
-  var crumb = originFrac(e) * e.start * ORIGIN_HOLD;
+     are worth more than it.
+
+     FLAT while the food lasts, and gone when it is gone. Scaling the floor by
+     the food left is the obvious thing and it is wrong: what a flake supports
+     while you eat it is set by the rate you can take it at, not by how much
+     of it remains — a flake three-quarters eaten still feeds a pad at full
+     rate until the last of it goes. Scaled, the floor drops below the opening
+     population on the first step and the culture starves from t=0 on every
+     dish, which is a net LOSS of early biomass and the exact opposite of what
+     this is for. That is not hypothetical: it is what the first version of
+     this commit did, while its comment claimed the floor held the culture at
+     its opening size. Flat, ORIGIN_HOLD at 1.0 reproduces the old grace gate
+     exactly — no culling until the crumb is gone. */
+  var crumb = originFrac(e) > 0 ? e.start * ORIGIN_HOLD : 0;
   if (crumb > target) target = crumb;
   if (nAgents < target) {
     S.growAcc += (e.grow * DT);
@@ -7308,14 +7320,14 @@ var PUDDLE_PL = 0.25;         /* share of the disc the alpha holds flat before f
 
    It is the same painter as a flake's pad, which is the point: it is the
    same substance, and it should thin the same way. What differs is what
-   sizes it. A pad is sized by the food under it; the drop is sized by the
-   reserve, so it runs down on the grace clock and is gone when the clock
-   is, which is exactly when starvation starts — the picture and the rule
+   sizes it, and since the crumb that is now under it IS food, the answer is
+   the same for both: the food left. It is gone when the crumb is, which is
+   when the floor under the target goes with it — the picture and the rule
    arrive together rather than the rule arriving unannounced.
 
-   By AREA, not radius. The reserve is an amount of cytoplasm and a drop
-   holding half of it is half the puddle, not half as wide, so the radius
-   goes as the square root. Straight radius empties the middle of the run
+   By AREA, not radius. The crumb is an amount of food and a drop holding
+   half of it is half the puddle, not half as wide, so the radius goes as
+   the square root. Straight radius empties the middle of the run
    far too fast and then crawls, which reads as a drop that gave up early.
 
    And it eases out rather than vanishing when the first flake lands. The
@@ -7708,7 +7720,16 @@ function originFrac(e) {
    as one piece of cytoplasm. Outside the mask bodyD is 0, which is not a thin
    tube but no tube; the clip draws nothing there anyway, so the widest band
    is the right answer for the pixels that do get painted. */
-function puddleAt(c, path, x, y, r, a) {
+/* `edge` is the tone the rim lands on, or null to fade out. It is a caller's
+   choice because the right answer is whatever is UNDER the puddle. A pad sits
+   on bare plate — BODY_FILL is off, nothing paints the body's mass — so it
+   ends on the faintest tissue tone, which is the whole point of PUDDLE_EDGE.
+   The crumb's drop sits on the inoculation, the densest tissue on the dish
+   and the brightest thing the line layer draws, so the same dim rim there
+   paints a dark annulus tracking inward as the crumb is eaten: the inverted
+   halo PUDDLE_EDGE exists to prevent, made by PUDDLE_EDGE. Over bright ground
+   the honest rim is no rim. */
+function puddleAt(c, path, x, y, r, a, edge) {
   if (!(r > 0) || !(a > 0)) return;
   var cell = (y | 0) * GW + (x | 0);
   /* the tissue's own width here, in cells, through the LIVE renderer's ramp —
@@ -7722,7 +7743,7 @@ function puddleAt(c, path, x, y, r, a) {
   var g = c.createRadialGradient(x, y, 0, x, y, r);
   g.addColorStop(0, rgba(col, a));
   g.addColorStop(PUDDLE_PL, rgba(col, a));
-  g.addColorStop(1, rgba(PUDDLE_EDGE, a));   /* the body's tone, not nothing — see PUDDLE_EDGE */
+  g.addColorStop(1, edge ? rgba(edge, a) : rgba(col, 0));
   c.save();
   c.beginPath(); c.arc(x, y, r, 0, Math.PI * 2); c.clip();
   c.fillStyle = g;
@@ -7746,13 +7767,13 @@ function paintPuddles(c) {
        flake came out at alpha 0.28 of a lamp-mixed cream, which over the dish
        is not thin cytoplasm but grey haze. Let the mass say how much mass
        there is. */
-    puddleAt(c, path, nd.x, nd.y, nd.r * PUDDLE_R, PUDDLE_A);
+    puddleAt(c, path, nd.x, nd.y, nd.r * PUDDLE_R, PUDDLE_A, PUDDLE_EDGE);
   }
   var rf = originFrac(e);   /* the tissue on the crumb goes as the crumb does */
   if (rf > 0) {
     if (!path) { path = traceIso(bodyV, BODY_LEVELS[PUDDLE_LV], false, null); if (!path) return; }
     /* by area: half a reserve is half a puddle, not half a width */
-    puddleAt(c, path, e.inoc.x, e.inoc.y, RES_R * Math.sqrt(rf), RES_A);
+    puddleAt(c, path, e.inoc.x, e.inoc.y, RES_R * Math.sqrt(rf), RES_A, null);
   }
 }
 
