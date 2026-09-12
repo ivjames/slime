@@ -11594,10 +11594,44 @@ function stateHash() {
   sk.sort();
   var pairs = [];
   for (i = 0; i < sk.length; i++) pairs.push([sk[i], S[sk[i]]]);
-  /* ...and the module-scope simulation scalars that live outside S. treePassN
-     is the tree's own pass counter: treeGrow reads it, so two runs that differ
-     in it differ in what the next growth pass does. */
-  var scal = JSON.stringify([RNG_STATE, stepsRun, nAgents, tN, treePassN, mainOK, pairs]);
+  /* ...and the module-scope state that lives outside S. This one IS a list,
+     because module scope cannot be enumerated the way S can: a script's top
+     level holds some two hundred arrays and most of them are the renderer's,
+     whose contents legitimately differ between two runs holding the same dish
+     (they depend on how many frames were drawn). Hashing those would make the
+     tool report divergences that no dish can see, which is worse than missing
+     one. So the sim/render boundary needs judgement, and the rule the list is
+     built from is written here so it can be re-audited rather than trusted:
+
+       hash every module-scope value that step() or its callees WRITE and a
+       LATER step READS.
+
+     That excludes, deliberately and with the reason in each case:
+       recN       reset to -1 at the top of every step before anything reads
+                  it, so it carries nothing across a step boundary.
+       scarW      set per agent inside the loop, for the three sense() calls.
+       attempts   picks which seed you play, not what a step does — its own
+                  declaration says so.
+       treeMs,    profiling counters.
+       treePasses
+       everything the renderer owns (veinT, dirtyFrames, brT, bmX0..1, ...):
+                  read by the compositor, never by a step.
+
+     To re-audit: list the module-scope declarations, and for each ask the
+     question above. The last pass over it added four — nodeHits, nodeLoad,
+     reabCursor, idleCursor — and then tubeDist, which is rebuilt every
+     TUBE_EVERY steps and read inside the agent loop by a streaming agent
+     walking its goal's geodesic. */
+  var cursors = [RNG_STATE, stepsRun, nAgents, tN, treePassN, mainOK,
+                 reabCursor, idleCursor,
+                 hashArr(nodeHits), hashArr(nodeLoad)];
+  /* tubeDist is an array of per-node distance maps with holes in it — a node
+     whose map has not been built yet is simply absent — so it is hashed as its
+     shape plus each map's digest, rather than through a typed-array view it
+     does not have. */
+  var td = [tubeDist.length];
+  for (i = 0; i < tubeDist.length; i++) td.push(tubeDist[i] ? hashArr(tubeDist[i]) : 'x');
+  var scal = JSON.stringify([cursors, td, pairs]);
   per.scalars = fnv1a(new TextEncoder().encode(scal)).toString(16);
   /* the whole: the per-array digests in their fixed order, folded together —
      so `all` changing and no `per` entry changing cannot happen */
