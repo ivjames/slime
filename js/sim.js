@@ -5323,7 +5323,11 @@ function resizeCanvas() {
 var FIELD_GAIN = 1.0;
 var SHARP  = 2.40;   // strength of the ridge lift
 var SHARP_RN = 3;    // narrow blur passes: kills per-cell grain, keeps the vein
-var SHARP_RW = 5;    // wide blur passes: the local mean a vein stands out from
+/* The wide blur runs on a HALF grid, so its pass count is in half-grid cells:
+   one pass there carries 2.0 full-cells squared of variance, against the 2.5
+   that the five full-resolution passes this replaced carried, and the
+   resampling makes up most of the rest. See buildRidge. */
+var SHARP_RW_H = 1;  // wide blur passes on the half grid
 var shpA = new Float32Array(NCELL);   // narrow
 var shpB = new Float32Array(NCELL);   // wide
 var shpT = new Float32Array(NCELL);   // scratch for the separable pass
@@ -5618,12 +5622,117 @@ function blurPass(src, dst) {
   }
 }
 
+/* ---- the wide blur, at half resolution ----
+   The wide field is a LOCAL MEAN and nothing else: the only thing any consumer
+   does with it is the unsharp difference `a + SHARP * (a - shpVB[i])`, so what
+   it has to carry is the low-frequency level a vein stands out from. Five
+   separable 1-2-1 passes over 420x260 is an expensive way to hold a quantity
+   that has, by construction, no detail in it — measured at 3.09 ms of the
+   5.02 ms buildRidge spends per rebuild, which at ~29 rebuilds a second was
+   about 9% of the whole process, the largest single item in a CPU profile of a
+   running dish.
+
+   So it is computed on a half grid, and the arithmetic says one pass there does
+   the work of five here. A 1-2-1 pass has a variance of half a cell squared; on
+   the half grid a cell is two, so one pass carries 2.0 full-cells squared
+   against the 2.5 that five full-res passes carry. The box-2 downsample adds
+   (2^2-1)/12 = 0.25 and the bilinear upsample about half of that again, for
+   2.375 against 2.5 — the same spatial extent to within a few per cent, at
+   roughly a quarter of the cell traffic.
+
+   None of this is the simulation's business. buildRidge is called from render()
+   and the static rebuild, never from step(); every shp* field is read only by
+   the painter and the vein trace; and stateHash hashes none of them, which is
+   the same statement from the other direction. So unlike the sweep constants,
+   this changes no plate, invalidates no tape, and needs no SIM_V — the
+   determinism harness must report the dish BIT-IDENTICAL across this change,
+   and that is the gate it was held to rather than "the dishes still get won". */
+var HW = (GW + 1) >> 1, HH = (GH + 1) >> 1;
+var shpH = new Float32Array(HW * HH), shpHT = new Float32Array(HW * HH);
+/* The upsample's source coordinates and weights, per row and column. Fixed by
+   the grid, so built once: a half cell hx covers full cells 2hx and 2hx+1 and
+   is centred at full coordinate 2hx+1, so the full cell x, centred at x+0.5,
+   samples the half grid at x/2 - 0.25. Clamped at both ends, which is what
+   makes the outermost half cell extend rather than fold. */
+var upX0 = new Int32Array(GW), upX1 = new Int32Array(GW), upTX = new Float32Array(GW);
+var upY0 = new Int32Array(GH), upY1 = new Int32Array(GH), upTY = new Float32Array(GH);
+(function buildUpTables() {
+  var i;
+  for (i = 0; i < GW; i++) {
+    var sx = i * 0.5 - 0.25, a0, t;
+    if (sx <= 0) { a0 = 0; t = 0; }
+    else { a0 = sx | 0; t = sx - a0; if (a0 >= HW - 1) { a0 = HW - 1; t = 0; } }
+    upX0[i] = a0; upX1[i] = a0 + 1 < HW ? a0 + 1 : a0; upTX[i] = t;
+  }
+  for (i = 0; i < GH; i++) {
+    var sy = i * 0.5 - 0.25, b0, u;
+    if (sy <= 0) { b0 = 0; u = 0; }
+    else { b0 = sy | 0; u = sy - b0; if (b0 >= HH - 1) { b0 = HH - 1; u = 0; } }
+    upY0[i] = b0; upY1[i] = b0 + 1 < HH ? b0 + 1 : b0; upTY[i] = u;
+  }
+})();
+
+/* full grid -> half grid, 2x2 box. The second sample is clamped rather than
+   skipped so an odd GW or GH cannot read past the row. */
+function downHalf(src, dst) {
+  var hx, hy;
+  for (hy = 0; hy < HH; hy++) {
+    var y0 = hy * 2, y1 = y0 + 1 < GH ? y0 + 1 : y0;
+    var r0 = y0 * GW, r1 = y1 * GW, hr = hy * HW;
+    for (hx = 0; hx < HW; hx++) {
+      var x0 = hx * 2, x1 = x0 + 1 < GW ? x0 + 1 : x0;
+      dst[hr + hx] = 0.25 * (src[r0 + x0] + src[r0 + x1] + src[r1 + x0] + src[r1 + x1]);
+    }
+  }
+}
+
+/* one separable 1-2-1 pass on the half grid, src -> dst, via shpHT — the same
+   edge handling blurPass uses, which is to repeat the edge cell */
+function blurHalf(src, dst) {
+  var hx, hy, i, row;
+  for (hy = 0; hy < HH; hy++) {
+    row = hy * HW;
+    for (hx = 0; hx < HW; hx++) {
+      i = row + hx;
+      shpHT[i] = 0.25 * (hx > 0 ? src[i - 1] : src[i])
+               + 0.50 * src[i]
+               + 0.25 * (hx < HW - 1 ? src[i + 1] : src[i]);
+    }
+  }
+  for (hy = 0; hy < HH; hy++) {
+    row = hy * HW;
+    var up = hy > 0 ? row - HW : row;
+    var dn = hy < HH - 1 ? row + HW : row;
+    for (hx = 0; hx < HW; hx++) {
+      i = row + hx;
+      dst[i] = 0.25 * shpHT[up + hx] + 0.50 * shpHT[i] + 0.25 * shpHT[dn + hx];
+    }
+  }
+}
+
+/* half grid -> full grid, bilinear off the prebuilt tables */
+function upHalf(src, dst) {
+  var x, y;
+  for (y = 0; y < GH; y++) {
+    var r0 = upY0[y] * HW, r1 = upY1[y] * HW, ty = upTY[y], iy = 1 - ty;
+    var row = y * GW;
+    for (x = 0; x < GW; x++) {
+      var a0 = upX0[x], a1 = upX1[x], tx = upTX[x], ix = 1 - tx;
+      dst[row + x] = iy * (ix * src[r0 + a0] + tx * src[r0 + a1])
+                   + ty * (ix * src[r1 + a0] + tx * src[r1 + a1]);
+    }
+  }
+}
+
 function buildRidge() {
   var n;
   blurPass(trail, shpA);
   for (n = 1; n < SHARP_RN; n++) blurPass(shpA, shpA);
-  blurPass(shpA, shpB);
-  for (n = 1; n < SHARP_RW; n++) blurPass(shpB, shpB);
+  /* and the wide field, on the half grid: see the block above for why one pass
+     there stands in for the five full-resolution passes it replaced */
+  downHalf(shpA, shpH);
+  for (n = 0; n < SHARP_RW_H; n++) blurHalf(shpH, shpH);
+  upHalf(shpH, shpB);
 }
 
 /* ---- bridges: drawing the tube that is already there ----
