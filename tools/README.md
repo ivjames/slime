@@ -45,8 +45,49 @@ version capped at 40,000, under EXP-02's own 700s = 42,000.
 
 Environment: `STEPS` (default 2000), `CASES` (default
 `EXP-01/3039,EXP-02/a1b2,EXP-05/7f31` — an open plate, a maze so the wall tests
-in the sweeps are exercised, and a dish with timed events), `CHROMIUM` to point
-at a browser other than the pre-installed one.
+in the sweeps are exercised, and a dish with timed events), `BRUSH` (default
+none — see below), `CHROMIUM` to point at a browser other than the
+pre-installed one.
+
+### The brush, and why it is not on by default
+
+`BRUSH=1@210,130` holds the brush down at that grid cell for the whole run —
+mode 1 a cue, 2 a retract. Without it the fixed cases paint **nothing**, so
+`cueF` and `retF` are zero everywhere for the length of every run and no
+comparison says one word about the code that maintains them. That blind spot
+is not hypothetical: a build that never widened the player fields' box passes
+every unbrushed case identically and is caught on all three brushed ones, with
+`cueF` named among the fields that moved.
+
+It is a HELD brush and not a moving one, because the harness sets the pointer
+once before the run and the sim reads it from inside the step budget, so a
+held brush stays a function of the step count and ×1 and ×4 still have to
+agree. A held brush is not a weak test: the reserve drains within a few
+hundred steps, the brush stops landing, and the rest of the run is the haze
+fading to nothing — write, decay, shrink and empty, in one run.
+
+What it does NOT catch is a box that is short by a cell or two at the disc's
+rim. The cone falls to zero there, so those cells hold values under the
+field's own 0.002 floor and are dead on the step they are written; a build
+short by one cell on every side is identical to one that is not. Verified,
+not assumed — that perturbation was run and it passed.
+
+Off by default because it changes every digest: the brushed runs are their
+own baseline, not comparable with the unbrushed ones.
+
+The coordinates are checked against the grid the page reports, and an
+off-plate one is a hard error rather than a quiet no-op. It has to be, because
+the quiet version is the worst failure this file knows: the brush rectangle
+clamps to the edge, every cell in it is then further from the centre than
+`CUE_R`, nothing is painted, every digest matches an unbrushed run, and the
+harness exits 0 having exercised none of the code the flag exists to cover.
+
+On-plate is necessary and not sufficient — a point buried in a wall paints
+nothing either, since `paintBrush` skips wall cells, and there is no cheap
+test for that from outside the page. The confirmation is the one a brushed
+comparison makes anyway: **a brushed digest must differ from the unbrushed
+digest of the same build.** If it does not, the brush did not land, whatever
+the coordinates said.
 
 ### What it is and is not sensitive to
 
@@ -110,10 +151,20 @@ Excluded with a reason each: `recN` (reset to -1 every step before use),
 not what a step does), the profiling counters, and everything the renderer owns.
 
 To re-audit, list the module-scope declarations and ask that question of each.
-Two passes have been run. The first added `nodeHits`, `nodeLoad`, `reabCursor`
-and `idleCursor`; the second added `tubeDist`, which is rebuilt every
-`TUBE_EVERY` steps and read inside the agent loop by a streaming agent walking
-its goal's geodesic.
+Three passes have been run. The first added `nodeHits`, `nodeLoad`,
+`reabCursor` and `idleCursor`; the second added `tubeDist`, which is rebuilt
+every `TUBE_EVERY` steps and read inside the agent loop by a streaming agent
+walking its goal's geodesic; the third added `cueX0`/`cueY0`/`cueX1`/`cueY1`,
+the box the player fields' decay sweeps, written by the brush and by that
+sweep and read by the next one.
+
+The box is the case where the rule was nearly argued around, so it is worth
+recording why it was not. A box that is too SMALL leaves a live cell
+undecayed, and `cueF` and `retF` would report that on their own — so it is
+true that hashing the box catches nothing `cueF` would miss. It is hashed
+anyway: the rule is "state a step writes and a later step reads", not "state
+whose errors nothing else would notice", and the second is a judgement that
+has to be made again correctly every time the code around it moves.
 
 **This coverage is verified, not assumed.** Starting `reabCursor` at 1 instead of
 0 diverges at 600 steps with *only* the `scalars` digest moving and all

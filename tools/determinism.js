@@ -11,6 +11,9 @@
  *   node tools/determinism.js --self                     # same build twice
  *   node tools/determinism.js --compare /tmp/a.json /tmp/b.json
  *
+ * BRUSH=1@210,130 holds the brush down for the run, so the player fields are
+ * exercised at all — see the constant.
+ *
  * --self is the one to run FIRST on a checkout you have not measured before.
  * It answers whether the harness is stable at all: the same build run twice,
  * at two different speeds, must agree. If it does not, the sim has picked up
@@ -31,6 +34,46 @@ const STEPS = +(process.env.STEPS || 2000);
    refactor that moves EXP-01 moves all of them. */
 const CASES = (process.env.CASES || 'EXP-01/3039,EXP-02/a1b2,EXP-05/7f31')
   .split(',').map(s => { const [code, seed] = s.split('/'); return { code, seed }; });
+/* Optional: hold the brush down for the whole run, as `mode@x,y` — mode 1 is
+ * a cue, 2 a retract, and x,y are grid cells. Without it the three fixed
+ * cases paint nothing at all, which means cueF and retF are zero everywhere
+ * for the length of every run and no comparison says anything about the code
+ * that maintains them. The brush is set once, before the run, and the sim
+ * reads it once per STEP from inside the step budget (see the frame loop), so
+ * a held brush is as much a function of the step count as everything else is
+ * and x1 and x4 still have to agree.
+ *
+ *   BRUSH=1@210,130 node tools/determinism.js --self
+ */
+const BRUSH = (() => {
+  if (!process.env.BRUSH) return null;
+  const m = /^([12])@(\d+),(\d+)$/.exec(process.env.BRUSH.trim());
+  if (!m) throw new Error(`BRUSH must look like 1@210,130, got ${process.env.BRUSH}`);
+  return { mode: +m[1], x: +m[2], y: +m[3] };
+})();
+
+/* The coordinates have to be ON the plate, and this is checked against the
+ * grid the page reports rather than against a copy of GW and GH kept here.
+ * Off the plate the flag fails SILENTLY and in the worst way available: the
+ * brush rectangle clamps to the edge, every cell in it is then further from
+ * the centre than CUE_R, nothing is painted, every digest matches an
+ * unbrushed run, and the harness exits 0 having exercised none of the code
+ * the flag exists to cover. That is the same failure the scalars list has
+ * hit twice, wearing a different hat.
+ *
+ * On-plate is necessary and not sufficient: a point buried in a wall paints
+ * nothing either, because paintBrush skips wall cells. There is no cheap
+ * test for that from out here, so the confirmation is the one the brushed
+ * runs make anyway — a brushed digest must DIFFER from the unbrushed digest
+ * of the same build. If it does not, the brush did not land, whatever the
+ * coordinates said. */
+function checkBrush(grid) {
+  if (!BRUSH) return;
+  if (BRUSH.x >= grid.w || BRUSH.y >= grid.h) {
+    throw new Error(`BRUSH ${process.env.BRUSH} is off the ${grid.w}x${grid.h} plate — ` +
+      `it would paint nothing and every digest would match an unbrushed run`);
+  }
+}
 
 const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css',
                '.json': 'application/json', '.svg': 'image/svg+xml', '.png': 'image/png',
@@ -69,6 +112,7 @@ async function runBuild(root, label, speed) {
     await page.goto(`http://127.0.0.1:${port}/index.html`);
     await page.waitForFunction(() => window.SLIME && window.SLIME.experiments, { timeout: 30000 });
     const codes = await page.evaluate(() => window.SLIME.experiments().map(e => e.code));
+    checkBrush(await page.evaluate(() => window.SLIME.grid()));
 
     for (const c of CASES) {
       const idx = codes.indexOf(c.code);
@@ -77,8 +121,12 @@ async function runBuild(root, label, speed) {
         window.SLIME.turbo(a.speed);
         window.SLIME.start(a.idx, a.seed);
         window.SLIME.turbo(a.speed);
+        if (a.brush) {
+          const p = window.SLIME.ptr;
+          p.down = true; p.mode = a.brush.mode; p.gx = a.brush.x; p.gy = a.brush.y;
+        }
         window.SLIME.runTo(a.steps);
-      }, { idx, seed: c.seed, steps: STEPS, speed });
+      }, { idx, seed: c.seed, steps: STEPS, speed, brush: BRUSH });
       /* Wait on the STEP COUNT, never on a clock: a slow machine runs fewer
          steps per second and the same number of them all the same.
          S.over is in the condition because a dish can END before the target —
@@ -156,7 +204,7 @@ function compare(a, b) {
        and different steps per frame — which is the strongest statement of the
        determinism claim this harness can make against a single build. */
     const root = arg('--root') ? path.resolve(arg('--root')) : ROOT;
-    process.stderr.write(`self-check: ${root}, ${STEPS} steps\n`);
+    process.stderr.write(`self-check: ${root}, ${STEPS} steps${BRUSH ? `, brush ${process.env.BRUSH}` : ''}\n`);
     const a = await runBuild(root, 'x1', 1);
     const b = await runBuild(root, 'x4', 4);
     process.exit(compare(a, b) ? 0 : 1);
@@ -167,7 +215,7 @@ function compare(a, b) {
   /* x8 for the same reason outcome.js asks for it: LAPSE_REF halved what a
      stop is worth, and this is a step-rate ask, not a watching speed. */
   const speed = +(arg('--speed') || 8);
-  process.stderr.write(`${label}: ${root}, ${STEPS} steps at x${speed}\n`);
+  process.stderr.write(`${label}: ${root}, ${STEPS} steps at x${speed}${BRUSH ? `, brush ${process.env.BRUSH}` : ''}\n`);
   const r = await runBuild(root, label, speed);
   const out = arg('--out');
   if (out) { fs.writeFileSync(out, JSON.stringify(r, null, 2)); process.stderr.write(`wrote ${out}\n`); }

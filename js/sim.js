@@ -2883,6 +2883,7 @@ function buildDish(e) {
   resetVeinTemporal();
   trail.fill(0); tmpF.fill(0); stalkF.fill(0); foodF.fill(0);
   cueF.fill(0); retF.fill(0); slimeF.fill(0); knotF.fill(0); traceF.fill(0);
+  cueBoxNone();
   flowF.fill(0); condF.fill(0); scarF.fill(0);
   fedF.fill(0); fedB.fill(0); padF.fill(0); padB.fill(0);
   bodyF.fill(0); bodyB.fill(0); linkF.fill(0); shadeF.fill(0);
@@ -3719,6 +3720,78 @@ function sense(x, y) {
 /* ------------------------------------------------------------
    7. field maintenance: diffuse + decay, once per step
    ------------------------------------------------------------ */
+/* ---- the player fields, and the box that holds them ----
+   cueF and retF are written by one thing, the brush, over a disc of CUE_R,
+   and they decay at CUE_DECAY — a curve that reaches its 0.002 floor in about
+   a second of sim time. So on the overwhelming majority of steps they are
+   zero over the overwhelming majority of the plate, and the two `> 0` tests
+   the diffusion loop carried for them were two loads and two compares on
+   109,200 cells to find nothing. Measured at 1.9% of the whole process: a
+   third of what diffuseTrail costs, and the largest single item in it.
+
+   This is a skip, and skips have a poor record here — tiling, region-culling
+   and bounding boxes were all tried against the FIELD and all died the same
+   way, because the organism covers 70-85% of the plate by the time a dish is
+   won and there is nothing left to skip exactly when you need it. What is
+   different here is what is being skipped. Not the organism: the brush.
+
+   And it is exact rather than approximate, which is the other reason it is
+   allowed. The decay is a no-op on a cell that is already zero, so declining
+   to visit one changes nothing at all — the dish this build produces is the
+   dish the sweep-everything build produced, bit for bit, and the determinism
+   harness is the gate rather than the outcomes. What the box has to be right
+   about is only that every nonzero cell is inside it, and it is from both
+   ends: the brush widens it over everything it touches, and the sweep leaves
+   it as the tight bounds of whatever stayed alive. Decay only ever shrinks
+   the live set, so a box that contained it still contains it.
+
+   Empty is x1 < x0, written as the canonical (0, 0, -1, -1) so that two runs
+   holding the same dish hold the same box and not merely equivalent ones. */
+var cueX0 = 0, cueY0 = 0, cueX1 = -1, cueY1 = -1;
+
+/* the box, widened over a rectangle the brush has just written into */
+function cueBoxAdd(x0, y0, x1, y1) {
+  if (cueX1 < cueX0) { cueX0 = x0; cueY0 = y0; cueX1 = x1; cueY1 = y1; return; }
+  if (x0 < cueX0) cueX0 = x0;
+  if (y0 < cueY0) cueY0 = y0;
+  if (x1 > cueX1) cueX1 = x1;
+  if (y1 > cueY1) cueY1 = y1;
+}
+
+/* ...and emptied, for a dish that has none */
+function cueBoxNone() { cueX0 = 0; cueY0 = 0; cueX1 = -1; cueY1 = -1; }
+
+/* ...and opened to the whole plate, for a field arriving from outside the
+   step loop, where there is nothing to infer its extent from */
+function cueBoxAll() { cueX0 = 0; cueY0 = 0; cueX1 = GW - 1; cueY1 = GH - 1; }
+
+/* One step of the two player fields, over the box, leaving it tight.
+   Lifted out of the diffusion sweep rather than guarded inside it: neither
+   field is read by that loop nor writes anything it reads, so running them
+   one after the other computes what running them interleaved computed. */
+function decayCues() {
+  if (cueX1 < cueX0) return;
+  var x, y, i, row, live;
+  var nx0 = GW, ny0 = GH, nx1 = -1, ny1 = -1;
+  for (y = cueY0; y <= cueY1; y++) {
+    row = y * GW;
+    for (x = cueX0; x <= cueX1; x++) {
+      i = row + x;
+      live = false;
+      if (cueF[i] > 0) { var c = cueF[i] * CUE_DECAY; cueF[i] = c < 0.002 ? 0 : c; if (c >= 0.002) live = true; }
+      if (retF[i] > 0) { var q = retF[i] * CUE_DECAY; retF[i] = q < 0.002 ? 0 : q; if (q >= 0.002) live = true; }
+      if (live) {
+        if (x < nx0) nx0 = x;
+        if (x > nx1) nx1 = x;
+        if (y < ny0) ny0 = y;
+        if (y > ny1) ny1 = y;
+      }
+    }
+  }
+  if (nx1 < nx0) cueBoxNone();
+  else { cueX0 = nx0; cueY0 = ny0; cueX1 = nx1; cueY1 = ny1; }
+}
+
 function diffuseTrail() {
   var x, y, i, row;
   var sw = DIFF, cw = 1 - 2 * DIFF;
@@ -3732,7 +3805,8 @@ function diffuseTrail() {
       tmpF[i] = sw * l + cw * trail[i] + sw * r;
     }
   }
-  /* vertical blur back into trail, with decay, and player fields decayed too.
+  /* vertical blur back into trail, with decay. The player fields are decayed
+     after it, over their own box — see decayCues.
 
      The floor under the decay is the reinforcement rule, and it is two lines
      because that is all it is: a cell that has been carrying traffic does not
@@ -3758,10 +3832,9 @@ function diffuseTrail() {
         if (v < skf) v = skf;   /* the stalk is a floor under the trail */
       }
       trail[i] = wallM[i] ? 0 : (v < 0.0016 ? 0 : v);
-      if (cueF[i] > 0) { var c = cueF[i] * CUE_DECAY; cueF[i] = c < 0.002 ? 0 : c; }
-      if (retF[i] > 0) { var q = retF[i] * CUE_DECAY; retF[i] = q < 0.002 ? 0 : q; }
     }
   }
+  decayCues();
 }
 
 /* ------------------------------------------------------------
@@ -10923,6 +10996,10 @@ function paintBrush(gx, gy, mode) {
   var R = CUE_R, R2 = R * R;
   var x0 = clamp(Math.round(gx - R), 0, GW - 1), x1 = clamp(Math.round(gx + R), 0, GW - 1);
   var y0 = clamp(Math.round(gy - R), 0, GH - 1), y1 = clamp(Math.round(gy + R), 0, GH - 1);
+  /* the whole rectangle, not the disc inside it and not the wall cells the
+     loop skips: a box that is a superset costs a few cells of sweep, and the
+     next one tightens it anyway */
+  cueBoxAdd(x0, y0, x1, y1);
   for (var y = y0; y <= y1; y++) {
     var dy = y - gy, row = y * GW;
     for (var x = x0; x <= x1; x++) {
@@ -12036,6 +12113,13 @@ function stateHash() {
      walking its goal's geodesic. */
   var cursors = [RNG_STATE, stepsRun, nAgents, tN, treePassN, mainOK,
                  reabCursor, idleCursor,
+                 /* the player fields' box: written by the brush and by
+                    decayCues, read by the next step's decayCues to decide
+                    what it sweeps. A box that is too SMALL leaves a live cell
+                    undecayed, which cueF and retF would report on their own —
+                    but it is state a step carries and the rule above is not
+                    "unless something else would catch it". */
+                 cueX0, cueY0, cueX1, cueY1,
                  hashArr(nodeHits), hashArr(nodeLoad)];
   /* tubeDist is an array of per-node distance maps with holes in it — a node
      whose map has not been built yet is simply absent — so it is hashed as its
@@ -12495,6 +12579,7 @@ function exitReplay() {
   if (FINAL_STATE) {
     trail.set(FINAL_STATE.trail);
     cueF.set(FINAL_STATE.cueF); retF.set(FINAL_STATE.retF);
+    cueBoxAll();   /* a snapshot says nothing about where its haze is */
     ovlLive = true;   /* whatever haze the run ended under is drawn with it */
     if (FINAL_STATE.slimeF) slimeF.set(FINAL_STATE.slimeF);
     if (FINAL_STATE.knotF) knotF.set(FINAL_STATE.knotF);
