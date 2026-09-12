@@ -5412,7 +5412,6 @@ function resizeCanvas() {
    point subtracted from it now falls below BODY_T and is simply agar. */
 var FIELD_GAIN = 1.0;
 var SHARP  = 2.40;   // strength of the ridge lift
-var SHARP_RN = 3;    // narrow blur passes: kills per-cell grain, keeps the vein
 /* The wide blur runs on a HALF grid, so its pass count is in half-grid cells:
    one pass there carries 2.0 full-cells squared of variance, against the 2.5
    that the five full-resolution passes this replaced carried, and the
@@ -5678,24 +5677,83 @@ function bodyRim() {
   for (y = 0; y < GH; y++) { bodyV[y * GW] = 0; bodyV[y * GW + GW - 1] = 0; }
 }
 
-/* one separable 1-2-1 pass, src -> dst, via shpT */
+/* ---- the narrow blur ----
+   The grain killer: what the ridge walk needs is the vein without the
+   per-cell noise the deposit leaves on it. It used to be three separable
+   1-2-1 passes, which is six sweeps of the grid; it is one separable pass
+   now, because three 1-2-1 passes ARE one 1-6-15-20-15-6-1 pass —
+   (1,2,1) convolved with itself twice, over 64 rather than over 4. The
+   kernel is not an approximation of the three passes, it is their
+   composition, so the field this leaves in the interior is the field the
+   three passes left, to within the rounding of one store instead of three.
+
+   What it is NOT identical about is the outermost three cells. Each pass
+   clamped by repeating the edge sample, and a clamp repeated three times is
+   not the same boundary as one clamp of the composed kernel: after a pass the
+   edge value has moved and the repeated tail has not. So the border is an
+   approximation where the interior is exact. It is three cells of a 420x260
+   grid, under the plate's rim, and bodyRim() zeroes the outer ring of the
+   field the tracer follows in any case; measured against the picture (three
+   dishes, 1200 steps, halted so the composite is reproducible) the difference
+   sits inside the run-to-run noise of the comparison itself.
+
+   Worth 0.8 ms of the 7.8 ms a rebuild costs, which at ~15 rebuilds a second
+   is about 1.2% of the whole process. Six sweeps at three taps became two at
+   seven: the taps per cell barely moved, the sweeps are a third, and the two
+   round trips through shpT that the middle passes made are gone.
+
+   None of this is the simulation's business — see the wide blur's block
+   below for the same statement at length. The determinism harness must
+   report the dish BIT-IDENTICAL across it. */
+var NB0 = 20 / 64, NB1 = 15 / 64, NB2 = 6 / 64, NB3 = 1 / 64;
+
 function blurPass(src, dst) {
-  var x, y, i, row;
+  var x, y, i, row, W1 = GW - 1, H1 = GH - 1;
+  /* The columns, into shpT. Peeled at both ends rather than tested per cell:
+     the clamp only ever binds within three of an edge, and the middle is by
+     far the longer run. The peel width and the tap guards are one decision,
+     not two: at a peel of 3 the outermost guard in each end loop is already
+     constant (x > 2 cannot hold below x = 3, x < W1 - 2 cannot hold at or
+     above it), and they are written out so that widening the kernel means
+     editing guards that are visibly there rather than discovering they were
+     assumed. */
   for (y = 0; y < GH; y++) {
     row = y * GW;
-    for (x = 0; x < GW; x++) {
+    var e0 = src[row], e1 = src[row + W1];
+    for (x = 0; x < 3; x++) {
       i = row + x;
-      shpT[i] = 0.25 * (x > 0 ? src[i - 1] : src[i])
-              + 0.50 * src[i]
-              + 0.25 * (x < GW - 1 ? src[i + 1] : src[i]);
+      shpT[i] = NB3 * ((x > 2 ? src[i - 3] : e0) + src[i + 3])
+              + NB2 * ((x > 1 ? src[i - 2] : e0) + src[i + 2])
+              + NB1 * ((x > 0 ? src[i - 1] : e0) + src[i + 1])
+              + NB0 * src[i];
+    }
+    for (x = 3; x < W1 - 2; x++) {
+      i = row + x;
+      shpT[i] = NB3 * (src[i - 3] + src[i + 3])
+              + NB2 * (src[i - 2] + src[i + 2])
+              + NB1 * (src[i - 1] + src[i + 1])
+              + NB0 * src[i];
+    }
+    for (x = W1 - 2; x <= W1; x++) {
+      i = row + x;
+      shpT[i] = NB3 * (src[i - 3] + (x < W1 - 2 ? src[i + 3] : e1))
+              + NB2 * (src[i - 2] + (x < W1 - 1 ? src[i + 2] : e1))
+              + NB1 * (src[i - 1] + (x < W1 ? src[i + 1] : e1))
+              + NB0 * src[i];
     }
   }
+  /* and the rows, out of it: the row offsets are per row already, so the
+     clamp costs nothing in the inner loop */
   for (y = 0; y < GH; y++) {
     row = y * GW;
-    var up = y > 0 ? row - GW : row, dn = y < GH - 1 ? row + GW : row;
+    var u3 = (y > 2 ? y - 3 : 0) * GW, u2 = (y > 1 ? y - 2 : 0) * GW, u1 = (y > 0 ? y - 1 : 0) * GW;
+    var d1 = (y < H1 ? y + 1 : H1) * GW, d2 = (y < H1 - 1 ? y + 2 : H1) * GW, d3 = (y < H1 - 2 ? y + 3 : H1) * GW;
     for (x = 0; x < GW; x++) {
       i = row + x;
-      dst[i] = 0.25 * shpT[up + x] + 0.50 * shpT[i] + 0.25 * shpT[dn + x];
+      dst[i] = NB3 * (shpT[u3 + x] + shpT[d3 + x])
+             + NB2 * (shpT[u2 + x] + shpT[d2 + x])
+             + NB1 * (shpT[u1 + x] + shpT[d1 + x])
+             + NB0 * shpT[i];
     }
   }
 }
@@ -5764,8 +5822,9 @@ function downHalf(src, dst) {
   }
 }
 
-/* one separable 1-2-1 pass on the half grid, src -> dst, via shpHT — the same
-   edge handling blurPass uses, which is to repeat the edge cell */
+/* one separable 1-2-1 pass on the half grid, src -> dst, via shpHT. The edge
+   is handled as the narrow blur handles it, by repeating the edge cell; this
+   one is still a single 1-2-1, so here the clamp is exact. */
 function blurHalf(src, dst) {
   var hx, hy, i, row;
   for (hy = 0; hy < HH; hy++) {
@@ -5805,7 +5864,6 @@ function upHalf(src, dst) {
 function buildRidge() {
   var n;
   blurPass(trail, shpA);
-  for (n = 1; n < SHARP_RN; n++) blurPass(shpA, shpA);
   /* and the wide field, on the half grid: see the block above for why one pass
      there stands in for the five full-resolution passes it replaced */
   downHalf(shpA, shpH);
@@ -9093,7 +9151,10 @@ function envBucket(p) { return p < 0.35 ? 0 : (p < 0.75 ? 1 : 2); }
    A pixel both frames draw is unchanged (max picks the undecayed new value); a
    pixel only the OLD frame drew fades exponentially instead of vanishing. No
    identity, no correspondence, no extra geometry — 'lighten' is per-channel
-   max and three drawImage calls per rebuild buy the whole thing.
+   max and three drawImage calls per rebuild buy the whole thing: the decay,
+   the punch, the fresh ink. There used to be a fourth, copying the result
+   back into the canvas the accumulator was called; the two canvases swap
+   names instead.
 
    veilDn comes from the same sim-time dt as the tiers, so at x12 it is ~0.01
    and the accumulator degenerates to a plain copy: a time-lapse retract
@@ -9215,7 +9276,12 @@ function inkFresh(tc, sx, sy) {
   }
   tc.restore();
 }
-var veilTmp = null, vtctx = null;     // scratch for the in-place decay
+/* The accumulator's back buffer: a rebuild decays and punches into it, lays
+   the fresh strokes on top, and the two swap names. Which object holds the
+   accumulator therefore alternates, so nothing may cache either reference
+   across a rebuild — the resize, the dish reset and the replay exit all reach
+   them through these two variables, which is what keeps that true. */
+var veilTmp = null, vtctx = null;
 var veilDn = 0;                       // decay folded in at the next composite
 var veinFresh = false;                // buildVeins ran since the last composite
 var whiskPath = null;
@@ -10822,10 +10888,15 @@ function render() {
       vtctx.drawImage(veilMask, 0, 0);
       vtctx.globalCompositeOperation = 'source-over';
     }
-    vactx.setTransform(1, 0, 0, 1, 0, 0);
-    vactx.clearRect(0, 0, veilAcc.width, veilAcc.height);
-    vactx.drawImage(veilTmp, 0, 0);
-    vactx.drawImage(veil, 0, 0);
+    /* and the fresh ink, onto the same canvas — which is then simply CALLED
+       the accumulator. Copying it into the old one and clearing that first
+       computed the same pixels; the pair is double-buffered instead, the way
+       fedRelax's fields are, so this rebuilds the accumulator in three
+       full-canvas blits and one clear rather than four and two. */
+    vtctx.drawImage(veil, 0, 0);
+    var spare = veilAcc, spareCtx = vactx;
+    veilAcc = veilTmp; vactx = vtctx;
+    veilTmp = spare;   vtctx = spareCtx;
     veinFresh = false;
   }
   /* the food, under every layer that could be covering it — see paintFood */
