@@ -4811,8 +4811,9 @@ function step() {
      dish, which is a net LOSS of early biomass and the exact opposite of what
      this is for. That is not hypothetical: it is what the first version of
      this commit did, while its comment claimed the floor held the culture at
-     its opening size. Flat, ORIGIN_HOLD at 1.0 reproduces the old grace gate
-     exactly — no culling until the crumb is gone. */
+     its opening size. Flat, nothing is culled until the crumb is gone, which
+     is the half of the old gate this keeps — see ORIGIN_HOLD for the half it
+     does not, and do not write "the same as the grace gate" here again. */
   var crumb = originFrac(e) > 0 ? e.start * ORIGIN_HOLD : 0;
   if (crumb > target) target = crumb;
   if (nAgents < target) {
@@ -7345,10 +7346,11 @@ var PUDDLE_PL = 0.25;         /* share of the disc the alpha holds flat before f
    the square root. Straight radius empties the middle of the run
    far too fast and then crawls, which reads as a drop that gave up early.
 
-   And it eases out rather than vanishing when the first flake lands. The
-   reserve is not spent at that moment — it stops being what the culture
-   is living on, which is a different thing and takes a moment to look
-   like one. */
+   And it does NOT ease out when the first flake lands. It used to: a grace
+   clock stopped mattering the moment you were fed, so the drop was faded
+   away over RES_FADE to say so. A crumb is food and does not stop being food
+   because something better turned up — it goes when it is eaten, and the
+   floor under the target goes with it. */
 var RES_R    = 14;            /* cells: the drop's radius at a full reserve */
 /* Its own alpha, well under a pad's, and the reason is what is already
    underneath. A flake's pad is painted over ordinary tissue; the drop is
@@ -10498,7 +10500,14 @@ function render() {
      around it — those say "this is an objective", and this one is not. */
   var of = originFrac(e);
   if (of > 0) {
-    var orad = RES_R * 0.34 * Math.sqrt(of);
+    /* RES_R is the drop's PUDDLE radius, which is the crumb's answer to
+       nd.r * PUDDLE_R rather than to nd.r — so the flake's own 0.34 has to be
+       taken against RES_R / PUDDLE_R, not against RES_R. Against RES_R the
+       crumb drew at 4.76 cells to a flake's 3.4, nearly twice a whole flake
+       by area, while the puddle under it is smaller than a flake's pad: the
+       one mark on the plate that is not an objective, drawn as the biggest
+       thing on it. */
+    var orad = (RES_R / PUDDLE_R) * 0.34 * Math.sqrt(of);
     if (orad > markCase * 0.5) casedDisc(ctx, e.inoc.x, e.inoc.y, orad, MARK_OBJ);
   }
 
@@ -11593,11 +11602,16 @@ var GHOST_ENT = 9;
    11: the drop is a disc, not a diamond: every run starts differently.
    12: the feeding rate is calibrated and PACE is 3.
    13: every dish runs on past its last node, not only one with `refine`
-       — see WIN_HOLD. Entry 6 is the same change for EXP-03 alone. */
-var SIM_V = 13;   /* Best times are unaffected by the hold — runClock stops at
-                     the win, measured identical to a tenth of a second across
-                     all twenty dishes — but the plate a seed and tape produce
-                     is different, which is what this byte is the contract for. */
+       — see WIN_HOLD. Entry 6 is the same change for EXP-03 alone.
+   14: the culture wakes on food — see ORIGIN_HOLD. The floor under the
+       target lets the opening regrow what it loses, so spawnAgent runs
+       where it never did; it draws from the generator, and every draw
+       after it lands somewhere else. */
+var SIM_V = 14;   /* The plate a seed and tape produce is different, which is
+                     what this byte is the contract for. Best times ARE
+                     affected this time, unlike at 13: eight dishes finish
+                     sooner, because a culture that can regrow its early
+                     losses reaches the food with more of itself. */
 
 function ghostSig() {
   var h = mix32(SIM_V, Math.round(CUE_CAP * 1000), Math.round(CUE_REGEN * 1000));
