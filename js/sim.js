@@ -5580,9 +5580,13 @@ function smoothRidgeField() {
   if (k >= 0.999) { shpV.set(shpA); shpVB.set(shpB); return; }
   /* Swept whole. Skipping the cells where shpA and shpV already agree is exact
      — the update is a no-op there — and measured as worth nothing, because
-     trail DIFFUSES: after eight blurs there is a tail of some tiny nonzero
-     value across nearly every cell of a running dish, and the cells that agree
-     exactly are too few to pay for the test. */
+     trail DIFFUSES: by the time the narrow blur has run there is a tail of some
+     tiny nonzero value across nearly every cell of a running dish, and the
+     cells that agree exactly are too few to pay for the test. (This used to
+     say "after eight blurs", counting three narrow and five wide. The wide
+     half now runs on the half grid in one pass, which changes the count but
+     not the argument: the tail comes from the diffusion in step(), and the
+     narrow blur is still three passes over it.) */
   for (var i = 0; i < NCELL; i++) {
     shpV[i] += (shpA[i] - shpV[i]) * k;
     shpVB[i] += (shpB[i] - shpVB[i]) * k;
