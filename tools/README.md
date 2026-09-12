@@ -75,6 +75,20 @@ not assumed — that perturbation was run and it passed.
 Off by default because it changes every digest: the brushed runs are their
 own baseline, not comparable with the unbrushed ones.
 
+The coordinates are checked against the grid the page reports, and an
+off-plate one is a hard error rather than a quiet no-op. It has to be, because
+the quiet version is the worst failure this file knows: the brush rectangle
+clamps to the edge, every cell in it is then further from the centre than
+`CUE_R`, nothing is painted, every digest matches an unbrushed run, and the
+harness exits 0 having exercised none of the code the flag exists to cover.
+
+On-plate is necessary and not sufficient — a point buried in a wall paints
+nothing either, since `paintBrush` skips wall cells, and there is no cheap
+test for that from outside the page. The confirmation is the one a brushed
+comparison makes anyway: **a brushed digest must differ from the unbrushed
+digest of the same build.** If it does not, the brush did not land, whatever
+the coordinates said.
+
 ### What it is and is not sensitive to
 
 Verified, on EXP-01/3039 at 600 steps:

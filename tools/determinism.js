@@ -52,6 +52,29 @@ const BRUSH = (() => {
   return { mode: +m[1], x: +m[2], y: +m[3] };
 })();
 
+/* The coordinates have to be ON the plate, and this is checked against the
+ * grid the page reports rather than against a copy of GW and GH kept here.
+ * Off the plate the flag fails SILENTLY and in the worst way available: the
+ * brush rectangle clamps to the edge, every cell in it is then further from
+ * the centre than CUE_R, nothing is painted, every digest matches an
+ * unbrushed run, and the harness exits 0 having exercised none of the code
+ * the flag exists to cover. That is the same failure the scalars list has
+ * hit twice, wearing a different hat.
+ *
+ * On-plate is necessary and not sufficient: a point buried in a wall paints
+ * nothing either, because paintBrush skips wall cells. There is no cheap
+ * test for that from out here, so the confirmation is the one the brushed
+ * runs make anyway — a brushed digest must DIFFER from the unbrushed digest
+ * of the same build. If it does not, the brush did not land, whatever the
+ * coordinates said. */
+function checkBrush(grid) {
+  if (!BRUSH) return;
+  if (BRUSH.x >= grid.w || BRUSH.y >= grid.h) {
+    throw new Error(`BRUSH ${process.env.BRUSH} is off the ${grid.w}x${grid.h} plate — ` +
+      `it would paint nothing and every digest would match an unbrushed run`);
+  }
+}
+
 const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css',
                '.json': 'application/json', '.svg': 'image/svg+xml', '.png': 'image/png',
                '.ico': 'image/x-icon', '.webmanifest': 'application/manifest+json' };
@@ -89,6 +112,7 @@ async function runBuild(root, label, speed) {
     await page.goto(`http://127.0.0.1:${port}/index.html`);
     await page.waitForFunction(() => window.SLIME && window.SLIME.experiments, { timeout: 30000 });
     const codes = await page.evaluate(() => window.SLIME.experiments().map(e => e.code));
+    checkBrush(await page.evaluate(() => window.SLIME.grid()));
 
     for (const c of CASES) {
       const idx = codes.indexOf(c.code);
