@@ -786,7 +786,36 @@ var COND_LEVEL = 34.0;     // the tube a fully conductive cell maintains
    the shortest path and the trunk's corridor keeps well over FED_LOW, so
    the thing shaded is only ever what is beside it. The winner-take-all is
    the same one Tero's model has; this only points it at the fed route. */
-var FED_BODY     = 3.0;   // trail at which a cell is cytoplasm a signal can ride
+/* The bar for "cytoplasm a signal can ride", and it was the most expensive
+   constant in the file for a reason that is not visible from here.
+
+   fedRelax is a nine-cell stencil over every cell that clears this bar, run
+   FED_PASSES times per slow sweep. At 3.0 the bar cleared about three quarters
+   of the plate by the time EXP-01 was won, and the pass cost 8.0 ms of the 9.4
+   the whole slow sweep took — 86% of it, and the only part of the sweep that
+   GREW over a run: the loop above it is flat at 1.3 ms from the first second to
+   the last. Nothing cheaper was available. The signal's bounding box is the
+   whole plate by ninety seconds, so there is no region to skip and no tile to
+   cull; the array traffic is a flat 2.2 ms of the 10, so there is no layout to
+   fix. It is per-cell work on three quarters of the dish, every sweep.
+
+   3.0 was also below what a single wandering agent MANUFACTURES. A lone scrap
+   on bare agar settles at a trail of about eight — DEPOSIT x VOID_SPEED over
+   one minus DECAY, and see the adrift block, which measures it — so one agent
+   that had walked somewhere made that ground cytoplasm the return signal could
+   ride, indefinitely. The signal was riding the plate rather than the network.
+
+   12 is BODY_LEVELS[2], the level the renderer calls the tube and the level the
+   record is traced at. The property that matters is that it sits ABOVE the lone
+   wanderer's eight: a wandering agent can no longer make ground the signal
+   travels on, and it takes a tube to carry a find home.
+
+   What it COSTS is the signal's reach, and that is a real change to the dish
+   rather than a free one — the network prunes differently when a find travels
+   only down tube. That is why this is a SIM_V bump and not a refactor, and why
+   it is landed with the outcome numbers in its PR rather than on the argument
+   above. */
+var FED_BODY     = 12.0;  // trail at which a cell is cytoplasm a signal can ride (= BODY_LEVELS[2], the tube)
 var FED_STEP     = 0.995; // share of the strongest neighbour a cell takes per pass, straight
 var FED_STEP_D   = Math.pow(FED_STEP, Math.SQRT2); // ...and diagonally: octile, not Chebyshev
 var FED_THIN     = 0.005; // extra share lost per cell at no trail, against FED_THICK
@@ -11713,12 +11742,20 @@ var GHOST_ENT = 9;
    14: the culture wakes on food — see ORIGIN_HOLD. The floor under the
        target lets the opening regrow what it loses, so spawnAgent runs
        where it never did; it draws from the generator, and every draw
-       after it lands somewhere else. */
-var SIM_V = 14;   /* The plate a seed and tape produce is different, which is
-                     what this byte is the contract for. Best times ARE
-                     affected this time, unlike at 13: eight dishes finish
-                     sooner, because a culture that can regrow its early
-                     losses reaches the food with more of itself. */
+       after it lands somewhere else.
+   15: FED_BODY 3 -> 12. The return signal rides tube rather than any ground a
+       single wandering agent has walked over, so a find reaches fewer cells,
+       a different set of routes is held, and the plate every seed produces
+       is different. */
+var SIM_V = 15;   /* The plate a seed and tape produce is different, which is
+                     what this byte is the contract for. Best times are
+                     affected, as they were at 14, but not in one direction:
+                     measured across three dishes and three seeds every case is
+                     still won with its mark unchanged, and the run clock moves
+                     by between a couple of per cent sooner and a tenth later
+                     with no consistent sign. At three seeds a dish that is
+                     systematically slower and one that drew a slow seed look
+                     the same, so neither is claimed here. */
 
 function ghostSig() {
   var h = mix32(SIM_V, Math.round(CUE_CAP * 1000), Math.round(CUE_REGEN * 1000));
