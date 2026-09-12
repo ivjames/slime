@@ -847,7 +847,13 @@ var FED_LAY_GAIN = 0.50;  // extra deposit per step on the connection
 var FED_R        = 8;     // cells: how far the connection's shade reaches
 var FED_HI       = 0.60;  // link at which a cell is trunk enough to cast a shade
 var FED_LOW      = 0.25;  // link below which a cell in that shade is shaded
-var FED_SHADE    = 0.03;  // extra share of conductivity a shaded cell loses per sweep
+/* Per sweep, so it moves with KNOT_EVERY like the others: 1-(1-0.03)^2, so a
+   shaded cell loses the same share of its conductivity per unit TIME as it did
+   at 0.03 every eight steps. Missed on the first pass of this compensation and
+   caught by grepping for what the file itself calls a per-sweep rate — which
+   found FED_SHADE_DEP too, and that one needs nothing: it is applied in the
+   deposit block inside the agent loop, so it is already per step. */
+var FED_SHADE    = 0.0591; // extra share of conductivity a shaded cell loses per sweep
 var FED_SHADE_DEP = 0.50; // share of deposit traffic through a shaded cell does not lay
 /* ---- the vein scar: where a tube HAS been ----
    The residual the dish has been missing. Three fields already say something
@@ -11812,8 +11818,11 @@ var GHOST_ENT = 9;
    16: KNOT_EVERY 8 -> 16, with every per-sweep rate compensated so the dish's
        CLOCKS do not move: COND_RATE to 1-(1-0.02)^2, COND_Q halved because the
        flux it normalises is per sweep, SCAR_DEP doubled, SCAR_FADE squared,
-       FED_PASSES 2 -> 4. KNOT_FADE and TRACE_FADE needed nothing — they are
-       already Math.pow(hold, KNOT_EVERY).
+       FED_SHADE to 1-(1-0.03)^2, FED_PASSES 2 -> 4. KNOT_FADE and TRACE_FADE
+       needed nothing — they are already Math.pow(hold, KNOT_EVERY), and nor did
+       FED_STEP, FED_FADE or FED_OFF, which are per PASS and so unchanged once
+       the passes per step are (2/8 is 4/16). FED_SHADE_DEP needed nothing
+       either: it is applied in the deposit block, per step already.
 
        The intent is that nothing about the organism changes and the sweep
        simply runs half as often, but the plate still moves, because a coarser
