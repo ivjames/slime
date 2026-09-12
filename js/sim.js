@@ -7441,13 +7441,23 @@ var LANDFALL_MAX = 24;        /* nodes the carry is walked inward over, at most 
    fat for a couple of radii and then stopped dead against its own drawn
    width. 1.7 clears the fan and little else.
 
-   PLATEAU. The alpha held flat to 0.55 of the disc and then spent the
-   whole falloff in the outer 45%, which over a mask that is itself
-   ending reads as a halo rather than a fade. Falling from 0.25 spends it
-   across the disc — a COLOUR ramp now rather than an alpha one, see
-   PUDDLE_EDGE, so what it spends across the disc is the difference
-   between the pad's tone and the body's, not the difference between
-   tissue and nothing. */
+   PLATEAU. This has been three things. It held flat to 0.55 and spent the
+   falloff in the outer 45%, which read as a halo; then it fell from 0.25,
+   spending a COLOUR ramp across the whole disc (see PUDDLE_EDGE) so that
+   what it spent was the difference between the pad's tone and the body's
+   rather than between tissue and nothing.
+
+   Both drew a circle. A ramp centred on the food is a circle centred on the
+   food however gentle its tones are, and the food is exactly where the
+   indicator ring is: the mass came out as a radial blob around a marker,
+   brightest at the middle and fading by 1.7 radii whatever the tissue under
+   it was doing. The ring is an honest mark — it is drawn at the food's own
+   radius — but its geometry had no business being the organism's.
+
+   So the ramp is gone: flat to 0.86 of the clip, and the last 14% is the
+   feather that keeps the clip's own edge from being a line. What shapes the
+   pad now is the contour, which is the tissue, and what sizes it is the
+   tissue's reach (see PUDDLE_MAX and padReach). */
 var PUDDLE_LV = 6;            /* index into BODY_LEVELS: trail 32, the pad itself */
 var PUDDLE_R  = 1.7;          /* flake radii: where the puddle has come down to the body */
 /* The tone the puddle's rim lands on: the faintest tissue there is, which is
@@ -7475,45 +7485,100 @@ var PUDDLE_R  = 1.7;          /* flake radii: where the puddle has come down to 
    it, and that is a different change. */
 var PUDDLE_EDGE = [0, 0, 0];
 var PUDDLE_A  = 0.92;         /* the fill's alpha at the flake */
-var PUDDLE_PL = 0.25;         /* share of the disc the alpha holds flat before falling */
+var PUDDLE_PL = 0.86;         /* share of the disc the alpha holds flat before falling */
 
-/* ---- the reserve at the origin ----
-   A plasmodium is inoculated as a DROP, and the drop is food. Before the
-   first flake goes down the culture is living on what it arrived with —
-   the dish log says so in as many words, "grace period, N seconds of
-   reserves" — and a drop being spent gets visibly thinner. The plate drew
-   none of that: the origin got a root loop for the vein graph to attach
-   to and nothing else, so the one mass on the dish that is being consumed
-   was the one mass never drawn.
+/* ---- the skirt, and why one contour was not enough ----
+   A pad traced at one level draws the mass and nothing else, and the food it
+   is standing on fell in the nothing. Measured on EXP-01 at 59 s, two seeds:
+   the fraction of each flake's DOT — the little disc the food itself is drawn
+   as — that sits above the traced level is 0.00, 0.55, 0.00, 0.00 on one seed
+   and 0.87, 0.50, 0.98, 0.00 on the other. At BODY_LEVELS[2] the same dots
+   read 1.00 almost everywhere. The tissue was on the food the whole time; it
+   is thinner than the seventh of the body's ten bands, which is where the pad
+   was being cut. So the plate said the culture was sitting beside its meal
+   while the simulation had it covered, and the complaint that started this —
+   the puddle sits next to the crumb instead of eating it — was the renderer's
+   and not the organism's.
 
-   It is the same painter as a flake's pad, which is the point: it is the
-   same substance, and it should thin the same way. What differs is what
-   sizes it, and since the crumb that is now under it IS food, the answer is
-   the same for both: the food left. It is gone when the crumb is, which is
-   when the floor under the target goes with it — the picture and the rule
-   arrive together rather than the rule arriving unannounced.
+   Two contours, then: the mass at PUDDLE_LV as before, and under it the film
+   the mass sits in, at PUDDLE_SKIRT_LV and a fraction of the alpha. That is
+   also what removes the ring the pad used to draw — see PUDDLE_PL — because
+   the skirt is what reaches the clip and the skirt is faint there.
 
-   By AREA, not radius. The crumb is an amount of food and a drop holding
-   half of it is half the puddle, not half as wide, so the radius goes as
-   the square root. Straight radius empties the middle of the run
-   far too fast and then crawls, which reads as a drop that gave up early.
+   By win + 15 s the flakes are covered at the mass level too (dot coverage
+   0.995 +/- 0.015 over sixteen flakes, four seeds), so the skirt is what the
+   picture needs while a flake is being eaten, which is the whole middle of
+   every run. SLIME.cover(lvIdx) is the measurement; it takes the level so
+   that "no tissue" and "tissue below the line" cannot be confused again. */
+var PUDDLE_SKIRT_LV = 2;      /* index into BODY_LEVELS: trail 12, the film */
+var PUDDLE_SKIRT_A  = 0.50;   /* the skirt's share of the mass's alpha */
+/* How far a pad's paint may reach from its station, in the station's own
+   radii: the floor when there is nothing there yet, the ceiling when the
+   tissue goes further. Between them padReach measures, so a pad that has
+   spread is drawn spread and one that has not is not — which is the part
+   that stops the mass being a fixed blob around a marker.
 
-   And it does NOT ease out when the first flake lands. It used to: a grace
-   clock stopped mattering the moment you were fed, so the drop was faded
-   away over RES_FADE to say so. A crumb is food and does not stop being food
-   because something better turned up — it goes when it is eaten, and the
-   floor under the target goes with it. */
-var RES_R    = 14;            /* cells: the drop's radius at a full reserve */
-/* Its own alpha, well under a pad's, and the reason is what is already
-   underneath. A flake's pad is painted over ordinary tissue; the drop is
-   painted over the CORE, where every one of the body layer's ten contour
-   fills is stacked and the plate is already at its brightest. At a pad's
-   0.92 the same cream that reads as mass on a flake reads as a lamp at the
-   origin — measured against the same frame with the drop off, the core went
-   from tissue to a white blowout and the trunks appeared to radiate from a
-   light source. The drop is not adding light, it is saying the core is full;
-   it only has to be the difference between full and spent. */
-var RES_A    = 0.42;          /* the drop's alpha at a full reserve */
+   The floor is FEED_R itself — the fan's own radius, read off the constant
+   rather than restated as the same number, since the fan is where the
+   simulation puts pad tissue and a clip tighter than the thing it clips is
+   the one choice that can only ever be wrong. The ceiling is what keeps the
+   layer local: film is tissue too and it runs along every trunk leaving the
+   station, so a long leash follows it off the flake. Measured by eye on a
+   won EXP-01, 2.6 painted the four stations as starfish with the trunk ends
+   swallowed; 2.2 leaves the tube reading as a tube where it arrives. */
+var PUDDLE_MIN = FEED_R;
+var PUDDLE_MAX = 2.2;
+
+/* ---- the mass at the origin ----
+   A plasmodium is inoculated as a DROP. Before the first flake goes down the
+   culture is living on what it arrived with, and the plate drew none of it:
+   the origin got a root loop for the vein graph to attach to and nothing
+   else, so the densest tissue on the dish was the one mass never drawn.
+
+   It is the same painter as a flake's pad, which is the point — it is the
+   same substance. What differed was what SIZED it. It used to be the food
+   left: the drop shrank by area as the crumb was eaten and went when the
+   crumb went, so that the picture and the floor under the growth target
+   arrived together. That was wrong in the same way the pads were wrong. The
+   layer paints tissue, and the tissue at the inoculation does not leave when
+   the crumb is eaten — the trunks still converge there and the core is still
+   the thickest cytoplasm on the plate at the end of a won dish. Sized by the
+   food, the mass thinned on a schedule while what it was drawing held, and
+   at 120 s it vanished off a core that was still there.
+
+   So the mass follows the tissue, like a pad, and the FOOD is said by the
+   crumb's own dot, which still goes by area as it is eaten (see paintFood).
+   RES_R is the floor under the reach rather than the radius itself.
+
+   Measured, this is the one station the complaint was right about: at win +
+   15 s over four seeds the tissue covers 0.318 +/- 0.173 of the crumb's disc
+   at the mass level and 0.313 of the crumb's own dot, against 0.899 and 0.995
+   for the flakes. At BODY_LEVELS[2] the same crumb reads 1.00 and 0.92 at
+   59 s. The tissue is there; it is film, and the skirt is what draws it. */
+var RES_R    = 14;            /* cells: the floor under the origin's reach */
+/* It has no alpha of its own: the origin is painted with a pad's, because it
+   is a pad — the same substance, at least as thick, painted by the same
+   function from the same contour.
+
+   It used to be well under a pad's (0.42 against 0.92), and the reason was
+   what is already underneath: a flake's pad is painted over ordinary tissue,
+   while the origin is painted over the CORE, where every one of the body
+   layer's ten contour fills is stacked and the plate is already at its
+   brightest. At a pad's alpha the same cream that read as mass on a flake
+   read as a lamp at the origin — the core went from tissue to a white
+   blowout and the trunks appeared to radiate from a light source.
+
+   That measurement was taken against the SHEET, where those ten fills are
+   what is underneath. Under the line renderer the dishes actually run on,
+   BODY_FILL is off and nothing paints the core's mass at all, so the ground
+   the number was chosen against is not the ground it lands on. Rendered both
+   ways at 59 s: at the low end the mass is a soft cloud the five trunks run
+   across; at a pad's alpha it is a drop the trunks run INTO, and their ends
+   disappear in it. The second is the correct picture and the first was the
+   artifact — a tube does not cross the drop it grew out of, it merges with
+   it, and a mass thin enough to show the ends is a mass that is being drawn
+   as a haze over the network rather than as part of it. Swallowing them is
+   the point. */
 
 var tx = new Float32Array(TREE_MAX), ty = new Float32Array(TREE_MAX);
 var tpar = new Int32Array(TREE_MAX);
@@ -7960,15 +8025,24 @@ function originFrac(e) {
    paints a dark annulus tracking inward as the crumb is eaten: the inverted
    halo PUDDLE_EDGE exists to prevent, made by PUDDLE_EDGE. Over bright ground
    the honest rim is no rim. */
-function puddleAt(c, path, x, y, r, a, edge) {
+function puddleAt(c, path, x, y, r, a, edge, band) {
   if (!(r > 0) || !(a > 0)) return;
-  var cell = (y | 0) * GW + (x | 0);
-  /* the tissue's own width here, in cells, through the LIVE renderer's ramp —
-     see puddleBand. Outside the mask bodyD is 0, which is not a thin tube but
-     no tube: the clip paints nothing there, so the widest reading is right for
-     whatever pixels do land. */
-  var half = bodyD[cell] || 0;
-  var band = puddleBand(half > 0 ? half * 2 : TUBE_W_HI);
+  /* The tone is the band's, and WHICH band is the caller's business, because
+     the two contours of a pad are two different thicknesses of the same
+     substance. The mass reads it from the tissue at the station (below); the
+     skirt is film by definition and is handed the film's own band, since
+     painting film in the core's tone is what made the origin come out as a
+     pale grey slab — a lamp-mixed cream at part alpha over a dark plate is
+     grey, and at the core the width sampled is the widest there is. */
+  if (!band) {
+    var cell = (y | 0) * GW + (x | 0);
+    /* the tissue's own width here, in cells, through the LIVE renderer's ramp —
+       see puddleBand. Outside the mask bodyD is 0, which is not a thin tube but
+       no tube: the clip paints nothing there, so the widest reading is right for
+       whatever pixels do land. */
+    var half = bodyD[cell] || 0;
+    band = puddleBand(half > 0 ? half * 2 : TUBE_W_HI);
+  }
   var m = mixLamp(TINT, band.hot);
   var col = [Math.round(m[0] * band.dim), Math.round(m[1] * band.dim), Math.round(m[2] * band.dim)];
   var g = c.createRadialGradient(x, y, 0, x, y, r);
@@ -7982,29 +8056,121 @@ function puddleAt(c, path, x, y, r, a, edge) {
   c.restore();
 }
 
-/* the puddles: the pads on the flakes, and the drop at the origin that the
-   culture is living on until the first of those lands */
-function paintPuddles(c) {
-  var e = S.exp, path = null, i;
-  for (i = 0; i < e.nodes.length; i++) {
-    if (!S.nodeDone[i] && !(S.nodeProg[i] > 0.01)) continue;
-    if (!path) { path = traceIso(bodyV, BODY_LEVELS[PUDDLE_LV], false, null); if (!path) return; }
-    var nd = e.nodes[i];
-    /* Flat alpha, and resisting the obvious tempting thing. A pad DOES recede
-       as the flake goes, but the simulation is already doing that — FEED_FILL
-       sizes the pad by the food left, so the tissue thins and the contour this
-       traces thins with it. Fading the paint by foodLeft as well counts the
-       same recession twice, and measurably: at PUDDLE_A x SPENT_FOOD an eaten
-       flake came out at alpha 0.28 of a lamp-mixed cream, which over the dish
-       is not thin cytoplasm but grey haze. Let the mass say how much mass
-       there is. */
-    puddleAt(c, path, nd.x, nd.y, nd.r * PUDDLE_R, PUDDLE_A, PUDDLE_EDGE);
+/* How far the mass reaches from a station, in cells: the furthest cell at or
+   above `lv` within the cap, plus a margin so that the clip lands outside the
+   contour instead of on it, bounded by PUDDLE_MIN and PUDDLE_MAX.
+
+   A scan rather than a field: the alternative is another accumulator updated
+   every step for a number read once a repaint. The box is the cap's, about
+   4,600 cells for one of EXP-01's flakes, and the `d2 <= best` test means
+   most of them are one compare. */
+function padReach(cx, cy, r0, lv) {
+  var lo = r0 * PUDDLE_MIN, cap = r0 * PUDDLE_MAX, cap2 = cap * cap, best = 0;
+  var x0 = Math.max(0, Math.floor(cx - cap)), x1 = Math.min(GW - 1, Math.ceil(cx + cap));
+  var y0 = Math.max(0, Math.floor(cy - cap)), y1 = Math.min(GH - 1, Math.ceil(cy + cap));
+  for (var y = y0; y <= y1; y++) {
+    var row = y * GW, dy = y + 0.5 - cy;
+    for (var x = x0; x <= x1; x++) {
+      var dx = x + 0.5 - cx, d2 = dx * dx + dy * dy;
+      if (d2 > cap2 || d2 <= best) continue;
+      if (bodyV[row + x] >= lv) best = d2;
+    }
   }
-  var rf = originFrac(e);   /* the tissue on the crumb goes as the crumb does */
-  if (rf > 0) {
-    if (!path) { path = traceIso(bodyV, BODY_LEVELS[PUDDLE_LV], false, null); if (!path) return; }
-    /* by area: half a reserve is half a puddle, not half a width */
-    puddleAt(c, path, e.inoc.x, e.inoc.y, RES_R * Math.sqrt(rf), RES_A, null);
+  var d = Math.sqrt(best) + 1.5;
+  return d < lo ? lo : (d > cap ? cap : d);
+}
+
+/* the puddles: the pads on the flakes, and the mass at the origin the culture
+   wakes in. Two contours each, skirt under mass — see PUDDLE_SKIRT_LV for what
+   one contour left out, which was the food.
+
+   The origin is painted whether or not there is any crumb left, and that is
+   the change from sizing it by the food: what the layer draws is the TISSUE,
+   and the tissue at the inoculation is the densest on the dish from the first
+   step to the last. The crumb going is said by the crumb's own dot going (see
+   paintFood), which is the mark that means food; a mass that vanished at 120 s
+   while the cytoplasm that made it stayed put was the picture disagreeing with
+   the plate. */
+function paintPuddles(c) {
+  var e = S.exp, i, pass, lv, al, path, nd;
+  var passes = [[PUDDLE_SKIRT_LV, PUDDLE_A * PUDDLE_SKIRT_A, VEIN_BANDS[0]],
+                [PUDDLE_LV, PUDDLE_A, null]];
+  for (pass = 0; pass < passes.length; pass++) {
+    lv = BODY_LEVELS[passes[pass][0]];
+    al = passes[pass][1];
+    var bd = passes[pass][2];
+    path = traceIso(bodyV, lv, false, null);
+    if (!path) continue;
+    for (i = 0; i < e.nodes.length; i++) {
+      if (!S.nodeDone[i] && !(S.nodeProg[i] > 0.01)) continue;
+      nd = e.nodes[i];
+      puddleAt(c, path, nd.x, nd.y, padReach(nd.x, nd.y, nd.r, lv), al, PUDDLE_EDGE, bd);
+    }
+    /* The origin as a station. RES_R is the reach it had when the clip was
+       fixed, so dividing it by PUDDLE_R — the multiple that clip was — turns
+       it into the station radius padReach takes, which is the same conversion
+       the crumb's own dot makes (see paintFood). That lands the origin's
+       floor at 11 cells and its ceiling at 18, against 18 and 29 for one of
+       EXP-01's flakes: the drop is a smaller station than an oat flake, which
+       is what it is. */
+    puddleAt(c, path, e.inoc.x, e.inoc.y,
+             padReach(e.inoc.x, e.inoc.y, RES_R / PUDDLE_R, lv), al, null, bd);
+  }
+}
+
+/* The food itself, drawn UNDER the tissue rather than over it.
+   ------------------------------------------------------------
+   It used to go on with the marks, after every tissue layer, and that one
+   ordering was most of the complaint this pass came from: the culture had its
+   meal covered and the plate drew the meal on top of the cover, so a pad read
+   as cytoplasm sitting beside a flake it was in fact standing on. Measured at
+   win + 15 s over sixteen flakes on four seeds, tissue covers 0.995 +/- 0.015
+   of each food dot's own disc. Nothing was missing from the simulation; the
+   dot was simply the last thing painted.
+
+   Under the tissue, a covered dot is covered — PUDDLE_A is 0.92, so what is
+   left of it is a stain rather than a disc, which is what being eaten looks
+   like — and an uncovered one still sits on bare agar with its casing, where
+   it has to be found. The ring and the dial stay over everything: those are
+   instruments, and an instrument the organism can paint over is not one.
+
+   The flake's dot goes as it is eaten, and it GOES rather than fading: the dot
+   is the food, and food that is half eaten is half as much food, not the same
+   food half transparent. Fading said the wrong thing twice — a translucent dot
+   over a bright pad read as a dot BEHIND the tissue rather than one being
+   consumed by it, and at three-quarters gone it was a full-sized smudge on a
+   plate whose every other mark is solid. (Under the tissue, "behind" is now
+   simply true, which is the one reading that was never wrong.)
+
+   By AREA, like the crumb at the origin: half the food left is half the disc,
+   not half the radius. Dropped below the width its own casing would swallow —
+   a disc thinner than the dark edge drawn around it is a ring, not a crumb —
+   which is also what clears the plate at done. That edge is markCase/2 thick
+   (see casedDisc) and the test is against exactly that: at markCase it was
+   twice as strict as the sentence above, and on the smallest canvas the dot
+   left the plate at 78% eaten while the dial beside it still read 78. */
+function paintFood(c) {
+  var e = S.exp, i;
+  for (i = 0; i < e.nodes.length; i++) {
+    var nd = e.nodes[i];
+    var prog = S.nodeDone[i] ? 1 : S.nodeProg[i];
+    var fr = nd.r * FOOD_DOT_R * Math.sqrt(1 - prog);
+    if (fr > markCase * 0.5) casedDisc(c, nd.x, nd.y, fr, MARK_OBJ);
+  }
+  /* The crumb the culture woke on, drawn as what it is: food, going by area as
+     it is eaten, in the same ink a flake's dot uses. No ring and no dial around
+     it — those say "this is an objective", and this one is not. */
+  var of = originFrac(e);
+  if (of > 0) {
+    /* RES_R is the origin's PUDDLE radius, which is the crumb's answer to
+       nd.r * PUDDLE_R rather than to nd.r — so the flake's own FOOD_DOT_R has
+       to be taken against RES_R / PUDDLE_R, not against RES_R. Against RES_R
+       the crumb drew at 4.76 cells to a flake's 3.4, nearly twice a whole
+       flake by area, while the puddle under it was smaller than a flake's
+       pad: the one mark on the plate that is not an objective, drawn as the
+       biggest thing on it. */
+    var orad = (RES_R / PUDDLE_R) * FOOD_DOT_R * Math.sqrt(of);
+    if (orad > markCase * 0.5) casedDisc(c, e.inoc.x, e.inoc.y, orad, MARK_OBJ);
   }
 }
 
@@ -10425,13 +10591,20 @@ var MARK_CYTO = '#7fd1b9';
    does too.
 
    0.66 sits the dial clear of both its neighbours — the core disc plus casing
-   ends at 0.34r + markCase/2 and the ring's casing starts at
+   ends at FOOD_DOT_R * r + markCase/2 and the ring's casing starts at
    r - (1.2 + markCase)/2. The gaps are narrowest where the casing is widest
    relative to the objective, which is the smallest plate: about a pixel each
    there, opening to nine and thirteen on a laptop's. The three bands read as
    three at every size the canvas will take, which is what MARK_CASE_MAX is
    for. */
 var MARK_DIAL_R = 0.66;
+/* The food's own disc, as a share of a station's radius: what a full flake's
+   dot is drawn at, and the footprint the mass layer has to cover for the food
+   to read as engulfed rather than as something the tissue is sitting beside
+   (see paintFood and SLIME.cover). It was three separate 0.34s — the dot, the
+   crumb's dot, and the clearance arithmetic above — which is two too many for
+   a number that three things have to agree on. */
+var FOOD_DOT_R = 0.34;
 
 function casedArc(c, x, y, r, a0, a1, w, style) {
   c.beginPath();
@@ -10582,6 +10755,12 @@ function render() {
     vactx.drawImage(veil, 0, 0);
     veinFresh = false;
   }
+  /* the food, under every layer that could be covering it — see paintFood */
+  ctx.save();
+  ctx.setTransform(sx, 0, 0, sy, 0, 0);
+  paintFood(ctx);
+  ctx.restore();
+
   ctx.globalAlpha = BODY && VEIN_GRAPH ? REC_A : INK_A;
   ctx.drawImage(ink, 0, 0);
   ctx.globalAlpha = 1;
@@ -10651,39 +10830,9 @@ function render() {
                -Math.PI / 2 + Math.PI * 2 * prog, 2.2, MARK_DIAL);
     }
 
-    /* The flake itself goes as it is eaten, and it GOES rather than fading:
-       the dot is the food, and food that is half eaten is half as much food,
-       not the same food half transparent. Fading said the wrong thing twice —
-       a translucent dot over a bright pad read as a dot behind the tissue
-       rather than a dot being consumed by it, and at three-quarters gone it
-       was a full-sized smudge on a plate whose every other mark is solid.
-
-       By AREA, like the crumb at the origin: half the food left is half the
-       disc, not half the radius. Dropped below the width its own casing
-       would swallow — a disc thinner than the dark edge drawn around it is
-       a ring, not a crumb — which is also what clears the plate at done.
-       That edge is markCase/2 thick (see casedDisc) and the test is against
-       exactly that: at markCase it was twice as strict as the sentence above,
-       and on the smallest canvas the dot left the plate at 78% eaten while
-       the dial beside it still read 78. */
-    var fr = nd.r * 0.34 * Math.sqrt(1 - prog);
-    if (fr > markCase * 0.5) casedDisc(ctx, nd.x, nd.y, fr, MARK_OBJ);
-  }
-
-  /* The crumb the culture woke on, drawn as what it is: food, going by area
-     as it is eaten, in the same ink a flake's dot uses. No ring and no dial
-     around it — those say "this is an objective", and this one is not. */
-  var of = originFrac(e);
-  if (of > 0) {
-    /* RES_R is the drop's PUDDLE radius, which is the crumb's answer to
-       nd.r * PUDDLE_R rather than to nd.r — so the flake's own 0.34 has to be
-       taken against RES_R / PUDDLE_R, not against RES_R. Against RES_R the
-       crumb drew at 4.76 cells to a flake's 3.4, nearly twice a whole flake
-       by area, while the puddle under it is smaller than a flake's pad: the
-       one mark on the plate that is not an objective, drawn as the biggest
-       thing on it. */
-    var orad = (RES_R / PUDDLE_R) * 0.34 * Math.sqrt(of);
-    if (orad > markCase * 0.5) casedDisc(ctx, e.inoc.x, e.inoc.y, orad, MARK_OBJ);
+    /* The food itself is not drawn here: it goes on under the tissue, before
+       any of it — see paintFood. What stays over the plate is the ring and
+       the dial, which are instruments. */
   }
 
   if (ptr.down) {
@@ -13638,6 +13787,47 @@ function init() {
       for (var key in cnt) if (cnt[key] >= 5) n++;
       var st = 0; for (i = 0; i < nAgents; i++) if (agoal[i]) st++;
       return { ok: mainOK, off: off, islands: n, streaming: st };
+    },
+    /* What the mass layer has to work with: how much of each station's food
+       the tissue is actually standing on. `disc` is the fraction of a flake's
+       own disc at or above the level the pads are traced at — the figure the
+       coverage claims are made against, and the one 67e4a7a got wrong by
+       comparing a band-weighted instant against a whole-disc fraction. `dot`
+       is the same fraction over the little disc the food ITSELF is drawn as,
+       at its full size rather than its eaten one, which is the figure that
+       says whether the crumb is engulfed or merely beside tissue. The origin
+       crumb is measured the same way and reported last, under `crumb`.
+
+       `lvIdx` indexes BODY_LEVELS, and defaults to the level the pads are
+       actually traced at. Sweeping it answers the question a single figure
+       cannot: whether an uncovered dot has no tissue on it or tissue that is
+       merely thinner than the level the mass layer draws. */
+    cover: function (lvIdx) {
+      var e = S.exp, lv = BODY_LEVELS[lvIdx == null ? PUDDLE_LV : lvIdx], out = [], i;
+      function frac(cx, cy, r) {
+        if (!(r > 0)) return 0;
+        var n = 0, hit = 0;
+        var x0 = Math.max(0, Math.floor(cx - r)), x1 = Math.min(GW - 1, Math.ceil(cx + r));
+        var y0 = Math.max(0, Math.floor(cy - r)), y1 = Math.min(GH - 1, Math.ceil(cy + r));
+        for (var y = y0; y <= y1; y++) {
+          for (var x = x0; x <= x1; x++) {
+            var dx = x + 0.5 - cx, dy = y + 0.5 - cy;
+            if (dx * dx + dy * dy > r * r) continue;
+            n++;
+            if (bodyV[y * GW + x] >= lv) hit++;
+          }
+        }
+        return n ? hit / n : 0;
+      }
+      for (i = 0; i < e.nodes.length; i++) {
+        var nd = e.nodes[i];
+        out.push({ label: nd.label, prog: S.nodeDone[i] ? 1 : S.nodeProg[i],
+                   disc: frac(nd.x, nd.y, nd.r), dot: frac(nd.x, nd.y, nd.r * FOOD_DOT_R) });
+      }
+      out.push({ label: 'crumb', prog: 1 - originFrac(e),
+                 disc: frac(e.inoc.x, e.inoc.y, RES_R),
+                 dot: frac(e.inoc.x, e.inoc.y, (RES_R / PUDDLE_R) * FOOD_DOT_R) });
+      return out;
     },
     /* a copy of the trail field, for measuring the network from outside */
     trail: function () { return Float32Array.prototype.slice.call(trail); },
