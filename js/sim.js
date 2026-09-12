@@ -981,6 +981,53 @@ var ENGULF_SOFT = 0.077;
 var HOLD_FILL = 0.012;  // share of a flake's area, in agents, that counts as held
 var HOLD_DROP = 1.5;    // seconds under that before the station is let go
 
+/* The crumb the culture wakes on, as a multiple of the size it wakes at.
+   A dish used to open on a "reserve": a clock, e.grace, during which
+   starvation was simply switched off, and a nebulous halo drawn at the
+   inoculation to say so. Nothing was being eaten, and the culture could not
+   grow either, because the growth target is min(engulfed * sustain, cap) and
+   engulfed is zero until the first flake is finished. That zero is the root
+   of three separate complaints: a flake reads thin for its whole meal, a
+   runner that reaches a second flake cannot be supplied behind it, and the
+   trunks into EXP-03's nine depots end bluntly a few cells short. Measured
+   on EXP-02, the culture sits at exactly 5000 from t=0 to t=160 and the
+   route to the second block thickens in the same sample that the first one
+   finishes. The organism was not failing to commit; it had nothing to commit.
+
+   So the origin is food, and the floor under the target is what that food
+   supports, coming down as it is eaten. It is NOT an objective: it is not in
+   e.nodes, it does not count toward a win, and no dish's count changes.
+
+   Expressed against e.start rather than in sustain units, which is the trap.
+   Sixteen of the twenty dishes have start ABOVE sustain — EXP-01 4500 to
+   3200, EXP-03 4200 to 1500 — so a crumb worth "one engulfed node" would set
+   the target below the size the culture opens at and shrink it from the
+   first step, which is the opposite of the point.
+
+   At 1.0 the crumb holds the culture at its opening size for as long as the
+   old grace gate did and lets go when the food is gone. That is NOT the same
+   dish, and the difference is the point. The old gate only suppressed
+   culling; it never permitted growth, because the target it was suppressing
+   against is engulfed * sustain and engulfed is zero. So the opening was a
+   one-way ratchet: every agent lost before the first flake — to damage, to
+   reabsorption, to anything — was lost for good. Measured against main on
+   seed 1, EXP-19 falls to 982 of its 4300 and sits there until food lands,
+   EXP-13 to 2418, EXP-04 bleeds 311 and never recovers one of them. With a
+   floor those are recoverable and all three hold flat. Nine of the twenty
+   dishes are bit-identical, being the ones that take no early damage.
+
+   Above 1.0 would hand the culture biomass it never had, which is the lever
+   that would let it supply a SECOND front — the runner that reaches a far
+   flake with nothing behind it. That was measured and deliberately not taken.
+   On EXP-02 over six seeds, the lag from touching the last flake to having a
+   tube on it runs 22.3s +/- 8.4 on main and on this; 17.7 +/- 5.7 at 1.3;
+   14.8 +/- 5.2 at 1.5. The direction is consistent and the response is
+   monotone, and the spread tightens as much as the mean falls — but at six
+   seeds nothing clears two sigma, and a difficulty change for all twenty
+   dishes is not something to ship on 1.9. The lever is real; the number is
+   not established. It wants its own seeds and its own verdict sweep. */
+var ORIGIN_HOLD = 1.0;
+
 /* ---- the fan on a flake ----
    A plasmodium that reaches food does not file past it. It stops advancing
    there and spreads over the flake as a sheet: a fan, then a pad of cytoplasm
@@ -2668,8 +2715,10 @@ var S = {
      the ones deliberately not logged */
   logged: false,
   nodeProg: null, nodeDone: null, nodeIdle: null, nodeHeld: null, engulfed: 0,
-  /* sim time the first flake landed, or -1 — the reserve drop at the origin
-     eases out from here; see reserveFrac */
+  /* sim time the first flake landed, or -1. It used to ease the reserve drop
+     out from here; the crumb that replaced it is food and runs down on its
+     own, so nothing reads this now — kept because FINAL_STATE carries it and
+     a stored verdict should not change shape for a field going quiet. */
   resFedT: -1,
   hab: 0, habPeak: 0, habBuilt: -1, fused: false,
   dietP: 0, dietC: 0, dietDoomedT: 0,
@@ -4747,10 +4796,30 @@ function step() {
       if (S.streamAcc > 4) S.streamAcc = 4;
     }
   }
+  /* The crumb the culture woke on, while there is any of it left — see
+     ORIGIN_HOLD. It is a floor under the target rather than a term in it:
+     whichever of the two feeds the organism better is what it lives on, so
+     the crumb carries the opening and the flakes take over the moment they
+     are worth more than it.
+
+     FLAT while the food lasts, and gone when it is gone. Scaling the floor by
+     the food left is the obvious thing and it is wrong: what a flake supports
+     while you eat it is set by the rate you can take it at, not by how much
+     of it remains — a flake three-quarters eaten still feeds a pad at full
+     rate until the last of it goes. Scaled, the floor drops below the opening
+     population on the first step and the culture starves from t=0 on every
+     dish, which is a net LOSS of early biomass and the exact opposite of what
+     this is for. That is not hypothetical: it is what the first version of
+     this commit did, while its comment claimed the floor held the culture at
+     its opening size. Flat, nothing is culled until the crumb is gone, which
+     is the half of the old gate this keeps — see ORIGIN_HOLD for the half it
+     does not, and do not write "the same as the grace gate" here again. */
+  var crumb = originFrac(e) > 0 ? e.start * ORIGIN_HOLD : 0;
+  if (crumb > target) target = crumb;
   if (nAgents < target) {
     S.growAcc += (e.grow * DT);
     while (S.growAcc >= 1 && nAgents < target && nAgents < MAXA) { spawnAgent(); S.growAcc -= 1; }
-  } else if ((S.simT > e.grace || S.refineT0 >= 0) && nAgents > target) {
+  } else if (nAgents > target) {
     S.starveAcc += (starveRate * DT);
     while (S.starveAcc >= 1 && nAgents > 0) {
       killWeakest();
@@ -7267,22 +7336,22 @@ var PUDDLE_PL = 0.25;         /* share of the disc the alpha holds flat before f
 
    It is the same painter as a flake's pad, which is the point: it is the
    same substance, and it should thin the same way. What differs is what
-   sizes it. A pad is sized by the food under it; the drop is sized by the
-   reserve, so it runs down on the grace clock and is gone when the clock
-   is, which is exactly when starvation starts — the picture and the rule
+   sizes it, and since the crumb that is now under it IS food, the answer is
+   the same for both: the food left. It is gone when the crumb is, which is
+   when the floor under the target goes with it — the picture and the rule
    arrive together rather than the rule arriving unannounced.
 
-   By AREA, not radius. The reserve is an amount of cytoplasm and a drop
-   holding half of it is half the puddle, not half as wide, so the radius
-   goes as the square root. Straight radius empties the middle of the run
+   By AREA, not radius. The crumb is an amount of food and a drop holding
+   half of it is half the puddle, not half as wide, so the radius goes as
+   the square root. Straight radius empties the middle of the run
    far too fast and then crawls, which reads as a drop that gave up early.
 
-   And it eases out rather than vanishing when the first flake lands. The
-   reserve is not spent at that moment — it stops being what the culture
-   is living on, which is a different thing and takes a moment to look
-   like one. */
+   And it does NOT ease out when the first flake lands. It used to: a grace
+   clock stopped mattering the moment you were fed, so the drop was faded
+   away over RES_FADE to say so. A crumb is food and does not stop being food
+   because something better turned up — it goes when it is eaten, and the
+   floor under the target goes with it. */
 var RES_R    = 14;            /* cells: the drop's radius at a full reserve */
-var RES_FADE = 3.0;           /* seconds to ease the drop out once fed */
 /* Its own alpha, well under a pad's, and the reason is what is already
    underneath. A flake's pad is painted over ordinary tissue; the drop is
    painted over the CORE, where every one of the body layer's ten contour
@@ -7645,23 +7714,20 @@ function treeFlow() {
   }
 }
 
-/* How much of the drop the culture arrived with is still under it: 1 at
-   inoculation, 0 when the grace clock runs out, which is the moment
-   starvation starts. Once a flake is down the reserve stops being what the
-   culture lives on, so it eases away over RES_FADE rather than vanishing on
-   the frame the dial closed. */
-function reserveFrac(e) {
+/* Replaced reserveFrac, which faded the drop out on the first flake because
+   a grace clock stopped mattering once you were fed. A crumb does not stop
+   mattering when you find something else: it is food, and it is there until
+   it is eaten. So the drop follows the crumb and nothing eases it away. */
+/* What is left of the crumb: 1 at the inoculation, 0 when it is eaten. The
+   clock is e.grace, which is what that number already measured — the time
+   the culture could live without finding anything. It is food now rather
+   than a grace, so nothing switches off at the end of it; the floor it puts
+   under the target simply reaches zero. */
+function originFrac(e) {
   var g = e.grace || 0;
   if (g <= 0) return 0;
   var f = 1 - S.simT / g;
-  if (f <= 0) return 0;
-  if (f > 1) f = 1;
-  if (S.resFedT >= 0) {
-    var k = 1 - (S.simT - S.resFedT) / RES_FADE;
-    if (k <= 0) return 0;
-    f *= k;
-  }
-  return f;
+  return f <= 0 ? 0 : (f > 1 ? 1 : f);
 }
 
 /* One puddle: the body's contour, clipped to a fading disc and filled in the
@@ -7671,7 +7737,16 @@ function reserveFrac(e) {
    as one piece of cytoplasm. Outside the mask bodyD is 0, which is not a thin
    tube but no tube; the clip draws nothing there anyway, so the widest band
    is the right answer for the pixels that do get painted. */
-function puddleAt(c, path, x, y, r, a) {
+/* `edge` is the tone the rim lands on, or null to fade out. It is a caller's
+   choice because the right answer is whatever is UNDER the puddle. A pad sits
+   on bare plate — BODY_FILL is off, nothing paints the body's mass — so it
+   ends on the faintest tissue tone, which is the whole point of PUDDLE_EDGE.
+   The crumb's drop sits on the inoculation, the densest tissue on the dish
+   and the brightest thing the line layer draws, so the same dim rim there
+   paints a dark annulus tracking inward as the crumb is eaten: the inverted
+   halo PUDDLE_EDGE exists to prevent, made by PUDDLE_EDGE. Over bright ground
+   the honest rim is no rim. */
+function puddleAt(c, path, x, y, r, a, edge) {
   if (!(r > 0) || !(a > 0)) return;
   var cell = (y | 0) * GW + (x | 0);
   /* the tissue's own width here, in cells, through the LIVE renderer's ramp —
@@ -7685,7 +7760,7 @@ function puddleAt(c, path, x, y, r, a) {
   var g = c.createRadialGradient(x, y, 0, x, y, r);
   g.addColorStop(0, rgba(col, a));
   g.addColorStop(PUDDLE_PL, rgba(col, a));
-  g.addColorStop(1, rgba(PUDDLE_EDGE, a));   /* the body's tone, not nothing — see PUDDLE_EDGE */
+  g.addColorStop(1, edge ? rgba(edge, a) : rgba(col, 0));
   c.save();
   c.beginPath(); c.arc(x, y, r, 0, Math.PI * 2); c.clip();
   c.fillStyle = g;
@@ -7709,13 +7784,13 @@ function paintPuddles(c) {
        flake came out at alpha 0.28 of a lamp-mixed cream, which over the dish
        is not thin cytoplasm but grey haze. Let the mass say how much mass
        there is. */
-    puddleAt(c, path, nd.x, nd.y, nd.r * PUDDLE_R, PUDDLE_A);
+    puddleAt(c, path, nd.x, nd.y, nd.r * PUDDLE_R, PUDDLE_A, PUDDLE_EDGE);
   }
-  var rf = reserveFrac(e);
+  var rf = originFrac(e);   /* the tissue on the crumb goes as the crumb does */
   if (rf > 0) {
     if (!path) { path = traceIso(bodyV, BODY_LEVELS[PUDDLE_LV], false, null); if (!path) return; }
     /* by area: half a reserve is half a puddle, not half a width */
-    puddleAt(c, path, e.inoc.x, e.inoc.y, RES_R * Math.sqrt(rf), RES_A);
+    puddleAt(c, path, e.inoc.x, e.inoc.y, RES_R * Math.sqrt(rf), RES_A, null);
   }
 }
 
@@ -10408,8 +10483,8 @@ function render() {
        rather than a dot being consumed by it, and at three-quarters gone it
        was a full-sized smudge on a plate whose every other mark is solid.
 
-       By AREA, like the reserve drop: half the food left is half the disc,
-       not half the radius. Dropped entirely below the width its own casing
+       By AREA, like the crumb at the origin: half the food left is half the
+       disc, not half the radius. Dropped below the width its own casing
        would swallow — a disc thinner than the dark edge drawn around it is
        a ring, not a crumb — which is also what clears the plate at done.
        That edge is markCase/2 thick (see casedDisc) and the test is against
@@ -10418,6 +10493,22 @@ function render() {
        the dial beside it still read 78. */
     var fr = nd.r * 0.34 * Math.sqrt(1 - prog);
     if (fr > markCase * 0.5) casedDisc(ctx, nd.x, nd.y, fr, MARK_OBJ);
+  }
+
+  /* The crumb the culture woke on, drawn as what it is: food, going by area
+     as it is eaten, in the same ink a flake's dot uses. No ring and no dial
+     around it — those say "this is an objective", and this one is not. */
+  var of = originFrac(e);
+  if (of > 0) {
+    /* RES_R is the drop's PUDDLE radius, which is the crumb's answer to
+       nd.r * PUDDLE_R rather than to nd.r — so the flake's own 0.34 has to be
+       taken against RES_R / PUDDLE_R, not against RES_R. Against RES_R the
+       crumb drew at 4.76 cells to a flake's 3.4, nearly twice a whole flake
+       by area, while the puddle under it is smaller than a flake's pad: the
+       one mark on the plate that is not an objective, drawn as the biggest
+       thing on it. */
+    var orad = (RES_R / PUDDLE_R) * 0.34 * Math.sqrt(of);
+    if (orad > markCase * 0.5) casedDisc(ctx, e.inoc.x, e.inoc.y, orad, MARK_OBJ);
   }
 
   if (ptr.down) {
@@ -10539,7 +10630,7 @@ function onEngulf(i) {
   var e = S.exp, nd = e.nodes[i];
   var dir = dirWord(e.inoc.x, e.inoc.y, nd.x, nd.y);
   var left = e.nodes.length - S.engulfed;
-  /* the first flake is what the reserve stops mattering at — see reserveFrac */
+  /* stamped for the record; nothing reads it since the crumb — see ORIGIN_HOLD */
   if (S.resFedT < 0) S.resFedT = S.simT;
   /* What the flake actually was, in the two numbers the organism balances */
   if (nd.nut) { S.dietP += nd.nut[0]; S.dietC += nd.nut[1]; }
@@ -10793,8 +10884,8 @@ function noteText(e) {
   }
   if (e.hab && S.hab > 0.02 && S.hab < 0.99) return 'the bitterness is mattering less';
   if (e.hab && S.hab >= 0.99) return 'quinine: noted, ignored';
-  if (S.engulfed === 0 && S.simT > e.grace) return 'starving — nothing engulfed';
-  if (S.engulfed === 0) return 'grace period — ' + Math.max(0, Math.ceil(e.grace - S.simT)) + 's of reserves';
+  if (S.engulfed === 0 && originFrac(e) <= 0) return 'starving — nothing engulfed';
+  if (S.engulfed === 0) return 'the crumb you woke on — ' + Math.ceil(originFrac(e) * 100) + '% left';
   if (nAgents < e.cap * 0.12) return 'cytoplasm critically low';
   return S.engulfed + ' of ' + e.nodes.length + ' engulfed · biomass holding';
 }
@@ -11511,11 +11602,16 @@ var GHOST_ENT = 9;
    11: the drop is a disc, not a diamond: every run starts differently.
    12: the feeding rate is calibrated and PACE is 3.
    13: every dish runs on past its last node, not only one with `refine`
-       — see WIN_HOLD. Entry 6 is the same change for EXP-03 alone. */
-var SIM_V = 13;   /* Best times are unaffected by the hold — runClock stops at
-                     the win, measured identical to a tenth of a second across
-                     all twenty dishes — but the plate a seed and tape produce
-                     is different, which is what this byte is the contract for. */
+       — see WIN_HOLD. Entry 6 is the same change for EXP-03 alone.
+   14: the culture wakes on food — see ORIGIN_HOLD. The floor under the
+       target lets the opening regrow what it loses, so spawnAgent runs
+       where it never did; it draws from the generator, and every draw
+       after it lands somewhere else. */
+var SIM_V = 14;   /* The plate a seed and tape produce is different, which is
+                     what this byte is the contract for. Best times ARE
+                     affected this time, unlike at 13: eight dishes finish
+                     sooner, because a culture that can regrow its early
+                     losses reaches the food with more of itself. */
 
 function ghostSig() {
   var h = mix32(SIM_V, Math.round(CUE_CAP * 1000), Math.round(CUE_REGEN * 1000));
