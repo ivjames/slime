@@ -73,6 +73,54 @@ license it.
 A green comparison also says nothing about *speed*. It is the correctness half
 of a performance change; the other half is a measurement.
 
+### Why the scalars are enumerated rather than listed
+
+The scalar digest walks `S` and hashes everything it holds except `exp` (the
+shared dish definition, never written by a step). It is not a list of the fields
+that matter, because that list was wrong twice — first missing `holdT0`, the one
+field the win step writes, then missing `growAcc`/`starveAcc`/`nodeIdle`/
+`nodeHeld`, accumulators that carry a difference for several steps before it
+crosses a threshold and shows up anywhere else.
+
+Both misses have the same shape and it is the worst one available here: every
+digest matches, `--compare` says identical, and two genuinely different dishes
+have been certified as one. A denylist fails safe (a new field is hashed until
+someone excludes it); an allowlist fails silent. Keys are sorted, so the digest
+depends on what `S` holds rather than on the order the literal declares it in.
+
+`treePassN` is hashed alongside — `treeGrow` reads it, so two runs that differ
+in it differ in what the next growth pass does.
+
+### The module-scope list, and why that one stays a list
+
+`S` is enumerated. The module-scope state beside it is not, and cannot be: a
+script's top level holds some two hundred arrays, most of them the renderer's,
+whose contents legitimately differ between two runs holding the same dish
+because they depend on how many frames were drawn. Hashing those would report
+divergences no dish can see, which is worse than missing one.
+
+So that part needs judgement, and the rule it is built from is recorded next to
+it in `sim.js`:
+
+> hash every module-scope value that `step()` or its callees **write** and a
+> **later step reads**.
+
+Excluded with a reason each: `recN` (reset to -1 every step before use),
+`scarW` (per-agent, for the three `sense()` calls), `attempts` (picks the seed,
+not what a step does), the profiling counters, and everything the renderer owns.
+
+To re-audit, list the module-scope declarations and ask that question of each.
+Two passes have been run. The first added `nodeHits`, `nodeLoad`, `reabCursor`
+and `idleCursor`; the second added `tubeDist`, which is rebuilt every
+`TUBE_EVERY` steps and read inside the agent loop by a streaming agent walking
+its goal's geodesic.
+
+**This coverage is verified, not assumed.** Starting `reabCursor` at 1 instead of
+0 diverges at 600 steps with *only* the `scalars` digest moving and all
+forty-six array digests held — that is, the cursor had not yet changed a single
+field, so the previous hash would have called the two builds identical. That is
+the whole failure mode, reproduced.
+
 ### One caveat about the double-buffered fields
 
 `fedRelax` ends by swapping which array object each of `fedF`/`fedB`,

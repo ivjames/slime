@@ -786,7 +786,36 @@ var COND_LEVEL = 34.0;     // the tube a fully conductive cell maintains
    the shortest path and the trunk's corridor keeps well over FED_LOW, so
    the thing shaded is only ever what is beside it. The winner-take-all is
    the same one Tero's model has; this only points it at the fed route. */
-var FED_BODY     = 3.0;   // trail at which a cell is cytoplasm a signal can ride
+/* The bar for "cytoplasm a signal can ride", and it was the most expensive
+   constant in the file for a reason that is not visible from here.
+
+   fedRelax is a nine-cell stencil over every cell that clears this bar, run
+   FED_PASSES times per slow sweep. At 3.0 the bar cleared about three quarters
+   of the plate by the time EXP-01 was won, and the pass cost 8.0 ms of the 9.4
+   the whole slow sweep took — 86% of it, and the only part of the sweep that
+   GREW over a run: the loop above it is flat at 1.3 ms from the first second to
+   the last. Nothing cheaper was available. The signal's bounding box is the
+   whole plate by ninety seconds, so there is no region to skip and no tile to
+   cull; the array traffic is a flat 2.2 ms of the 10, so there is no layout to
+   fix. It is per-cell work on three quarters of the dish, every sweep.
+
+   3.0 was also below what a single wandering agent MANUFACTURES. A lone scrap
+   on bare agar settles at a trail of about eight — DEPOSIT x VOID_SPEED over
+   one minus DECAY, and see the adrift block, which measures it — so one agent
+   that had walked somewhere made that ground cytoplasm the return signal could
+   ride, indefinitely. The signal was riding the plate rather than the network.
+
+   12 is BODY_LEVELS[2], the level the renderer calls the tube and the level the
+   record is traced at. The property that matters is that it sits ABOVE the lone
+   wanderer's eight: a wandering agent can no longer make ground the signal
+   travels on, and it takes a tube to carry a find home.
+
+   What it COSTS is the signal's reach, and that is a real change to the dish
+   rather than a free one — the network prunes differently when a find travels
+   only down tube. That is why this is a SIM_V bump and not a refactor, and why
+   it is landed with the outcome numbers in its PR rather than on the argument
+   above. */
+var FED_BODY     = 12.0;  // trail at which a cell is cytoplasm a signal can ride (= BODY_LEVELS[2], the tube)
 var FED_STEP     = 0.995; // share of the strongest neighbour a cell takes per pass, straight
 var FED_STEP_D   = Math.pow(FED_STEP, Math.SQRT2); // ...and diagonally: octile, not Chebyshev
 var FED_THIN     = 0.005; // extra share lost per cell at no trail, against FED_THICK
@@ -11541,23 +11570,68 @@ function stateHash() {
   for (i = 0; i < fields.length; i++) per[fields[i][0]] = hashArr(fields[i][1]);
   for (i = 0; i < agents.length; i++) per[agents[i][0]] = hashArr(agents[i][1], nAgents);
   for (i = 0; i < tree.length; i++) per[tree[i][0]] = hashArr(tree[i][1], tN);
-  /* The scalars, as one string. JSON of a number is its shortest round-tripping
-     form, which for a double is lossless, so this is as exact as the arrays. */
-  var scal = JSON.stringify([
-    RNG_STATE, stepsRun, nAgents, tN, mainOK,
-    S.simT, S.engulfed, S.hab, S.dietP, S.dietC, S.shocksSurvived,
-    S.eventIdx, S.cueRes, S.cueHeld, S.flowAcc, S.streamAcc,
-    S.seed, S.idx, S.nodeProg, S.nodeDone,
-    /* Both halves of runClock(), not just one. The win step writes holdT0 and
-       nothing else the hash was reading — so a change that moved WHEN a dish
-       is won read as identical while the run clock and the mark moved, which
-       is the one divergence this tool exists to refuse to miss. */
-    S.refineT0, S.holdT0, S.shockActive, S.shockWarn, S.anticipated,
-    /* the sub-unit accumulators: a perturbation smaller than one agent lives
-       here for several steps before it becomes one, and that is exactly the
-       size of difference the float32 stores elsewhere hide */
-    S.growAcc, S.starveAcc
-  ]);
+  /* The scalars. Enumerated from S rather than listed by hand, because the
+     hand-written list was wrong twice: it missed holdT0 (the one field the WIN
+     writes), and it missed growAcc/starveAcc/nodeIdle/nodeHeld — accumulators
+     that hold a difference for several steps before it crosses a threshold and
+     becomes visible anywhere else. A list of "the fields that matter" is a
+     list someone has to remember to extend, and the failure mode is silent:
+     every digest matches and the tool certifies two different dishes as one.
+
+     So the rule is inverted. Everything S holds is hashed, and the only things
+     excluded are named here with a reason:
+
+       exp     the dish definition — shared across every run of that dish,
+               never written by a step, and large.
+
+     Keys are SORTED rather than taken in insertion order, so that the digest
+     depends on what S holds and not on the order the literal happens to
+     declare it in. JSON of a number is its shortest round-tripping form, which
+     for a double is lossless, so this is as exact as the byte hashes above. */
+  var skip = { exp: 1 };
+  var sk = [], q;
+  for (q in S) if (Object.prototype.hasOwnProperty.call(S, q) && !skip[q]) sk.push(q);
+  sk.sort();
+  var pairs = [];
+  for (i = 0; i < sk.length; i++) pairs.push([sk[i], S[sk[i]]]);
+  /* ...and the module-scope state that lives outside S. This one IS a list,
+     because module scope cannot be enumerated the way S can: a script's top
+     level holds some two hundred arrays and most of them are the renderer's,
+     whose contents legitimately differ between two runs holding the same dish
+     (they depend on how many frames were drawn). Hashing those would make the
+     tool report divergences that no dish can see, which is worse than missing
+     one. So the sim/render boundary needs judgement, and the rule the list is
+     built from is written here so it can be re-audited rather than trusted:
+
+       hash every module-scope value that step() or its callees WRITE and a
+       LATER step READS.
+
+     That excludes, deliberately and with the reason in each case:
+       recN       reset to -1 at the top of every step before anything reads
+                  it, so it carries nothing across a step boundary.
+       scarW      set per agent inside the loop, for the three sense() calls.
+       attempts   picks which seed you play, not what a step does — its own
+                  declaration says so.
+       treeMs,    profiling counters.
+       treePasses
+       everything the renderer owns (veinT, dirtyFrames, brT, bmX0..1, ...):
+                  read by the compositor, never by a step.
+
+     To re-audit: list the module-scope declarations, and for each ask the
+     question above. The last pass over it added four — nodeHits, nodeLoad,
+     reabCursor, idleCursor — and then tubeDist, which is rebuilt every
+     TUBE_EVERY steps and read inside the agent loop by a streaming agent
+     walking its goal's geodesic. */
+  var cursors = [RNG_STATE, stepsRun, nAgents, tN, treePassN, mainOK,
+                 reabCursor, idleCursor,
+                 hashArr(nodeHits), hashArr(nodeLoad)];
+  /* tubeDist is an array of per-node distance maps with holes in it — a node
+     whose map has not been built yet is simply absent — so it is hashed as its
+     shape plus each map's digest, rather than through a typed-array view it
+     does not have. */
+  var td = [tubeDist.length];
+  for (i = 0; i < tubeDist.length; i++) td.push(tubeDist[i] ? hashArr(tubeDist[i]) : 'x');
+  var scal = JSON.stringify([cursors, td, pairs]);
   per.scalars = fnv1a(new TextEncoder().encode(scal)).toString(16);
   /* the whole: the per-array digests in their fixed order, folded together —
      so `all` changing and no `per` entry changing cannot happen */
@@ -11568,7 +11642,8 @@ function stateHash() {
   keys.push('scalars');
   var h = 0x811C9DC5;
   for (i = 0; i < keys.length; i++) h = fnv1a(new TextEncoder().encode(keys[i] + ':' + per[keys[i]] + ';'), h);
-  return { all: (h >>> 0).toString(16), steps: stepsRun, agents: nAgents, per: per };
+  return { all: (h >>> 0).toString(16), steps: stepsRun, agents: nAgents,
+           treeN: tN, per: per };
 }
 
 /* ------------------------------------------------------------
@@ -11713,12 +11788,20 @@ var GHOST_ENT = 9;
    14: the culture wakes on food — see ORIGIN_HOLD. The floor under the
        target lets the opening regrow what it loses, so spawnAgent runs
        where it never did; it draws from the generator, and every draw
-       after it lands somewhere else. */
-var SIM_V = 14;   /* The plate a seed and tape produce is different, which is
-                     what this byte is the contract for. Best times ARE
-                     affected this time, unlike at 13: eight dishes finish
-                     sooner, because a culture that can regrow its early
-                     losses reaches the food with more of itself. */
+       after it lands somewhere else.
+   15: FED_BODY 3 -> 12. The return signal rides tube rather than any ground a
+       single wandering agent has walked over, so a find reaches fewer cells,
+       a different set of routes is held, and the plate every seed produces
+       is different. */
+var SIM_V = 15;   /* The plate a seed and tape produce is different, which is
+                     what this byte is the contract for. Best times are
+                     affected, as they were at 14, but not in one direction:
+                     measured across three dishes and three seeds every case is
+                     still won with its mark unchanged, and the run clock moves
+                     by between a couple of per cent sooner and a tenth later
+                     with no consistent sign. At three seeds a dish that is
+                     systematically slower and one that drew a slow seed look
+                     the same, so neither is claimed here. */
 
 function ghostSig() {
   var h = mix32(SIM_V, Math.round(CUE_CAP * 1000), Math.round(CUE_REGEN * 1000));
