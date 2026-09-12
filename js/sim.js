@@ -13420,8 +13420,11 @@ function init() {
     rate: function () { return { ask: TURBO, got: rateNow / LAPSE_REF, short: rateShort() }; },
     speeds: function () { return SPEEDS.slice(); },
     /* the estimated real-time factor of ×1, for a caption that has to agree
-       with the one the buttons print */
-    realX: function () { return REAL_X; },
+       with the one the buttons print — so it is REAL_X through LAPSE_REF, the
+       same conversion realX() makes, and not the raw dish-second factor. The
+       buttons print realX(TURBO); an accessor that returned REAL_X would
+       disagree with them by exactly the reference. */
+    realX: function () { return LAPSE_REF * REAL_X; },
     /* the seed of the current run, raw and as the notebook prints it */
     seed: function () { return S.seed; },
     seedLabel: function () { return seedLabel(S.seed); },
