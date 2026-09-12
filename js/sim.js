@@ -11329,6 +11329,95 @@ var STEP_MS = 20;
 var stepsRun = 0;
 var stepTarget = 0;
 
+/* ---- harness: the dish as a number ----
+   Determinism is what SIM_V is the version of, and the only way to hold a
+   refactor to it is to hash what the simulation actually holds and compare.
+   A change meant to cost nothing but time — a hoisted test, a loop split in
+   two — is exactly the kind that passes a visual check and moves the dish in
+   the fourth decimal, and a moved dish invalidates every tape.
+
+   BYTES, not values. Each float array is hashed through a Uint8Array view of
+   its own buffer, so two runs agree only if they agree to the last bit. That
+   is deliberately stricter than "the same dish": reassociating an expression
+   is the edit this has to catch, and it is precisely the edit a tolerance
+   lets through.
+
+   PER ARRAY as well as whole, because a hash that only says "different" makes
+   the author bisect by hand — the field that moved first names the pass that
+   moved it. Ordering is fixed and explicit rather than taken from a live
+   enumeration, so two builds hash the same fields in the same order even if
+   one of them has grown a new one.
+
+   The AGENT arrays are hashed over the live prefix and the tree's over its
+   live node count: past those the slots hold whatever the last compaction
+   swap left there, which legitimately differs between two runs holding the
+   same dish, and hashing them would report a divergence no dish can see. */
+function fnv1a(bytes, h) {
+  h = h === undefined ? 0x811C9DC5 : h;
+  for (var i = 0; i < bytes.length; i++) {
+    h ^= bytes[i];
+    h = Math.imul(h, 0x01000193);
+  }
+  return h >>> 0;
+}
+/* `n` elements, not bytes: the caller says how much of the array is live and
+   this turns that into the byte window, so a prefix of a Float32Array hashes
+   its first n*4 bytes and one of a Uint8Array its first n. */
+function hashArr(a, n) {
+  var el = a.BYTES_PER_ELEMENT;
+  var len = (n === undefined ? a.length : Math.max(0, Math.min(n, a.length))) * el;
+  return fnv1a(new Uint8Array(a.buffer, a.byteOffset, len)).toString(16);
+}
+function stateHash() {
+  /* The fields step() and its callees write. Grouped as they are in the file
+     so a reader can check the list against the declarations rather than
+     against memory. */
+  var fields = [
+    ['trail', trail], ['stalkF', stalkF], ['slimeF', slimeF],
+    ['cueF', cueF], ['retF', retF],
+    ['knotF', knotF], ['traceF', traceF],
+    ['flowF', flowF], ['condF', condF], ['scarF', scarF],
+    ['fedF', fedF], ['fedB', fedB], ['padF', padF], ['padB', padB],
+    ['bodyF', bodyF], ['bodyB', bodyB], ['linkF', linkF], ['shadeF', shadeF],
+    ['foodF', foodF], ['statF', statF],
+    ['wallM', wallM], ['hazM', hazM], ['occ', occ],
+    ['tcov', tcov], ['tAt', tAt]
+  ];
+  /* ...the agents, over the live prefix... */
+  var agents = [
+    ['ax', ax], ['ay', ay], ['ah', ah], ['atip', atip],
+    ['astv', astv], ['aoff', aoff], ['aidle', aidle], ['agoal', agoal]
+  ];
+  /* ...and the tree, over its live nodes. */
+  var tree = [
+    ['tx', tx], ['ty', ty], ['tpar', tpar], ['tw', tw], ['tleaf', tleaf],
+    ['tstate', tstate], ['tidle', tidle], ['tborn', tborn], ['tjoin', tjoin]
+  ];
+  var per = {}, i;
+  for (i = 0; i < fields.length; i++) per[fields[i][0]] = hashArr(fields[i][1]);
+  for (i = 0; i < agents.length; i++) per[agents[i][0]] = hashArr(agents[i][1], nAgents);
+  for (i = 0; i < tree.length; i++) per[tree[i][0]] = hashArr(tree[i][1], tN);
+  /* The scalars, as one string. JSON of a number is its shortest round-tripping
+     form, which for a double is lossless, so this is as exact as the arrays. */
+  var scal = JSON.stringify([
+    RNG_STATE, stepsRun, nAgents, tN,
+    S.simT, S.engulfed, S.hab, S.dietP, S.dietC, S.shocksSurvived,
+    S.eventIdx, S.refineT0, S.cueRes, S.cueHeld, S.flowAcc, S.streamAcc,
+    S.seed, S.idx, S.nodeProg, S.nodeDone
+  ]);
+  per.scalars = fnv1a(new TextEncoder().encode(scal)).toString(16);
+  /* the whole: the per-array digests in their fixed order, folded together —
+     so `all` changing and no `per` entry changing cannot happen */
+  var keys = [];
+  for (i = 0; i < fields.length; i++) keys.push(fields[i][0]);
+  for (i = 0; i < agents.length; i++) keys.push(agents[i][0]);
+  for (i = 0; i < tree.length; i++) keys.push(tree[i][0]);
+  keys.push('scalars');
+  var h = 0x811C9DC5;
+  for (i = 0; i < keys.length; i++) h = fnv1a(new TextEncoder().encode(keys[i] + ':' + per[keys[i]] + ';'), h);
+  return { all: (h >>> 0).toString(16), steps: stepsRun, agents: nAgents, per: per };
+}
+
 /* ------------------------------------------------------------
    15b. input trace + replay
    ------------------------------------------------------------
@@ -13132,6 +13221,8 @@ function init() {
        runs at different speeds can be compared on the same step rather than
        on whichever step their frames happened to land on */
     runTo: function (n) { stepTarget = Math.max(0, n | 0); return stepTarget; },
+    /* harness only: the dish as a number — see stateHash */
+    stateHash: stateHash,
     start: function (i, seed) {
       startRun(clamp(i | 0, 0, EXPERIMENTS.length - 1), seed);
       return S.seed;
