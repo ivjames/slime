@@ -73,6 +73,24 @@ license it.
 A green comparison also says nothing about *speed*. It is the correctness half
 of a performance change; the other half is a measurement.
 
+### Why the scalars are enumerated rather than listed
+
+The scalar digest walks `S` and hashes everything it holds except `exp` (the
+shared dish definition, never written by a step). It is not a list of the fields
+that matter, because that list was wrong twice — first missing `holdT0`, the one
+field the win step writes, then missing `growAcc`/`starveAcc`/`nodeIdle`/
+`nodeHeld`, accumulators that carry a difference for several steps before it
+crosses a threshold and shows up anywhere else.
+
+Both misses have the same shape and it is the worst one available here: every
+digest matches, `--compare` says identical, and two genuinely different dishes
+have been certified as one. A denylist fails safe (a new field is hashed until
+someone excludes it); an allowlist fails silent. Keys are sorted, so the digest
+depends on what `S` holds rather than on the order the literal declares it in.
+
+`treePassN` is hashed alongside — `treeGrow` reads it, so two runs that differ
+in it differ in what the next growth pass does.
+
 ### One caveat about the double-buffered fields
 
 `fedRelax` ends by swapping which array object each of `fedF`/`fedB`,

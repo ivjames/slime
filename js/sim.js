@@ -11570,23 +11570,34 @@ function stateHash() {
   for (i = 0; i < fields.length; i++) per[fields[i][0]] = hashArr(fields[i][1]);
   for (i = 0; i < agents.length; i++) per[agents[i][0]] = hashArr(agents[i][1], nAgents);
   for (i = 0; i < tree.length; i++) per[tree[i][0]] = hashArr(tree[i][1], tN);
-  /* The scalars, as one string. JSON of a number is its shortest round-tripping
-     form, which for a double is lossless, so this is as exact as the arrays. */
-  var scal = JSON.stringify([
-    RNG_STATE, stepsRun, nAgents, tN, mainOK,
-    S.simT, S.engulfed, S.hab, S.dietP, S.dietC, S.shocksSurvived,
-    S.eventIdx, S.cueRes, S.cueHeld, S.flowAcc, S.streamAcc,
-    S.seed, S.idx, S.nodeProg, S.nodeDone,
-    /* Both halves of runClock(), not just one. The win step writes holdT0 and
-       nothing else the hash was reading — so a change that moved WHEN a dish
-       is won read as identical while the run clock and the mark moved, which
-       is the one divergence this tool exists to refuse to miss. */
-    S.refineT0, S.holdT0, S.shockActive, S.shockWarn, S.anticipated,
-    /* the sub-unit accumulators: a perturbation smaller than one agent lives
-       here for several steps before it becomes one, and that is exactly the
-       size of difference the float32 stores elsewhere hide */
-    S.growAcc, S.starveAcc
-  ]);
+  /* The scalars. Enumerated from S rather than listed by hand, because the
+     hand-written list was wrong twice: it missed holdT0 (the one field the WIN
+     writes), and it missed growAcc/starveAcc/nodeIdle/nodeHeld — accumulators
+     that hold a difference for several steps before it crosses a threshold and
+     becomes visible anywhere else. A list of "the fields that matter" is a
+     list someone has to remember to extend, and the failure mode is silent:
+     every digest matches and the tool certifies two different dishes as one.
+
+     So the rule is inverted. Everything S holds is hashed, and the only things
+     excluded are named here with a reason:
+
+       exp     the dish definition — shared across every run of that dish,
+               never written by a step, and large.
+
+     Keys are SORTED rather than taken in insertion order, so that the digest
+     depends on what S holds and not on the order the literal happens to
+     declare it in. JSON of a number is its shortest round-tripping form, which
+     for a double is lossless, so this is as exact as the byte hashes above. */
+  var skip = { exp: 1 };
+  var sk = [], q;
+  for (q in S) if (Object.prototype.hasOwnProperty.call(S, q) && !skip[q]) sk.push(q);
+  sk.sort();
+  var pairs = [];
+  for (i = 0; i < sk.length; i++) pairs.push([sk[i], S[sk[i]]]);
+  /* ...and the module-scope simulation scalars that live outside S. treePassN
+     is the tree's own pass counter: treeGrow reads it, so two runs that differ
+     in it differ in what the next growth pass does. */
+  var scal = JSON.stringify([RNG_STATE, stepsRun, nAgents, tN, treePassN, mainOK, pairs]);
   per.scalars = fnv1a(new TextEncoder().encode(scal)).toString(16);
   /* the whole: the per-array digests in their fixed order, folded together —
      so `all` changing and no `per` entry changing cannot happen */
@@ -11597,7 +11608,8 @@ function stateHash() {
   keys.push('scalars');
   var h = 0x811C9DC5;
   for (i = 0; i < keys.length; i++) h = fnv1a(new TextEncoder().encode(keys[i] + ':' + per[keys[i]] + ';'), h);
-  return { all: (h >>> 0).toString(16), steps: stepsRun, agents: nAgents, per: per };
+  return { all: (h >>> 0).toString(16), steps: stepsRun, agents: nAgents,
+           treeN: tN, per: per };
 }
 
 /* ------------------------------------------------------------
