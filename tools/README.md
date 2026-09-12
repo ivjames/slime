@@ -135,3 +135,47 @@ one of those six digests would read as moved when nothing had. If you ever need
 that comparison, hash the pair as a set rather than by name. Changing
 `FED_PASSES` at all is a change to the plate, so `determinism.js` is the wrong
 tool for it either way — `outcome.js` is.
+
+## cover.js
+
+How much of its food the culture is standing on, at the level the mass layer
+draws. Two figures per station, each a plain fraction of a disc:
+
+- **disc** — of the flake's own disc, how much is at or above the traced level.
+- **dot** — the same, over the little disc the food ITSELF is drawn as. This is
+  the one that decides whether the plate can draw the food as engulfed: tissue
+  everywhere else on a flake does not cover the crumb in the middle of it.
+
+```bash
+node tools/cover.js                        # win + 15 s, four seeds of EXP-01
+AT=59 node tools/cover.js                  # at a sim time instead of at the win
+LEVELS=1 node tools/cover.js               # and sweep the level, BODY_LEVELS[0..6]
+CASE=EXP-03 SEEDS=3039 node tools/cover.js
+```
+
+It reads `SLIME.cover(lvIdx)`, which takes the level so that "no tissue" and
+"tissue below the line the renderer cuts at" cannot be confused — which is
+exactly what they were. Measured on EXP-01 at 59 s, the dots read 0.00 at the
+level pads were traced at and 1.00 four levels down: the tissue was on the
+food the whole time and the mass layer was cutting above it. That is what
+PUDDLE_SKIRT_LV answers.
+
+### Why an unwon run is dropped rather than averaged
+
+The default moment is fifteen seconds after the last flake goes down, inside
+the `WIN_HOLD` window while the plate is still moving. A dish that never wins
+has no such moment, so it is reported `NOT MEASURABLE` and left out of the
+summary rather than sampled at the cap: a losing run's flakes are uncovered
+because the culture never got there, which is a true fact about a different
+question. Use `AT=` when the question really is "at this time".
+
+### The measurement this replaces
+
+`67e4a7a` claimed coverage went from 0.43 to 0.57 and was reverted by
+`f50f3f8` because those two numbers came from different measurements — one
+band-weighted at an instant, one a whole-disc fraction — so the comparison was
+never like for like. Re-measured properly it was +0.033 against a pooled
+standard error near 0.073, with the spread nearly tripled. There is one figure
+here, its shape is stated above, and the moment it is taken at is printed with
+it. A coverage claim that does not say *which* fraction, over *what*, *when* is
+not a measurement.
