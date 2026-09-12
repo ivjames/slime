@@ -647,8 +647,18 @@ var TRACE_HOLD = 0.995; // per-step decay: half-life ~2.3s at 60 steps/s
    a tube abandoned for that long stops being. Both halves matter — the first
    is why a single filament sweeping past does not leave a permanent tube
    behind it, the second is the pruning. */
-var COND_Q     = 1 / 6;    // deposit per cell per sweep that counts as unit flux
-var COND_RATE  = 0.02;     // share of the way to the drive taken per sweep
+/* Per SWEEP, which is why this moves when KNOT_EVERY does. flowF accumulates a
+   cell's deposit on every step and the sweep zeroes it, so doubling the interval
+   doubles what arrives per sweep; left at 1/6 that doubles q, and drive is
+   q^2/(1+q^2), so every carrying cell would read nearer saturation than its
+   traffic earned. Halved with the interval, q is what it was. */
+var COND_Q     = 1 / 12;   // deposit per cell per sweep that counts as unit flux
+/* 1-(1-0.02)^2, so that two sweeps' worth of relaxation happens in one and the
+   time constant this constant sets — about seven seconds, and it is the one that
+   decides how long the organism remembers a route — is what it was at
+   KNOT_EVERY 8. The compensation is exact for this term because the relaxation
+   is geometric; see the SIM_V 16 note for where it is only close. */
+var COND_RATE  = 0.0396;   // share of the way to the drive taken per sweep
 /* What a fully conductive cell holds. Comfortably over ADRIFT_T, so cytoplasm
    standing in a held tube is never mistaken for a scrap, and comfortably
    under TRAIL_MAX, so a maintained tube is still a tube rather than the
@@ -822,7 +832,13 @@ var FED_THIN     = 0.005; // extra share lost per cell at no trail, against FED_
 var FED_THICK    = 18.0;  // trail at which a cell passes the signal at the full step (= ADRIFT_T)
 var FED_FADE     = 0.90;  // what a cell keeps of its own value per pass, on cytoplasm
 var FED_OFF      = 0.50;  // ...and off it, where a signal dies in a few passes
-var FED_PASSES   = 2;     // relaxation passes per slow sweep: cells per KNOT_EVERY steps
+/* Four per sweep at KNOT_EVERY 16, so the signal still advances two cells every
+   eight steps and still fades FED_FADE twice in them. This is the term that
+   makes the cadence change nearly free rather than actually free: the relax pass
+   is most of the sweep's cost and doubling the passes gives all of that back, so
+   what this change saves is the rest of the sweep — the flux and scar loop, the
+   link product, the trunk dilation, the shade — run half as often. */
+var FED_PASSES   = 4;     // relaxation passes per slow sweep: cells per KNOT_EVERY steps
 var FED_CORE_R   = 16;    // cells around the inoculation point that are the body signal's source
 var FED_SHARP_LOG = 4;    // the exponent on the detour ratio is 2 to this: squarings, not Math.pow
 var FED_SHARP    = 1 << FED_SHARP_LOG; // ...which is 16: how tight a corridor the trunk is
@@ -831,7 +847,13 @@ var FED_LAY_GAIN = 0.50;  // extra deposit per step on the connection
 var FED_R        = 8;     // cells: how far the connection's shade reaches
 var FED_HI       = 0.60;  // link at which a cell is trunk enough to cast a shade
 var FED_LOW      = 0.25;  // link below which a cell in that shade is shaded
-var FED_SHADE    = 0.03;  // extra share of conductivity a shaded cell loses per sweep
+/* Per sweep, so it moves with KNOT_EVERY like the others: 1-(1-0.03)^2, so a
+   shaded cell loses the same share of its conductivity per unit TIME as it did
+   at 0.03 every eight steps. Missed on the first pass of this compensation and
+   caught by grepping for what the file itself calls a per-sweep rate — which
+   found FED_SHADE_DEP too, and that one needs nothing: it is applied in the
+   deposit block inside the agent loop, so it is already per step. */
+var FED_SHADE    = 0.0591; // extra share of conductivity a shaded cell loses per sweep
 var FED_SHADE_DEP = 0.50; // share of deposit traffic through a shaded cell does not lay
 /* ---- the vein scar: where a tube HAS been ----
    The residual the dish has been missing. Three fields already say something
@@ -869,8 +891,8 @@ var FED_SHADE_DEP = 0.50; // share of deposit traffic through a shaded cell does
    not need its history repeated, so the scar speaks only where the tube has
    gone. */
 var SCAR_COND = 0.45;      // conductivity at which this cell is a tube worth remembering
-var SCAR_DEP  = 0.02;      // scar laid per sweep while it is
-var SCAR_FADE = 0.99975;   // per-sweep decay: half-life ~6 min of dish time
+var SCAR_DEP  = 0.04;      // scar laid per sweep while it is (2x: half as many sweeps)
+var SCAR_FADE = 0.9995000625;  // 0.99975^2 per sweep: the same ~6 min half-life
 var SCAR_W    = 3.0;       // sensed weight of a full scar on bare ground
 var SCAR_REF  = 25.0;      // trail at which a live tube silences its own scar
 
@@ -3724,7 +3746,7 @@ function diffuseTrail() {
    whose half-life is measured in seconds and which is empty nearly
    everywhere. Eight steps of decay applied once every eight steps is the same
    curve sampled more coarsely, on a quantity nothing reads for an edge. */
-var KNOT_EVERY = 8;
+var KNOT_EVERY = 16;
 var KNOT_FADE = Math.pow(KNOT_HOLD, KNOT_EVERY);
 /* The trace rides the same coarse clock, for the same reason: a field whose
    half-life is seconds does not need sixty samples of its own curve a second,
@@ -11792,16 +11814,43 @@ var GHOST_ENT = 9;
    15: FED_BODY 3 -> 12. The return signal rides tube rather than any ground a
        single wandering agent has walked over, so a find reaches fewer cells,
        a different set of routes is held, and the plate every seed produces
-       is different. */
-var SIM_V = 15;   /* The plate a seed and tape produce is different, which is
-                     what this byte is the contract for. Best times are
-                     affected, as they were at 14, but not in one direction:
-                     measured across three dishes and three seeds every case is
-                     still won with its mark unchanged, and the run clock moves
-                     by between a couple of per cent sooner and a tenth later
-                     with no consistent sign. At three seeds a dish that is
-                     systematically slower and one that drew a slow seed look
-                     the same, so neither is claimed here. */
+       is different.
+   16: KNOT_EVERY 8 -> 16, with every per-sweep rate compensated so the dish's
+       CLOCKS do not move: COND_RATE to 1-(1-0.02)^2, COND_Q halved because the
+       flux it normalises is per sweep, SCAR_DEP doubled, SCAR_FADE squared,
+       FED_SHADE to 1-(1-0.03)^2, FED_PASSES 2 -> 4. KNOT_FADE and TRACE_FADE
+       needed nothing — they are already Math.pow(hold, KNOT_EVERY), and nor did
+       FED_STEP, FED_FADE or FED_OFF, which are per PASS and so unchanged once
+       the passes per step are (2/8 is 4/16). FED_SHADE_DEP needed nothing
+       either: it is applied in the deposit block, per step already.
+
+       The intent is that nothing about the organism changes and the sweep
+       simply runs half as often, but the plate still moves, because a coarser
+       clock is not the same arithmetic even at the same rate. Two places make
+       it approximate rather than exact: drive is q^2/(1+q^2), so one sweep
+       reading twice the accumulated flux is not two sweeps each reading once
+       however COND_Q is set; and the scar's deposit is clamped at 1, so a
+       doubled deposit reaches the clamp on a different sweep. Both are small
+       and neither is a behaviour anyone tuned — but they are why this is a
+       SIM_V bump and not a free change. */
+var SIM_V = 16;   /* The plate a seed and tape produce is different, which is
+                     what this byte is the contract for. Measured across three
+                     dishes and three seeds, every case is still won and not one
+                     mark or score moves.
+
+                     The run clock moves, and what this change taught about
+                     reading that is worth more than the number: on EXP-02 the
+                     clock swings by up to a sixth in EITHER direction, and the
+                     sign flips per seed between two different changes. That
+                     dish has bifurcations — a small perturbation routes the
+                     culture down another corridor — so at three seeds its clock
+                     carries no signal at all, and the +9.5% recorded against
+                     entry 15 was almost certainly the same sensitivity rather
+                     than anything that change did. On EXP-01 the clock holds
+                     inside a few per cent, and EXP-05 is refine-bound and
+                     cannot move. Read "still won, marks unchanged" from these
+                     sweeps; do not read the clock column without many more
+                     seeds than three. */
 
 function ghostSig() {
   var h = mix32(SIM_V, Math.round(CUE_CAP * 1000), Math.round(CUE_REGEN * 1000));
