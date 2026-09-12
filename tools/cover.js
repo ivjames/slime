@@ -85,12 +85,19 @@ function stat(a) {
       window.SLIME.runTo(a.cap);
     }, { idx, seed, cap: CAP });
     /* the plate keeps moving for WIN_HOLD after the win, which is what makes
-       "the win plus fifteen" a moment that exists to be sampled */
+       "the win plus fifteen" a moment that exists to be sampled.
+       Three ways to stop waiting, and the third is not optional: runTo parks
+       the dish on its step cap with S.paused set and S.running still TRUE, so
+       a predicate that only knows !S.running waits the whole Playwright
+       timeout out on any seed that does not finish. outcome.js tests the same
+       pair. */
     const reached = await page.waitForFunction(a => {
       const S = window.SLIME.S;
-      if (a.at) return S.simT >= a.at || (S.simT > 2 && !S.running);
-      return (S.holdT0 >= 0 && S.simT - S.holdT0 >= a.after) || (S.simT > 2 && !S.running);
-    }, { at: AT, after: AFTER }, { timeout: 900000 }).then(() => true).catch(() => false);
+      if (window.SLIME.steps() >= a.cap && S.paused) return true;
+      if (S.simT > 2 && !S.running) return true;
+      return a.at ? S.simT >= a.at : (S.holdT0 >= 0 && S.simT - S.holdT0 >= a.after);
+    }, { at: AT, after: AFTER, cap: CAP },
+       { timeout: 900000, polling: 500 }).then(() => true).catch(() => false);
     const r = await page.evaluate(n => {
       const S = window.SLIME.S;
       const o = { t: +S.simT.toFixed(1), won: S.holdT0 >= 0, cover: window.SLIME.cover() };
@@ -98,7 +105,11 @@ function stat(a) {
       return o;
     }, LEVELS ? 7 : 0);
     r.seed = seed;
-    r.ok = reached && (AT ? true : r.won);
+    /* Reaching the moment is the thing being asserted, so it is tested rather
+       than assumed from the wait returning: the wait above also returns for a
+       dish that stopped or capped BEFORE it, and counting that sample would
+       report a state from some earlier second under this second's heading. */
+    r.ok = reached && (AT ? r.t >= AT : r.won);
     rows.push(r);
     console.log(`${seed} ${r.ok ? 'ok ' : 'NOT MEASURABLE'} t=${r.t}  ` +
       r.cover.map(c => `${c.label} ${c.disc.toFixed(3)}/${c.dot.toFixed(3)}`).join('  '));

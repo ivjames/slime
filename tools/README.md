@@ -167,7 +167,12 @@ the `WIN_HOLD` window while the plate is still moving. A dish that never wins
 has no such moment, so it is reported `NOT MEASURABLE` and left out of the
 summary rather than sampled at the cap: a losing run's flakes are uncovered
 because the culture never got there, which is a true fact about a different
-question. Use `AT=` when the question really is "at this time".
+question. Use `AT=` when the question really is "at this time" — and that
+moment is held to the same rule, since a dish that ended or hit the step cap
+before it never reached it either. Both cases are detected rather than waited
+out: `runTo` parks a run on the cap with `S.paused` set and `S.running` still
+true, so a harness that reads only `S.running` sits out its whole timeout on
+every seed that does not finish.
 
 ### The measurement this replaces
 
