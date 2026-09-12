@@ -1004,13 +1004,28 @@ var HOLD_DROP = 1.5;    // seconds under that before the station is let go
    the target below the size the culture opens at and shrink it from the
    first step, which is the opposite of the point.
 
-   At 1.0 the crumb holds the culture at exactly its opening size for exactly
-   as long as the old grace gate did, and lets go when the food is gone — the
-   same dish, reached by saying "there is food here" instead of "starvation is
-   switched off". That is the null on purpose, so the refactor can be measured
-   before any balance moves. Anything above 1.0 hands the culture biomass it
-   did not have, which is what would actually let it supply a second front,
-   and has to be measured against all twenty dishes before it ships. */
+   At 1.0 the crumb holds the culture at its opening size for as long as the
+   old grace gate did and lets go when the food is gone. That is NOT the same
+   dish, and the difference is the point. The old gate only suppressed
+   culling; it never permitted growth, because the target it was suppressing
+   against is engulfed * sustain and engulfed is zero. So the opening was a
+   one-way ratchet: every agent lost before the first flake — to damage, to
+   reabsorption, to anything — was lost for good. Measured against main on
+   seed 1, EXP-19 falls to 982 of its 4300 and sits there until food lands,
+   EXP-13 to 2418, EXP-04 bleeds 311 and never recovers one of them. With a
+   floor those are recoverable and all three hold flat. Nine of the twenty
+   dishes are bit-identical, being the ones that take no early damage.
+
+   Above 1.0 would hand the culture biomass it never had, which is the lever
+   that would let it supply a SECOND front — the runner that reaches a far
+   flake with nothing behind it. That was measured and deliberately not taken.
+   On EXP-02 over six seeds, the lag from touching the last flake to having a
+   tube on it runs 22.3s +/- 8.4 on main and on this; 17.7 +/- 5.7 at 1.3;
+   14.8 +/- 5.2 at 1.5. The direction is consistent and the response is
+   monotone, and the spread tightens as much as the mean falls — but at six
+   seeds nothing clears two sigma, and a difficulty change for all twenty
+   dishes is not something to ship on 1.9. The lever is real; the number is
+   not established. It wants its own seeds and its own verdict sweep. */
 var ORIGIN_HOLD = 1.0;
 
 /* ---- the fan on a flake ----
