@@ -11602,6 +11602,36 @@ function show(id) {
 }
 
 /* ---------- title ---------- */
+/* The build on the glass, and the simulation version it runs.
+   ------------------------------------------------------------
+   The deploy stamps the commit into a constant at the foot of index.html (see
+   DEPLOY.md), and until now nothing showed it: `slime status` could read it
+   over HTTP and a person looking at the page could not, short of viewing
+   source. That is the wrong way round for the one question a static site
+   makes hard to answer — is what I am looking at the thing that was just
+   deployed, or the copy my browser kept?
+
+   SIM_V rides along because it answers the other version question, and it is
+   the one with consequences a player can see: a best time or a recorded tape
+   from another SIM_V is not comparable and is dropped, so a run whose times
+   have gone is a run whose simulation version moved.
+
+   Written once, from init, rather than on every arrival at the title screen:
+   both halves are constants for the life of the page, and goTitle re-renders
+   the schedule because the schedule changes.
+
+   The stamp constant is read through `typeof` rather than named directly. It
+   is declared with `const` in a classic script, which puts it in the global
+   LEXICAL scope and not on `window` — so a bare reference resolves, but a
+   bare reference on a page that somehow lacks it throws a ReferenceError,
+   and that would take the whole of init() down for a decoration. */
+function renderStamp() {
+  var el = $('stamp');
+  if (!el) return;
+  var b = (typeof BUILD === 'string' && BUILD) ? BUILD : 'unstamped';
+  el.textContent = 'build ' + b + ' \u00b7 sim v' + SIM_V;
+}
+
 function renderTitle() {
   var box = $('dishes');
   box.innerHTML = '';
@@ -13789,6 +13819,7 @@ function init() {
   dockActions();
   setSpeed(1);
   renderTitle();
+  renderStamp();
   show('scr-title');
   /* A fragment naming a dish opens it; anything else — including nothing —
      leaves the schedule up. The title screen is rendered either way so that
