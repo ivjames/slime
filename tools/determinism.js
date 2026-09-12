@@ -110,7 +110,14 @@ async function runBuild(root, label, speed) {
 
 function compare(a, b) {
   const keys = [...new Set([...Object.keys(a.cases), ...Object.keys(b.cases)])].sort();
-  let bad = 0;
+  let bad = 0, threw = 0;
+  /* A build that threw is not a build that agreed. Both tools recorded
+     pageErrors and neither read them, so `--self` could print "all 3 case(s)
+     identical" and exit 0 for a page erroring every frame — two runs of a
+     broken build agree with each other perfectly. */
+  for (const [lbl, r] of [[a.label, a], [b.label, b]]) {
+    if (r.pageErrors) { threw++; console.log(`THREW    ${lbl}: ${r.pageErrors[0]}`); }
+  }
   for (const k of keys) {
     const x = a.cases[k], y = b.cases[k];
     if (!x || !y) { console.log(`MISSING  ${k} (${!x ? a.label : b.label} has no result)`); bad++; continue; }
@@ -127,8 +134,10 @@ function compare(a, b) {
     console.log(`           moved (${moved.length}/${fields.length}): ${moved.join(' ') || '(none)'}`);
     if (moved.length && same.length) console.log(`           held: ${same.join(' ')}`);
   }
-  console.log(bad ? `\n${bad} of ${keys.length} case(s) diverged` : `\nall ${keys.length} case(s) identical`);
-  return bad === 0;
+  console.log((bad ? `\n${bad} of ${keys.length} case(s) diverged`
+                   : `\nall ${keys.length} case(s) identical`) +
+    (threw ? ` — but ${threw} build(s) threw, so this table means nothing` : ''));
+  return bad === 0 && threw === 0;
 }
 
 (async () => {

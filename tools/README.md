@@ -34,6 +34,15 @@ checkout you have not measured before.** It answers whether the harness is
 stable at all — if two speeds disagree, the sim has picked up a dependency on
 frame timing and no comparison against that build means anything.
 
+### What outcome.js caps at, and why it is not round
+
+`CAP` defaults to 60,000 steps because the largest `timeLimit` in `EXPERIMENTS`
+is 900 sim-seconds, which at 60 steps a second is 54,000. A cap below a dish's
+own clock cannot be reached by a *losing* run of it: the harness would report
+`CAPPED` where the dish actually reaches its `timeout` verdict, and a verdict
+the harness cannot see is one a change can silently take away. The first
+version capped at 40,000, under EXP-02's own 700s = 42,000.
+
 Environment: `STEPS` (default 2000), `CASES` (default
 `EXP-01/3039,EXP-02/a1b2,EXP-05/7f31` — an open plate, a maze so the wall tests
 in the sweeps are exercised, and a dish with timed events), `CHROMIUM` to point
@@ -44,7 +53,7 @@ at a browser other than the pre-installed one.
 Verified, on EXP-01/3039 at 600 steps:
 
 - Perturbing `COND_RATE` by 5e-8 relative **diverges**, and is localised to
-  `condF` with all forty-two other digests held. A change that moves the dish
+  `condF` with all forty-six other digests held. A change that moves the dish
   at all is caught, and named.
 - Reassociating `cd += COND_RATE * (drive - cd)` into
   `cd = cd + COND_RATE * drive - COND_RATE * cd` **does not diverge.** Every

@@ -11381,7 +11381,11 @@ function stateHash() {
     ['bodyF', bodyF], ['bodyB', bodyB], ['linkF', linkF], ['shadeF', shadeF],
     ['foodF', foodF], ['statF', statF],
     ['wallM', wallM], ['hazM', hazM], ['occ', occ],
-    ['tcov', tcov], ['tAt', tAt]
+    ['tcov', tcov], ['tAt', tAt],
+    /* labelMain() writes these once every CONN_EVERY steps and the
+       reabsorption pass reads them on every other one, so they are state a
+       step can be wrong about for nine steps before anything else shows it */
+    ['mainC', mainC], ['connLab', connLab]
   ];
   /* ...the agents, over the live prefix... */
   var agents = [
@@ -11391,7 +11395,12 @@ function stateHash() {
   /* ...and the tree, over its live nodes. */
   var tree = [
     ['tx', tx], ['ty', ty], ['tpar', tpar], ['tw', tw], ['tleaf', tleaf],
-    ['tstate', tstate], ['tidle', tidle], ['tborn', tborn], ['tjoin', tjoin]
+    ['tstate', tstate], ['tidle', tidle], ['tborn', tborn], ['tjoin', tjoin],
+    /* tkids and tcarry are maintained incrementally rather than recomputed, and
+       only tkids' ZERO-ness reaches tleaf — so a miscount that has not yet
+       changed a leaf total matches every other digest and misfires later. The
+       hash is here to catch the drift, not its first symptom. */
+    ['tkids', tkids], ['tcarry', tcarry]
   ];
   var per = {}, i;
   for (i = 0; i < fields.length; i++) per[fields[i][0]] = hashArr(fields[i][1]);
@@ -11400,10 +11409,19 @@ function stateHash() {
   /* The scalars, as one string. JSON of a number is its shortest round-tripping
      form, which for a double is lossless, so this is as exact as the arrays. */
   var scal = JSON.stringify([
-    RNG_STATE, stepsRun, nAgents, tN,
+    RNG_STATE, stepsRun, nAgents, tN, mainOK,
     S.simT, S.engulfed, S.hab, S.dietP, S.dietC, S.shocksSurvived,
-    S.eventIdx, S.refineT0, S.cueRes, S.cueHeld, S.flowAcc, S.streamAcc,
-    S.seed, S.idx, S.nodeProg, S.nodeDone
+    S.eventIdx, S.cueRes, S.cueHeld, S.flowAcc, S.streamAcc,
+    S.seed, S.idx, S.nodeProg, S.nodeDone,
+    /* Both halves of runClock(), not just one. The win step writes holdT0 and
+       nothing else the hash was reading — so a change that moved WHEN a dish
+       is won read as identical while the run clock and the mark moved, which
+       is the one divergence this tool exists to refuse to miss. */
+    S.refineT0, S.holdT0, S.shockActive, S.shockWarn, S.anticipated,
+    /* the sub-unit accumulators: a perturbation smaller than one agent lives
+       here for several steps before it becomes one, and that is exactly the
+       size of difference the float32 stores elsewhere hide */
+    S.growAcc, S.starveAcc
   ]);
   per.scalars = fnv1a(new TextEncoder().encode(scal)).toString(16);
   /* the whole: the per-array digests in their fixed order, folded together —

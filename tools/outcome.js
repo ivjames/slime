@@ -22,7 +22,13 @@ const fs = require('fs');
 const path = require('path');
 
 const ROOT = path.resolve(__dirname, '..');
-const CAP = +(process.env.CAP || 40000);        // step cap: a dish that never ends
+/* Above the longest dish clock, not a round number: the largest timeLimit in
+   EXPERIMENTS is 900 sim-seconds, which at 60 steps a second is 54,000 steps.
+   A cap under that cannot be reached by a LOSING run of such a dish — it would
+   report CAPPED instead of the `timeout` verdict the dish actually reaches, and
+   a verdict the harness cannot see is one a change can silently take away.
+   (40000 was under EXP-02's own 700s = 42,000, which is how this was found.) */
+const CAP = +(process.env.CAP || 60000);
 const SEEDS = (process.env.SEEDS || '3039,a1b2,7f31').split(',');
 const CASES = (process.env.CASES || 'EXP-01,EXP-02,EXP-05').split(',');
 const PAR = +(process.env.PAR || 3);
@@ -56,9 +62,20 @@ async function runOne(browser, port, code, seed) {
     await page.waitForFunction(() => window.SLIME && window.SLIME.experiments, { timeout: 30000 });
     const idx = await page.evaluate(c => window.SLIME.experiments().findIndex(e => e.code === c), code);
     if (idx < 0) throw new Error(`no dish ${code}`);
-    await page.evaluate(a => { window.SLIME.start(a.idx, a.seed); window.SLIME.turbo(4); }, { idx, seed });
+    /* runTo(CAP) so that a capped run STOPS at the cap. Without it the sim kept
+       stepping between the poll that satisfied the wait and the evaluate that
+       read the result, so a CAPPED case reported whatever step the poll
+       happened to catch — measured at 550/552/565 steps across three identical
+       runs of one seed. That made the one outcome nobody has verified the only
+       nondeterministic row in the table, and compare()'s half-second threshold
+       then read poll jitter as a dish finishing sooner or later. */
+    await page.evaluate(a => {
+      window.SLIME.start(a.idx, a.seed);
+      window.SLIME.turbo(4);
+      window.SLIME.runTo(a.cap);
+    }, { idx, seed, cap: CAP });
     await page.waitForFunction(
-      cap => window.SLIME.S.over || window.SLIME.steps() >= cap,
+      cap => window.SLIME.S.over || (window.SLIME.steps() >= cap && window.SLIME.S.paused),
       CAP, { timeout: 900000, polling: 500 });
     const r = await page.evaluate(() => ({
       over: window.SLIME.S.over,
@@ -110,7 +127,7 @@ async function runBuild(root, label) {
 
 function compare(a, b) {
   const keys = [...new Set([...Object.keys(a.cases), ...Object.keys(b.cases)])].sort();
-  let broke = 0, faster = 0, slower = 0;
+  let broke = 0, faster = 0, slower = 0, threw = 0;
   console.log(`\n${'case'.padEnd(14)} ${a.label.padEnd(10)} ${b.label.padEnd(10)}  clock a -> b        delta`);
   for (const k of keys) {
     const x = a.cases[k], y = b.cases[k];
@@ -121,12 +138,19 @@ function compare(a, b) {
                : (!x.won && y.won) ? '  (now won)' : '';
     if (x.won && !y.won) broke++;
     else if (d < -0.5) faster++; else if (d > 0.5) slower++;
+    /* A page that threw is not a result. Counted and surfaced rather than left
+       in the JSON for nobody to read: a build erroring every frame could
+       otherwise produce a table of plausible outcomes and a zero exit. */
+    for (const [lbl, r] of [[a.label, x], [b.label, y]]) {
+      if (r.pageErrors) { threw++; console.log(`           THREW (${lbl}): ${r.pageErrors[0]}`); }
+    }
     console.log(`${k.padEnd(14)} ${x.outcome.padEnd(10)} ${y.outcome.padEnd(10)} ` +
       `${x.simT.toFixed(1).padStart(7)}s ->${y.simT.toFixed(1).padStart(7)}s  ` +
       `${(d >= 0 ? '+' : '') + d.toFixed(1)}s (${(pc >= 0 ? '+' : '') + pc.toFixed(1)}%)${flag}`);
   }
-  console.log(`\n${keys.length} case(s): ${broke} broken, ${faster} finished sooner, ${slower} later`);
-  return broke === 0;
+  console.log(`\n${keys.length} case(s): ${broke} broken, ${faster} finished sooner, ${slower} later` +
+    (threw ? `, ${threw} threw` : ''));
+  return broke === 0 && threw === 0;
 }
 
 (async () => {
