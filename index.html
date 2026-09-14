@@ -86,6 +86,22 @@ h1,h2,h3{font-weight:600;margin:0}
   color:var(--slime);text-shadow:0 0 34px rgba(239,193,50,.30);margin-right:-.16em}
 .hero .sub{color:var(--dim);letter-spacing:.30em;font-size:11px;text-transform:uppercase;margin-top:14px}
 .hero .tag{max-width:56ch;margin:16px auto 0;color:#a9b199}
+/* The plate's own label: which build is on the glass, and which version of
+   the simulation it runs. A static site has no other version signal — the
+   deploy stamp was readable only by viewing source or curling the page, which
+   is fine for `slime status` and no use at all to someone looking at a plate
+   that is behaving oddly. Quieter than .sub and in the same idiom, at the
+   foot of the schedule where a lab sticker would be.
+
+   Quieter as a SOLID tone and not as --dim under an opacity. Faded that way
+   it composites to #63695b, which is 3.44:1 on --bg and under the AA floor
+   at 10.5px — and the :root comment says in as many words that --dim was
+   raised to clear 4.5:1 wherever it carries 10px type. This sheet has made
+   that exact mistake once already and reverted it: see the not-yet-reached
+   node note, "a half-opacity --dim, which is a colour you can see only if
+   you already know what it says". 5.08:1 here, against --dim's own 7.33. */
+.stamp{text-align:center;margin-top:18px;color:#7d8573;
+  font-size:10.5px;letter-spacing:.18em}
 
 .slab{border:1px solid var(--line);background:linear-gradient(180deg,#14180f,#0f1210);border-radius:3px}
 .slab-h{display:flex;justify-content:space-between;align-items:baseline;gap:12px;
@@ -662,6 +678,9 @@ body.touch .dish{min-height:132px}
     <div class="row" style="margin-top:14px;justify-content:center">
       <button class="btn ghost" id="btn-wipe">Wipe specimen log</button>
     </div>
+    <!-- filled by renderStamp(); empty until then, so a page whose script
+         failed to load shows nothing rather than a placeholder -->
+    <div class="stamp" id="stamp"></div>
   </section>
 
   <!-- ============ BRIEF ============ -->

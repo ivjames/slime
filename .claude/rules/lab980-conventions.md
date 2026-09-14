@@ -16,6 +16,35 @@ true in *this* repo, so it is here rather than one clone away.
    loop is: open it, let the bot review, address what it finds, merge it
    yourself. `boxoffice` has said this in its own `CLAUDE.md` for a while —
    it's true everywhere here.
+
+   **If the bot cannot review it, you review it.** It is out more often than
+   the rule above implies, and in two different ways. It DECLINES: asked from
+   a session identity it does not serve it answers "To use Codex here, create
+   a Codex account and connect to github" — the app works on the repo, it is
+   the requester it refuses, and no amount of waiting changes that. And it
+   simply DOESN'T FIRE: in `slime`, PR 73 was reviewed and PR 72 never was,
+   with nothing to distinguish them. Either way the PR is not reviewed and is
+   not going to become reviewed, so waiting is the one response that cannot
+   work — and a PR nobody merges is the failure this whole section exists to
+   prevent.
+
+   So: run the review yourself, adversarially, against the diff. Hold what it
+   turns up to exactly the standard 4 sets for the bot's findings — verify
+   each against the code, fix what is real, and say why anything else is not.
+   Your own pass is not a formality standing in for a real one: run against
+   this repo it found a harness flag that validated the shape of its argument
+   and not its range, so an out-of-range value would have exercised none of
+   the code the flag existed to cover while every digest matched and the run
+   exited 0. That is precisely the class of bug the review is for.
+
+   5's one-round rule does not bind here — it exists because a metered review
+   re-reads the whole diff and restarts the loop, and neither is true of your
+   own. Re-read after your own fixes as often as it is useful.
+
+   Then merge, and **say in the PR that the bot did not review it and that you
+   did**, with what you checked. A PR that merged without the review it was
+   supposed to get should carry that in its own record rather than leave the
+   next reader to infer it from an absence.
 4. **Verify each finding before you fix it.** The bot is usually right and
    occasionally not, and a fix pushed on its say-so that changes correct code
    is worse than the bug it imagined. Read the actual script or file it names

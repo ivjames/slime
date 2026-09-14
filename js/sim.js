@@ -7540,9 +7540,10 @@ var LANDFALL_MAX = 24;        /* nodes the carry is walked inward over, at most 
    The sim already has that mass — the fan feeding on a flake is the
    thickest tissue on the plate — so the puddle is drawn from it: the
    eased body's contour at PUDDLE_LV, filled in the trunk's tone under
-   the veins so the trunks run into it, but only within PUDDLE_R flake
-   radii of a flake being eaten or eaten, and fading to nothing at that
-   distance. The fade, not a loop test, is what keeps the puddle at the
+   the veins so the trunks run into it, but only within the reach padReach
+   measures at a flake being eaten or eaten, and fading to nothing at that
+   distance. (It was a fixed PUDDLE_R flake radii when this was written;
+   PUDDLE_MIN, PUDDLE_MAX and padReach took the sizing over.) The fade, not a loop test, is what keeps the puddle at the
    flake: at any level the fan on a flake is one piece with the trunk
    that feeds it, and the trunk with the drop, so the contour's loop
    around a pad is the loop around the whole network, and a first try
@@ -7596,7 +7597,13 @@ var LANDFALL_MAX = 24;        /* nodes the carry is walked inward over, at most 
    pad now is the contour, which is the tissue, and what sizes it is the
    tissue's reach (see PUDDLE_MAX and padReach). */
 var PUDDLE_LV = 6;            /* index into BODY_LEVELS: trail 32, the pad itself */
-var PUDDLE_R  = 1.7;          /* flake radii: where the puddle has come down to the body */
+/* Flake radii. It used to be the pad's clip — how far out the puddle was
+   drawn — and padReach, PUDDLE_MIN and PUDDLE_MAX took that over. What is
+   left is one job: the multiple the origin's fixed reach is expressed in, so
+   RES_R / PUDDLE_R is the station radius the origin hands padReach and the
+   crumb's own dot is taken against. Editing it now resizes the origin, and
+   nothing else. */
+var PUDDLE_R  = 1.7;
 /* The tone the puddle's rim lands on: the faintest tissue there is, which is
    the thinnest vein band's. It used to land on alpha zero, and the fill is
    clipped to the body's contour, so what that ramp faded out was TISSUE — a
@@ -7616,7 +7623,8 @@ var PUDDLE_R  = 1.7;          /* flake radii: where the puddle has come down to 
 
    What this does NOT do is make the clip circle vanish. Nothing paints the
    body's mass under the pad, so the rim is still an edge where the contour
-   crosses PUDDLE_R — a trunk running into a pad is cut off square there. It
+   crosses the clip padReach sized — a trunk running into a pad is cut off
+   square there. It
    is the lowest-contrast edge available rather than no edge, and that is the
    honest claim. Filling the body's levels (BODY_FILL) is what would remove
    it, and that is a different change. */
@@ -7688,11 +7696,18 @@ var PUDDLE_MAX = 2.2;
    RES_R is the floor under the reach rather than the radius itself.
 
    Measured, this is the one station the complaint was right about: at win +
-   15 s over four seeds the tissue covers 0.318 +/- 0.173 of the crumb's disc
+   15 s over four seeds the tissue covers 0.369 +/- 0.285 of the crumb's disc
    at the mass level and 0.313 of the crumb's own dot, against 0.899 and 0.995
-   for the flakes. At BODY_LEVELS[2] the same crumb reads 1.00 and 0.92 at
+   for the flakes. (The disc figure read 0.318 +/- 0.173 when it was taken
+   over raw RES_R, which is 2.89 times the comparable area — see the crumb's
+   row in SLIME.cover. Re-measured on the same four seeds with the scale
+   fixed, every other number here came back unchanged, which is what says the
+   two are comparable and only the disc moved.) At BODY_LEVELS[2] the same crumb reads 1.00 and 0.92 at
    59 s. The tissue is there; it is film, and the skirt is what draws it. */
-var RES_R    = 14;            /* cells: the floor under the origin's reach */
+var RES_R    = 14;            /* cells: the origin's PUDDLE radius — see above.
+                                 Not the floor padReach applies, which is this
+                                 through the same conversion the crumb's dot
+                                 makes: (RES_R / PUDDLE_R) * PUDDLE_MIN, 11.1. */
 /* It has no alpha of its own: the origin is painted with a pad's, because it
    is a pad — the same substance, at least as thick, painted by the same
    function from the same contour.
@@ -11936,6 +11951,36 @@ function show(id) {
 }
 
 /* ---------- title ---------- */
+/* The build on the glass, and the simulation version it runs.
+   ------------------------------------------------------------
+   The deploy stamps the commit into a constant at the foot of index.html (see
+   DEPLOY.md), and until now nothing showed it: `slime status` could read it
+   over HTTP and a person looking at the page could not, short of viewing
+   source. That is the wrong way round for the one question a static site
+   makes hard to answer — is what I am looking at the thing that was just
+   deployed, or the copy my browser kept?
+
+   SIM_V rides along because it answers the other version question, and it is
+   the one with consequences a player can see: a best time or a recorded tape
+   from another SIM_V is not comparable and is dropped, so a run whose times
+   have gone is a run whose simulation version moved.
+
+   Written once, from init, rather than on every arrival at the title screen:
+   both halves are constants for the life of the page, and goTitle re-renders
+   the schedule because the schedule changes.
+
+   The stamp constant is read through `typeof` rather than named directly. It
+   is declared with `const` in a classic script, which puts it in the global
+   LEXICAL scope and not on `window` — so a bare reference resolves, but a
+   bare reference on a page that somehow lacks it throws a ReferenceError,
+   and that would take the whole of init() down for a decoration. */
+function renderStamp() {
+  var el = $('stamp');
+  if (!el) return;
+  var b = (typeof BUILD === 'string' && BUILD) ? BUILD : 'unstamped';
+  el.textContent = 'build ' + b + ' \u00b7 sim v' + SIM_V;
+}
+
 function renderTitle() {
   var box = $('dishes');
   box.innerHTML = '';
@@ -14123,6 +14168,7 @@ function init() {
   dockActions();
   setSpeed(1);
   renderTitle();
+  renderStamp();
   show('scr-title');
   /* A fragment naming a dish opens it; anything else — including nothing —
      leaves the schedule up. The title screen is rendered either way so that
@@ -14432,8 +14478,16 @@ function init() {
         out.push({ label: nd.label, prog: S.nodeDone[i] ? 1 : S.nodeProg[i],
                    disc: frac(nd.x, nd.y, nd.r), dot: frac(nd.x, nd.y, nd.r * FOOD_DOT_R) });
       }
+      /* Both of the crumb's radii go through the same conversion, because a
+         column that mixes two scales is the error this tool was written to
+         stop being made. RES_R is the origin's PUDDLE radius — its answer to
+         nd.r * PUDDLE_R, not to nd.r — so the station radius a flake's `disc`
+         is taken over is RES_R / PUDDLE_R, exactly as `dot` and paintFood and
+         paintPuddles all already take it. Against raw RES_R the crumb's disc
+         was a fraction of PUDDLE_R^2 = 2.89 times the comparable area, so the
+         crumb row could not be read beside the flake rows above it. */
       out.push({ label: 'crumb', prog: 1 - originFrac(e),
-                 disc: frac(e.inoc.x, e.inoc.y, RES_R),
+                 disc: frac(e.inoc.x, e.inoc.y, RES_R / PUDDLE_R),
                  dot: frac(e.inoc.x, e.inoc.y, (RES_R / PUDDLE_R) * FOOD_DOT_R) });
       return out;
     },
