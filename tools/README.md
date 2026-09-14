@@ -235,3 +235,57 @@ standard error near 0.073, with the spread nearly tripled. There is one figure
 here, its shape is stated above, and the moment it is taken at is printed with
 it. A coverage claim that does not say *which* fraction, over *what*, *when* is
 not a measurement.
+
+## mass.js
+
+What the mass layer draws, and whether it has an EDGE.
+
+The layer paints the tissue heaped on the food. It used to do that by filling
+the body's contour inside a circle at each station, and a fill that is opaque
+where the circle lands draws an ARC wherever tissue crosses it. That is the
+defect; `PAD_BUDGET` in `sim.js` is the replacement, and this is how both are
+held to a number.
+
+```bash
+node tools/mass.js                              # EXP-01, one seed, three times
+CLIP=1 node tools/mass.js                       # and what the circle does there
+TUNE=13@0.6,18@0.43,26@0.3 node tools/mass.js   # sweep the budget
+SHOTS=/tmp/shots TIMES=45 node tools/mass.js    # write the plate as a png too
+```
+
+Two figures, both at a stated moment and on one run:
+
+- **mass** — per station, `core`/`crad`: the cells painted at a weight of half
+  or better, and how far the furthest of them is. Cells, 0.551 mm each.
+- **step** — the largest step the layer's opacity takes between neighbouring
+  lattice cells that are both tissue, `any` anywhere and `wide` where both are
+  at least six cells from the tissue's edge. An edge in a picture is a step in
+  a line; this is that step, as a number.
+
+`quads` is what the trace actually looked at on the last rebuild, against the
+plate's 108,780 — 5 % of them at 45 s and 10.5 % at 120 s. It is printed
+because the layer's whole performance claim rests on it, and a claim that is
+not printed is a claim nobody re-checks.
+
+`step` is the figure a clip cannot win, and `CLIP=1` prints why: the circle's
+fill is at full alpha where it lands, so it steps by the whole of it —
+0.92 — over the share of the circle that `in` reports as standing on tissue,
+of which `thru` cuts tissue that carries on outside. Measured on
+EXP-01/11f9a2, the origin's circle stands on tissue over 0.80 of itself at
+20 s with 0.72 of it cutting, and each flake's over 0.23 to 0.41 at 120 s.
+The budget's worst step over the same run is 0.26 where the tissue is wide
+enough for a step to read.
+
+### What TUNE trades
+
+`budget@hold` — the budget in `PAD_D_REF` units, and the share of it held at
+full weight before the fade begins. Hold is how far the mass reaches; budget
+minus hold is how long it takes to fade; a longer fade is a smaller step at
+the cost of a wider mass. There is no setting that is small and soft, and
+that is the whole choice the layer offers:
+
+| budget@hold | flake reach at 120 s | of the plate | step where wide |
+|---|---|---|---|
+| 13@0.6  | 29–34 cells | 7.0 % | 0.55 |
+| 18@0.43 | 32–37 cells | 9.1 % | 0.26 |
+| 26@0.3  | 36–41 cells | 12.8 % | 0.21 |
