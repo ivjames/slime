@@ -7690,9 +7690,13 @@ var PUDDLE_MAX = 2.2;
    RES_R is the floor under the reach rather than the radius itself.
 
    Measured, this is the one station the complaint was right about: at win +
-   15 s over four seeds the tissue covers 0.318 +/- 0.173 of the crumb's disc
+   15 s over four seeds the tissue covers 0.369 +/- 0.285 of the crumb's disc
    at the mass level and 0.313 of the crumb's own dot, against 0.899 and 0.995
-   for the flakes. At BODY_LEVELS[2] the same crumb reads 1.00 and 0.92 at
+   for the flakes. (The disc figure read 0.318 +/- 0.173 when it was taken
+   over raw RES_R, which is 2.89 times the comparable area — see the crumb's
+   row in SLIME.cover. Re-measured on the same four seeds with the scale
+   fixed, every other number here came back unchanged, which is what says the
+   two are comparable and only the disc moved.) At BODY_LEVELS[2] the same crumb reads 1.00 and 0.92 at
    59 s. The tissue is there; it is film, and the skirt is what draws it. */
 var RES_R    = 14;            /* cells: the origin's PUDDLE radius — see above.
                                  Not the floor padReach applies, which is this
