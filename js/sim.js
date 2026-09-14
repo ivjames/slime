@@ -8447,14 +8447,20 @@ function padWalk() {
    the weight is. Two things fall out of it and both are needed. The loops
    close inside the weight, so the quads worth looking at are a list — the
    trace stops being a scan of the plate and becomes a scan of the mass,
-   which on EXP-01 at two minutes is about a twentieth of it. And the cut the
-   zeroing makes is at a weight of zero, so it is not drawn: the contour ends
-   where nothing is painted anyway.
+   which on EXP-01/11f9a2 is a twentieth of the plate's quads at 45 s and a
+   tenth at 120 s — SLIME.mass() prints it, so the claim is a number. And the
+   cut the zeroing makes is never drawn, which is the load-bearing part and is
+   true twice over: where the weight ends it ends by FADING, so the contour
+   that closes along it closes at an alpha of nothing; and a lattice cell
+   outside the mask holds no grid cell at BODY_LEVELS[0] or over, so zeroing
+   it moves no contour at all.
 
    Measured: tracing ten levels of the whole plate a rebuild cost 15 ms of a
    7 ms rebuild — more than doubling it, and a fifth off the step rate. */
 var massV = new Float32Array(NCELL);
 var massQ = new Int32Array(NCELL);        /* quads the trace looks at */
+/* four cells a lattice cell, and the lattice is a quarter of the grid, so
+   the write list cannot outrun the plate however much of it is mass */
 var massW = new Int32Array(NCELL);        /* cells massV was written to, to clear */
 var massQS = new Int32Array(NCELL);       /* a stamp per quad, so it is listed once */
 var massQN = 0, massWN = 0, massStamp = 0;
@@ -14364,7 +14370,11 @@ function init() {
       fieldDirty = true; dirtyFrames = REBUILD_EVERY;
       return { stations: st,
                step: { any: +(any * PAD_A).toFixed(3), wide: +(wide * PAD_A).toFixed(3), at: [ax2, ay2] },
-               plate: { cells: tot * 4, pct: +(100 * tot / N).toFixed(1) } };
+               /* `quads` is what the last rebuild's trace actually looked at,
+                  against the plate's (GH-1)*GW — the claim massField makes, as
+                  a number rather than as an assertion */
+               plate: { cells: tot * 4, pct: +(100 * tot / N).toFixed(1),
+                        quads: massQN, ofPlate: +(100 * massQN / ((GH - 1) * GW)).toFixed(1) } };
     },
     /* harness only: the budget's dials, so a sweep is one page rather than
        one build each */

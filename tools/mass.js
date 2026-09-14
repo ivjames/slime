@@ -131,7 +131,8 @@ const pad = (v, n) => String(v).padStart(n);
         const lbl = tune ? `${tune.B}@${tune.HOLD}` : 'as built';
         console.log(`  ${lbl.padEnd(9)} ` +
           r.stations.map(s => `${s.label.replace('flake ', '')}:${pad(s.core, 4)}/${pad(s.crad, 4)}`).join(' ') +
-          `  plate ${r.plate.pct}%  step ${r.step.any}/${r.step.wide}`);
+          `  plate ${r.plate.pct}%  step ${r.step.any}/${r.step.wide}` +
+          `  quads ${r.plate.quads} (${r.plate.ofPlate}%)`);
         if (SHOTS) {
           const slug = tune ? `${tune.B}h${tune.HOLD}` : 'built';
           const f = path.join(SHOTS, `${CASE}-${seed}-t${pad(t, 3).replace(/ /g, '0')}-${slug}.png`);

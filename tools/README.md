@@ -262,6 +262,11 @@ Two figures, both at a stated moment and on one run:
   at least six cells from the tissue's edge. An edge in a picture is a step in
   a line; this is that step, as a number.
 
+`quads` is what the trace actually looked at on the last rebuild, against the
+plate's 108,780 — 5 % of them at 45 s and 10.5 % at 120 s. It is printed
+because the layer's whole performance claim rests on it, and a claim that is
+not printed is a claim nobody re-checks.
+
 `step` is the figure a clip cannot win, and `CLIP=1` prints why: the circle's
 fill is at full alpha where it lands, so it steps by the whole of it —
 0.92 — over the share of the circle that `in` reports as standing on tissue,
