@@ -7534,9 +7534,10 @@ var LANDFALL_MAX = 24;        /* nodes the carry is walked inward over, at most 
    The sim already has that mass — the fan feeding on a flake is the
    thickest tissue on the plate — so the puddle is drawn from it: the
    eased body's contour at PUDDLE_LV, filled in the trunk's tone under
-   the veins so the trunks run into it, but only within PUDDLE_R flake
-   radii of a flake being eaten or eaten, and fading to nothing at that
-   distance. The fade, not a loop test, is what keeps the puddle at the
+   the veins so the trunks run into it, but only within the reach padReach
+   measures at a flake being eaten or eaten, and fading to nothing at that
+   distance. (It was a fixed PUDDLE_R flake radii when this was written;
+   PUDDLE_MIN, PUDDLE_MAX and padReach took the sizing over.) The fade, not a loop test, is what keeps the puddle at the
    flake: at any level the fan on a flake is one piece with the trunk
    that feeds it, and the trunk with the drop, so the contour's loop
    around a pad is the loop around the whole network, and a first try
@@ -7616,7 +7617,8 @@ var PUDDLE_R  = 1.7;
 
    What this does NOT do is make the clip circle vanish. Nothing paints the
    body's mass under the pad, so the rim is still an edge where the contour
-   crosses PUDDLE_R — a trunk running into a pad is cut off square there. It
+   crosses the clip padReach sized — a trunk running into a pad is cut off
+   square there. It
    is the lowest-contrast edge available rather than no edge, and that is the
    honest claim. Filling the body's levels (BODY_FILL) is what would remove
    it, and that is a different change. */
@@ -7692,7 +7694,10 @@ var PUDDLE_MAX = 2.2;
    at the mass level and 0.313 of the crumb's own dot, against 0.899 and 0.995
    for the flakes. At BODY_LEVELS[2] the same crumb reads 1.00 and 0.92 at
    59 s. The tissue is there; it is film, and the skirt is what draws it. */
-var RES_R    = 14;            /* cells: the floor under the origin's reach */
+var RES_R    = 14;            /* cells: the origin's PUDDLE radius — see above.
+                                 Not the floor padReach applies, which is this
+                                 through the same conversion the crumb's dot
+                                 makes: (RES_R / PUDDLE_R) * PUDDLE_MIN, 11.1. */
 /* It has no alpha of its own: the origin is painted with a pad's, because it
    is a pad — the same substance, at least as thick, painted by the same
    function from the same contour.
