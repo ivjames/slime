@@ -91,8 +91,16 @@ h1,h2,h3{font-weight:600;margin:0}
    deploy stamp was readable only by viewing source or curling the page, which
    is fine for `slime status` and no use at all to someone looking at a plate
    that is behaving oddly. Quieter than .sub and in the same idiom, at the
-   foot of the schedule where a lab sticker would be. */
-.stamp{text-align:center;margin-top:18px;color:var(--dim);opacity:.62;
+   foot of the schedule where a lab sticker would be.
+
+   Quieter as a SOLID tone and not as --dim under an opacity. Faded that way
+   it composites to #63695b, which is 3.44:1 on --bg and under the AA floor
+   at 10.5px — and the :root comment says in as many words that --dim was
+   raised to clear 4.5:1 wherever it carries 10px type. This sheet has made
+   that exact mistake once already and reverted it: see the not-yet-reached
+   node note, "a half-opacity --dim, which is a colour you can see only if
+   you already know what it says". 5.08:1 here, against --dim's own 7.33. */
+.stamp{text-align:center;margin-top:18px;color:#7d8573;
   font-size:10.5px;letter-spacing:.18em}
 
 .slab{border:1px solid var(--line);background:linear-gradient(180deg,#14180f,#0f1210);border-radius:3px}
