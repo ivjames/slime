@@ -7528,7 +7528,13 @@ var TREE_FLOW_EVERY = 8;      /* growth passes between flow walks */
 var TREE_WLINK = 1.6;         /* cells: a vein carrying one flake pair */
 var TREE_SRC_MAX = 16;        /* flakes the flow walk can take */
 var LANDFALL_MAX = 24;        /* nodes the carry is walked inward over, at most */
-/* ---- the puddle ----
+/* ---- the puddle, which is the clip, which is off ----
+   What follows is the mass layer as it was: the body's contour filled inside
+   a circle at each station. PAD_BUDGET replaces it and says why; this is
+   kept because it is the alternative, and because the paragraphs below are
+   the record of what was tried in it. Read them as history, not as what the
+   plate draws.
+
    In the time-lapse an oat the network has reached disappears under a
    mass of plasmodium: the flake becomes a puddle as the lines take it.
    The sim already has that mass — the fan feeding on a flake is the
@@ -8211,6 +8217,317 @@ function padReach(cx, cy, r0, lv) {
   return d < lo ? lo : (d > cap ? cap : d);
 }
 
+/* ---- the mass as a budget rather than a clip ----
+   What the clip above cannot do, and says so: end. A pad is the body's
+   contour filled inside a circle, and the fill is at full alpha where the
+   circle lands, so wherever tissue crosses that circle the plate draws an
+   ARC — measured on EXP-01/11f9a2 at 120 s, a quarter to two fifths of every
+   flake's clip circle stands on tissue at the skirt's level and half of that
+   again has tissue continuing outside it. The circle is not a fading edge
+   there; it is a cut through the organism, and it is what "there are masks
+   around the crumbs" names.
+
+   A clip cannot be fixed by choosing a better radius, because a radius is
+   the wrong quantity. What is wanted is the tissue heaped ON the food, and
+   the tissue does not know where the flake's centre is; it knows how thick
+   it is. So the mass is painted by a WEIGHT, one number a cell, and the
+   weight is continuous — there is no level at which it steps, so there is
+   no edge anywhere on the plate for the eye to find.
+
+   The weight is a travel budget spent in thinness. From the food outward,
+   crossing a cell costs PAD_D_REF / (the tissue's half-width there): a step
+   across a thick pad is nearly free, a step along a thin filament is dear.
+   The mass is what the budget reaches. On the drop at the origin, forty
+   cells of solid cytoplasm cost about a tenth of the budget a cell, so the
+   whole drop is drawn and the shape drawn is the DROP; the trunks leaving it
+   are five or six cells across, cost four times as much a cell, and the mass
+   dies a little way down each of them — which is a tube running out of a
+   mass, not a tube cut off square by an arc.
+
+   Three properties fall out of it that the clip could not have together:
+
+   - it is on the food, because that is where the walk starts;
+   - it is present the moment there is any tissue on the food at all, which
+     is the whole middle of a run (the clip's two contours were an attempt at
+     the same thing, one level for the mass and one for the film under it);
+   - it has no edge, because the weight fades to nothing wherever the tissue
+     narrows, and tissue that does not narrow is tissue the mass belongs on.
+
+   Costed on the FILM's half-width, BODY_LEVELS[PAD_MASK_LV], and not on the
+   tube mask the veins take their axis from: a flake being eaten at 45 s has
+   film on it and no tube yet, and a cost read off the tube mask is infinite
+   there — the mass would arrive at each flake only once the tube did, which
+   is the defect this layer exists to cure. */
+var PAD_BUDGET  = true;       /* the mass layer: budget, not clip */
+/* The clip is kept, off, under this flag: it is the alternative and the
+   record of what was wrong with it, and turning it back on is one word. It
+   and the budget are exclusive — paintPuddles hands over to paintMass — and
+   both stand down under BODY_FILL, which draws the whole body and has no
+   mass to localise. */
+var PAD_MASK_LV = 0;          /* index into BODY_LEVELS: tissue the walk may cross */
+var PAD_D_REF   = 6;          /* cells of half-width a step costs one unit at */
+var PAD_B       = 18;         /* the budget, in those units */
+var PAD_HOLD    = 0.43;       /* share of it held at full weight before the fade starts */
+var PAD_A       = 0.92;       /* the mass's alpha where the weight is one */
+/* The weight lives at HALF the plate's resolution, and costs nowhere near
+   half the picture: it is a soft mask multiplied against contours traced at
+   full resolution, so what a coarse mask buys is four times less walking and
+   what it costs is a cell of blur at the fade — which is a fade. The lattice
+   LW x LH is the one the component labeller already uses.
+
+   Where the layer's cost actually was is worth recording, because the guess
+   was wrong. Built naively it took a fifth off the step rate — 141 a second
+   to 108, at turbo 32 on EXP-01/11f9a2 grown to 45 s — and the walk was not
+   what did it: at half resolution the rate was still 108. It was the TRACE,
+   ten contours of the whole plate a rebuild, +15 ms on a 7 ms rebuild. That
+   is what massField answers, and with both in the rate is 140 against the
+   clip's 138. */
+var padD = new Float32Array(LW * LH);   /* the film's half-width, in whole cells */
+var padG = new Float32Array(LW * LH);   /* budget spent reaching this lattice cell */
+var padW = new Float32Array(LW * LH);   /* the weight, 0..1 */
+var padC = new Float32Array(LW * LH);   /* the cost of crossing it, budget a cell */
+var pbX0 = 0, pbY0 = 0, pbX1 = -1, pbY1 = -1;   /* the lattice box anything painted lies in */
+var padCv = null, padCtx = null, padImg = null;   /* the weight as a mask */
+var padScr = null, padSctx = null;                /* the levels, before they are masked */
+
+/* the film's half-width: the same two-sweep chamfer bodyDist runs, on the
+   level the walk may cross rather than on the tube mask, over the lattice. A
+   lattice cell is tissue if any of its four is — the mask a step may stand
+   on is generous by half a cell, and a mass half a cell wide at its fringe
+   is at a weight of nothing. Distances come out in whole cells, since a
+   lattice step is two of them. */
+function padDist(lv) {
+  var x, y, c, d, a, N = LW * LH;
+  for (y = 0; y < LH; y++) {
+    var lr = y * LW, gr = (y << 1) * GW;
+    for (x = 0; x < LW; x++) {
+      var g = gr + (x << 1);
+      var on = bodyV[g] >= lv || bodyV[g + 1] >= lv || bodyV[g + GW] >= lv || bodyV[g + GW + 1] >= lv;
+      padD[lr + x] = on ? DT_INF : 0;
+    }
+  }
+  /* the lattice's own rim is not tissue. The sweeps below start a cell in —
+     as bodyDist's do — so a rim cell left in the mask would keep the infinity
+     it was initialised with, read as the widest tissue on the plate, and sit
+     at a weight of zero beside a mass at one: a step of the whole alpha, at
+     the one place on the plate the eye is already looking for an edge. The
+     grid's own rim is zeroed for the same reason (see bodyRim). */
+  for (x = 0; x < LW; x++) { padD[x] = 0; padD[(LH - 1) * LW + x] = 0; }
+  for (y = 0; y < LH; y++) { padD[y * LW] = 0; padD[y * LW + LW - 1] = 0; }
+  for (y = 1; y < LH; y++) {
+    var r1 = y * LW;
+    for (x = 1; x < LW - 1; x++) {
+      c = r1 + x; d = padD[c]; if (d === 0) continue;
+      a = padD[c - 1] + 1; if (a < d) d = a;
+      a = padD[c - LW] + 1; if (a < d) d = a;
+      a = padD[c - LW - 1] + DT_R2; if (a < d) d = a;
+      a = padD[c - LW + 1] + DT_R2; if (a < d) d = a;
+      padD[c] = d;
+    }
+  }
+  for (y = LH - 2; y >= 0; y--) {
+    var r2 = y * LW;
+    for (x = LW - 2; x >= 1; x--) {
+      c = r2 + x; d = padD[c]; if (d === 0) continue;
+      a = padD[c + 1] + 1; if (a < d) d = a;
+      a = padD[c + LW] + 1; if (a < d) d = a;
+      a = padD[c + LW - 1] + DT_R2; if (a < d) d = a;
+      a = padD[c + LW + 1] + DT_R2; if (a < d) d = a;
+      padD[c] = d;
+    }
+  }
+  for (c = 0; c < N; c++) padD[c] *= 2;   /* lattice steps to cells */
+}
+
+/* The budget spent reaching each cell, from every station's food outward.
+   A weighted distance, so the two-sweep chamfer a distance transform uses is
+   not exact here — two sweeps find no path that doubles back. Four, in
+   alternating directions, and what is left is an over-estimate on a path
+   that winds, which draws a mass a cell short down a hairpin. */
+var PAD_SWEEPS = 4;
+function padWalk() {
+  var e = S.exp, i, x, y, c, d, a, s2, N = LW * LH;
+  padDist(BODY_LEVELS[PAD_MASK_LV]);
+  for (i = 0; i < N; i++) {
+    var h = padD[i];
+    if (h <= 0) { padG[i] = -1; padC[i] = 0; continue; }
+    padG[i] = DT_INF;
+    /* A lattice step is two cells, so it is charged for two. No floor is
+       needed under the half-width: the lattice transform's own smallest
+       non-zero reading is one lattice step, which is two cells, so the
+       dearest a step can be is PAD_D_REF. */
+    padC[i] = 2 * PAD_D_REF / h;
+  }
+  /* the seeds: tissue standing on a station's own food. A flake with nothing
+     on it yet seeds nothing and is drawn nothing, which is the honest
+     picture of a flake the culture has not reached. */
+  function seed(cx, cy, r) {
+    var lx = cx * 0.5, ly = cy * 0.5, lr = r * 0.5;
+    var x0 = Math.max(0, Math.floor(lx - lr)), x1 = Math.min(LW - 1, Math.ceil(lx + lr));
+    var y0 = Math.max(0, Math.floor(ly - lr)), y1 = Math.min(LH - 1, Math.ceil(ly + lr));
+    for (var yy = y0; yy <= y1; yy++) for (var xx = x0; xx <= x1; xx++) {
+      var dx = xx + 0.5 - lx, dy = yy + 0.5 - ly;
+      if (dx * dx + dy * dy > lr * lr) continue;
+      var k = yy * LW + xx;
+      if (padG[k] > 0) padG[k] = 0;
+    }
+  }
+  for (i = 0; i < e.nodes.length; i++) {
+    if (!S.nodeDone[i] && !(S.nodeProg[i] > 0.01)) continue;
+    seed(e.nodes[i].x, e.nodes[i].y, e.nodes[i].r);
+  }
+  seed(e.inoc.x, e.inoc.y, RES_R / PUDDLE_R);
+  for (s2 = 0; s2 < PAD_SWEEPS; s2++) {
+    var fwd = (s2 & 1) === 0;
+    for (y = fwd ? 1 : LH - 2; fwd ? y < LH - 1 : y >= 1; y += fwd ? 1 : -1) {
+      var row = y * LW;
+      for (x = fwd ? 1 : LW - 2; fwd ? x < LW - 1 : x >= 1; x += fwd ? 1 : -1) {
+        c = row + x; d = padG[c];
+        if (d <= 0) continue;
+        var here = padC[c] * 0.5;
+        var n0 = fwd ? c - 1 : c + 1, n1 = fwd ? c - LW : c + LW;
+        var n2 = fwd ? c - LW - 1 : c + LW + 1, n3 = fwd ? c - LW + 1 : c + LW - 1;
+        a = padG[n0]; if (a >= 0) { a += here + padC[n0] * 0.5; if (a < d) d = a; }
+        a = padG[n1]; if (a >= 0) { a += here + padC[n1] * 0.5; if (a < d) d = a; }
+        a = padG[n2]; if (a >= 0) { a += (here + padC[n2] * 0.5) * DT_R2; if (a < d) d = a; }
+        a = padG[n3]; if (a >= 0) { a += (here + padC[n3] * 0.5) * DT_R2; if (a < d) d = a; }
+        padG[c] = d;
+      }
+    }
+  }
+  /* the weight: one to PAD_HOLD of the budget, then smoothly to nothing at
+     it. Smoothstep and not a straight ramp, so the mass has no crease where
+     the hold ends either — the whole point of the layer is that there is no
+     line anywhere in it that the tissue did not put there.
+
+     The box it lands in is kept as it goes, with a cell of margin so the
+     mask's own edge is a zero and not a value the blit would cut: the mask
+     is a few per cent of the plate, and everything downstream of this —
+     the image write, the contour trace, the blit — is bounded by it. */
+  var hold = PAD_B * PAD_HOLD, span = PAD_B - hold;
+  pbX0 = LW; pbY0 = LH; pbX1 = -1; pbY1 = -1;
+  for (y = 0; y < LH; y++) {
+    var r3 = y * LW;
+    for (x = 0; x < LW; x++) {
+      i = r3 + x;
+      var g = padG[i], w;
+      if (g < 0 || g >= PAD_B) { padW[i] = 0; continue; }
+      if (g <= hold) w = 1;
+      else { var u = 1 - (g - hold) / span; w = u * u * (3 - 2 * u); }
+      padW[i] = w;
+      if (w <= 0) continue;
+      if (x < pbX0) pbX0 = x;
+      if (x > pbX1) pbX1 = x;
+      if (y < pbY0) pbY0 = y;
+      if (y > pbY1) pbY1 = y;
+    }
+  }
+  if (pbX1 >= pbX0) {
+    pbX0 = pbX0 > 0 ? pbX0 - 1 : 0; pbY0 = pbY0 > 0 ? pbY0 - 1 : 0;
+    pbX1 = pbX1 < LW - 1 ? pbX1 + 1 : LW - 1; pbY1 = pbY1 < LH - 1 ? pbY1 + 1 : LH - 1;
+  }
+}
+
+/* The field the mass's contours are traced from: the body, zeroed wherever
+   the weight is. Two things fall out of it and both are needed. The loops
+   close inside the weight, so the quads worth looking at are a list — the
+   trace stops being a scan of the plate and becomes a scan of the mass,
+   which on EXP-01 at two minutes is about a twentieth of it. And the cut the
+   zeroing makes is at a weight of zero, so it is not drawn: the contour ends
+   where nothing is painted anyway.
+
+   Measured: tracing ten levels of the whole plate a rebuild cost 15 ms of a
+   7 ms rebuild — more than doubling it, and a fifth off the step rate. */
+var massV = new Float32Array(NCELL);
+var massQ = new Int32Array(NCELL);        /* quads the trace looks at */
+var massW = new Int32Array(NCELL);        /* cells massV was written to, to clear */
+var massQS = new Int32Array(NCELL);       /* a stamp per quad, so it is listed once */
+var massQN = 0, massWN = 0, massStamp = 0;
+function massField() {
+  var lx, ly, dx, dy, qx, qy, k, g, q;
+  for (k = 0; k < massWN; k++) massV[massW[k]] = 0;
+  massWN = 0; massQN = 0;
+  if (pbX1 < pbX0) return;
+  if (++massStamp >= 2000000000) { massStamp = 1; massQS.fill(0); }
+  for (ly = pbY0; ly <= pbY1; ly++) {
+    var lr = ly * LW;
+    for (lx = pbX0; lx <= pbX1; lx++) {
+      if (!(padW[lr + lx] > 0)) continue;
+      /* the four cells this lattice cell stands over... */
+      for (dy = 0; dy < 2; dy++) for (dx = 0; dx < 2; dx++) {
+        var gx = (lx << 1) + dx, gy = (ly << 1) + dy;
+        if (gx >= GW || gy >= GH) continue;
+        g = gy * GW + gx;
+        massV[g] = bodyV[g]; massW[massWN++] = g;
+      }
+      /* ...and the nine quads any of them is a corner of, the ring included
+         so the loops that close along the zeroing are found */
+      for (qy = (ly << 1) - 1; qy <= (ly << 1) + 1; qy++) {
+        if (qy < 0 || qy > GH - 2) continue;
+        for (qx = (lx << 1) - 1; qx <= (lx << 1) + 1; qx++) {
+          if (qx < 0 || qx > GW - 2) continue;
+          q = qy * GW + qx;
+          if (massQS[q] === massStamp) continue;
+          massQS[q] = massStamp; massQ[massQN++] = q;
+        }
+      }
+    }
+  }
+}
+
+/* The mass: the body's own contours, every level of them, under the weight.
+   Painted onto a scratch the size of the canvas and then cut to the weight
+   with destination-in — a raster step in a layer that is otherwise vector,
+   and the price of a mask that is a FIELD rather than a shape. Only the box
+   the weight lands in is written and blitted.
+
+   destination-in and not a clip because the weight has no outline to clip
+   to. That is the whole point of it: a clip is a decision about where the
+   mass ENDS, and every such decision drew an arc. */
+function paintMass(c, sx, sy) {
+  var k, x, y;
+  if (pbX1 < pbX0) return;
+  if (!padCv) {
+    padCv = document.createElement('canvas');
+    padCv.width = LW; padCv.height = LH;
+    padCtx = padCv.getContext('2d');
+    padImg = padCtx.createImageData(LW, LH);
+  }
+  var px = padImg.data, bw = pbX1 - pbX0 + 1, bh = pbY1 - pbY0 + 1;
+  for (y = pbY0; y <= pbY1; y++) {
+    var row = y * LW;
+    for (x = pbX0; x <= pbX1; x++) {
+      var i = row + x, o = i * 4, w = padW[i];
+      px[o] = 255; px[o + 1] = 255; px[o + 2] = 255;
+      px[o + 3] = w > 0 ? Math.round(w * 255 * PAD_A) : 0;
+    }
+  }
+  padCtx.putImageData(padImg, 0, 0, pbX0, pbY0, bw, bh);
+  var W = c.canvas.width, H = c.canvas.height;
+  if (!padScr) { padScr = document.createElement('canvas'); padSctx = padScr.getContext('2d'); }
+  if (padScr.width !== W || padScr.height !== H) { padScr.width = W; padScr.height = H; }
+  /* the lattice is half the grid, so a lattice cell is two of the transform's */
+  var dx0 = pbX0 * 2 * sx, dy0 = pbY0 * 2 * sy, dw = bw * 2 * sx, dh = bh * 2 * sy;
+  padSctx.setTransform(1, 0, 0, 1, 0, 0);
+  padSctx.clearRect(0, 0, W, H);
+  padSctx.setTransform(sx, 0, 0, sy, 0, 0);
+  /* the paths are the mass's own — massField traced them from a field that is
+     zero outside the weight — so this fills the box and not the plate */
+  for (k = 0; k < BODY_LEVELS.length; k++) {
+    if (!bodyPath[k]) continue;
+    padSctx.fillStyle = BODY_STYLE[k];
+    padSctx.fill(bodyPath[k], 'evenodd');
+  }
+  padSctx.setTransform(1, 0, 0, 1, 0, 0);
+  padSctx.globalCompositeOperation = 'destination-in';
+  padSctx.drawImage(padCv, pbX0, pbY0, bw, bh, dx0, dy0, dw, dh);
+  padSctx.globalCompositeOperation = 'source-over';
+  c.save();
+  c.setTransform(1, 0, 0, 1, 0, 0);
+  c.drawImage(padScr, dx0, dy0, dw, dh, dx0, dy0, dw, dh);
+  c.restore();
+}
+
 /* the puddles: the pads on the flakes, and the mass at the origin the culture
    wakes in. Two contours each, skirt under mass — see PUDDLE_SKIRT_LV for what
    one contour left out, which was the food.
@@ -8222,8 +8539,9 @@ function padReach(cx, cy, r0, lv) {
    paintFood), which is the mark that means food; a mass that vanished at 120 s
    while the cytoplasm that made it stayed put was the picture disagreeing with
    the plate. */
-function paintPuddles(c) {
+function paintPuddles(c, sx, sy) {
   var e = S.exp, i, pass, lv, al, path, nd;
+  if (PAD_BUDGET && !BODY_FILL) { paintMass(c, sx, sy); return; }
   var passes = [[PUDDLE_SKIRT_LV, PUDDLE_A * PUDDLE_SKIRT_A, VEIN_BANDS[0]],
                 [PUDDLE_LV, PUDDLE_A, null]];
   for (pass = 0; pass < passes.length; pass++) {
@@ -8370,7 +8688,7 @@ function paintTree() {
   vgctx.lineCap = 'round';
   vgctx.lineJoin = 'round';
   /* the puddles first, under everything */
-  paintPuddles(vgctx);
+  paintPuddles(vgctx, sx, sy);
   if (ghost) {
     vgctx.globalAlpha = TREE_GHOST_A;
     vgctx.lineWidth = TREE_GHOST_W;
@@ -9655,34 +9973,41 @@ function traceMass(minTier, out) {
    whose corners straddle it, which isoMin/isoMax answer in two compares —
    and only the edges the crossing entered are walked, from the list the
    sweep collected, so the cost is the outline's length, not the plate's. */
-function traceIso(f, lv, mm, keep) {
-  var NE = NCELL, x, y, n, e;
+/* `qlist`/`qn`, when given, are the quads to consider instead of the whole
+   plate — the mass layer traces a field that is zero outside its own weight,
+   so every loop it has closes inside the few thousand quads the weight
+   stands on, and the scan is of those rather than of the hundred thousand.
+   A list whose field is NOT zeroed outside it would cut loops open and close
+   them with a chord, which evenodd fills wrong; the zeroing is what makes
+   the list safe. */
+function traceIso(f, lv, mm, keep, qlist, qn) {
+  var NE = NCELL, x, y, n, e, qi;
   /* stamps rather than clears, one per level per rebuild; wrapped long
      before the integer runs out, with the one clear that then costs */
   if (isoStamp >= 2000000000) { isoStamp = 0; isoMark.fill(0); isoSeen.fill(0); }
   var stamp = ++isoStamp;
   isoListN = 0;
-  for (y = 0; y < GH - 1; y++) {
-    var row = y * GW;
-    for (x = 0; x < GW - 1; x++) {
-      n = row + x;
-      if (mm && (isoMin[n] >= lv || isoMax[n] < lv)) continue;
-      var a = f[n], b = f[n + 1], c = f[n + GW + 1], d = f[n + GW];
-      var ai = a >= lv, bi = b >= lv, ci = c >= lv, di = d >= lv;
-      var cs = (ai ? 1 : 0) | (bi ? 2 : 0) | (ci ? 4 : 0) | (di ? 8 : 0);
-      if (cs === 0 || cs === 15) continue;
-      /* edges: 0 top (H n), 1 right (V n+1), 2 bottom (H n+GW), 3 left (V n) */
-      msEid[0] = n; msEid[1] = NE + n + 1; msEid[2] = n + GW; msEid[3] = NE + n;
-      if (ai !== bi) { isoX[n] = x + 0.5 + (lv - a) / (b - a); isoY[n] = y + 0.5; }
-      if (bi !== ci) { isoX[NE + n + 1] = x + 1.5; isoY[NE + n + 1] = y + 0.5 + (lv - b) / (c - b); }
-      if (di !== ci) { isoX[n + GW] = x + 0.5 + (lv - d) / (c - d); isoY[n + GW] = y + 1.5; }
-      if (ai !== di) { isoX[NE + n] = x + 0.5; isoY[NE + n] = y + 0.5 + (lv - a) / (d - a); }
-      e = msEid[MS_FROM[cs]];
-      isoNext[e] = msEid[MS_TO[cs]]; isoMark[e] = stamp; isoList[isoListN++] = e;
-      if (MS_FROM2[cs] >= 0) {
-        e = msEid[MS_FROM2[cs]];
-        isoNext[e] = msEid[MS_TO2[cs]]; isoMark[e] = stamp; isoList[isoListN++] = e;
-      }
+  var qN = qlist ? qn : (GH - 1) * GW;
+  for (qi = 0; qi < qN; qi++) {
+    n = qlist ? qlist[qi] : qi;
+    x = n % GW; y = (n / GW) | 0;
+    if (x >= GW - 1) continue;
+    if (mm && (isoMin[n] >= lv || isoMax[n] < lv)) continue;
+    var a = f[n], b = f[n + 1], c = f[n + GW + 1], d = f[n + GW];
+    var ai = a >= lv, bi = b >= lv, ci = c >= lv, di = d >= lv;
+    var cs = (ai ? 1 : 0) | (bi ? 2 : 0) | (ci ? 4 : 0) | (di ? 8 : 0);
+    if (cs === 0 || cs === 15) continue;
+    /* edges: 0 top (H n), 1 right (V n+1), 2 bottom (H n+GW), 3 left (V n) */
+    msEid[0] = n; msEid[1] = NE + n + 1; msEid[2] = n + GW; msEid[3] = NE + n;
+    if (ai !== bi) { isoX[n] = x + 0.5 + (lv - a) / (b - a); isoY[n] = y + 0.5; }
+    if (bi !== ci) { isoX[NE + n + 1] = x + 1.5; isoY[NE + n + 1] = y + 0.5 + (lv - b) / (c - b); }
+    if (di !== ci) { isoX[n + GW] = x + 0.5 + (lv - d) / (c - d); isoY[n + GW] = y + 1.5; }
+    if (ai !== di) { isoX[NE + n] = x + 0.5; isoY[NE + n] = y + 0.5 + (lv - a) / (d - a); }
+    e = msEid[MS_FROM[cs]];
+    isoNext[e] = msEid[MS_TO[cs]]; isoMark[e] = stamp; isoList[isoListN++] = e;
+    if (MS_FROM2[cs] >= 0) {
+      e = msEid[MS_FROM2[cs]];
+      isoNext[e] = msEid[MS_TO2[cs]]; isoMark[e] = stamp; isoList[isoListN++] = e;
     }
   }
   var path = null, li;
@@ -9756,6 +10081,9 @@ function buildVeins() {
      are built either way. */
   if (PROF) pvT = performance.now();
   if (BODY) {
+    /* the mass's weight first: it is what the contours are traced inside,
+       and the quads worth looking at are the ones it stands on */
+    if (PAD_BUDGET && !BODY_FILL) { padWalk(); massField(); }
     for (y = 0; y < (BODY_FILL ? GH - 1 : 0); y++) {
       var rowB = y * GW;
       for (x = 0; x < GW - 1; x++) {
@@ -9771,6 +10099,12 @@ function buildVeins() {
     if (BODY_FILL) {
       for (b = 0; b < BODY_LEVELS.length; b++) bodyPath[b] = traceIso(bodyV, BODY_LEVELS[b], true);
       recPath = traceIso(recV, BODY_LEVELS[REC_LEVEL], false);
+    } else if (PAD_BUDGET) {
+      /* the mass's levels, traced inside its own weight — see massField */
+      for (b = 0; b < BODY_LEVELS.length; b++) {
+        bodyPath[b] = massQN ? traceIso(massV, BODY_LEVELS[b], false, null, massQ, massQN) : null;
+      }
+      recPath = null;
     } else {
       for (b = 0; b < BODY_LEVELS.length; b++) bodyPath[b] = null;
       recPath = null;
@@ -13929,6 +14263,124 @@ function init() {
       return { x: sx / c, y: sy / c };
     },
     grid: function () { return { w: GW, h: GH }; },
+    /* The mass layer, measured. The weight is a lattice field — two grid
+       cells to a side — and everything here is converted back to grid cells,
+       0.551 mm each, so it can be read beside cover() and beside the clip's
+       own figures.
+
+       Per station: `core` is the area at a weight of at least half and
+       `crad` how far the furthest of it is; `edge` and `erad` the same at a
+       twentieth, which is the outer limit of anything painted at all. A
+       station with no tissue on its food seeds nothing and reads zero.
+
+       `step` is the largest step the layer's opacity takes between two
+       neighbouring lattice cells that are both tissue: `any` anywhere, and
+       `wide` where both of them are at least six cells from the tissue's
+       edge — that is, where there is enough tissue for a step to read as a
+       line rather than as the end of a filament. It is the number a clip
+       cannot win: a clip steps by its whole alpha wherever the contour
+       crosses it, over the share of the circle clipProbe reports as `in`,
+       because a clip has nowhere to fade. */
+    mass: function () {
+      var e = S.exp, st = [], i, x, y;
+      padWalk();
+      function one(label, cx, cy) {
+        var core = 0, crad = 0, edge = 0, erad = 0, R = 35, lx = cx * 0.5, ly = cy * 0.5;
+        var x0 = Math.max(0, Math.floor(lx - R)), x1 = Math.min(LW - 1, Math.ceil(lx + R));
+        var y0 = Math.max(0, Math.floor(ly - R)), y1 = Math.min(LH - 1, Math.ceil(ly + R));
+        for (y = y0; y <= y1; y++) for (x = x0; x <= x1; x++) {
+          var w = padW[y * LW + x]; if (w <= 0.05) continue;
+          var dx = x + 0.5 - lx, dy = y + 0.5 - ly, d2 = dx * dx + dy * dy;
+          if (d2 > R * R) continue;
+          edge++; if (d2 > erad) erad = d2;
+          if (w >= 0.5) { core++; if (d2 > crad) crad = d2; }
+        }
+        st.push({ label: label, core: core * 4, crad: +(2 * Math.sqrt(crad)).toFixed(1),
+                  edge: edge * 4, erad: +(2 * Math.sqrt(erad)).toFixed(1) });
+      }
+      for (i = 0; i < e.nodes.length; i++) one(e.nodes[i].label, e.nodes[i].x, e.nodes[i].y);
+      one('crumb', e.inoc.x, e.inoc.y);
+      var any = 0, wide = 0, ax2 = 0, ay2 = 0, N = LW * LH, WIDE = 6;
+      function pair(k, n, hk) {
+        var hn = padD[n]; if (!(hn > 0)) return;
+        var ds = Math.abs(padW[k] - padW[n]);
+        if (ds > any) { any = ds; ax2 = (k % LW) * 2; ay2 = ((k / LW) | 0) * 2; }
+        if (ds > wide && hk >= WIDE && hn >= WIDE) wide = ds;
+      }
+      for (y = 1; y < LH - 1; y++) for (x = 1; x < LW - 1; x++) {
+        var k = y * LW + x, hk = padD[k]; if (!(hk > 0)) continue;
+        pair(k, k - 1, hk); pair(k, k - LW, hk);
+      }
+      var tot = 0; for (i = 0; i < N; i++) if (padW[i] > 0.05) tot++;
+      /* the walk above wrote the live weight and its box, and the contours
+         standing beside them are the last rebuild's: ask for another, so the
+         next frame is drawn from one moment rather than two */
+      fieldDirty = true; dirtyFrames = REBUILD_EVERY;
+      return { stations: st,
+               step: { any: +(any * PAD_A).toFixed(3), wide: +(wide * PAD_A).toFixed(3), at: [ax2, ay2] },
+               plate: { cells: tot * 4, pct: +(100 * tot / N).toFixed(1) } };
+    },
+    /* harness only: the budget's dials, so a sweep is one page rather than
+       one build each */
+    padTune: function (o) {
+      if (o) {
+        if (o.B != null) PAD_B = o.B;
+        if (o.DREF != null) PAD_D_REF = o.DREF;
+        if (o.HOLD != null) PAD_HOLD = o.HOLD;
+        if (o.MASKLV != null) PAD_MASK_LV = o.MASKLV;
+        if (o.SWEEPS != null) PAD_SWEEPS = o.SWEEPS;
+        if (o.A != null) PAD_A = o.A;
+        if (o.on != null) PAD_BUDGET = !!o.on;
+        fieldDirty = true; dirtyFrames = REBUILD_EVERY;
+        treeDirty = true; treePaintT = -1e9;
+      }
+      return { B: PAD_B, DREF: PAD_D_REF, HOLD: PAD_HOLD, SWEEPS: PAD_SWEEPS,
+               MASKLV: PAD_MASK_LV, A: PAD_A, on: PAD_BUDGET };
+    },
+    /* harness only: the mass layer's clip, measured. For each station the
+       pads are painted at, the radius padReach hands the clip and what the
+       body's contour is doing where that circle lands: `in` is the share of
+       the circle standing on tissue at or above the traced level (the fill is
+       opaque there, so the circle is a drawn edge), `thru` the share where
+       the tissue continues OUTSIDE it as well (the circle cuts the organism),
+       and `reach`/`solid` the clip radius against how far the tissue actually
+       goes from that station at that level. All in cells. */
+    clipProbe: function (lvIdx) {
+      var e = S.exp, lv = BODY_LEVELS[lvIdx == null ? PUDDLE_LV : lvIdx], out = [], i;
+      var N = 720, EPS = 1.5;
+      function at(x, y) {
+        var cx = x | 0, cy = y | 0;
+        if (cx < 0 || cy < 0 || cx >= GW || cy >= GH) return 0;
+        return bodyV[cy * GW + cx];
+      }
+      function one(label, x, y, r0, prog) {
+        var r = padReach(x, y, r0, lv), k, ins = 0, thru = 0;
+        for (k = 0; k < N; k++) {
+          var a = k * 2 * Math.PI / N, ca = Math.cos(a), sa = Math.sin(a);
+          var vi = at(x + ca * (r - EPS), y + sa * (r - EPS));
+          var vo = at(x + ca * (r + EPS), y + sa * (r + EPS));
+          if (vi >= lv) { ins++; if (vo >= lv) thru++; }
+        }
+        /* how far the tissue at this level actually reaches from the station,
+           unclipped: the furthest cell at or above lv reachable in a straight
+           ray, out to 80 cells */
+        var solid = 0;
+        for (k = 0; k < N; k += 4) {
+          var a2 = k * 2 * Math.PI / N, c2 = Math.cos(a2), s2 = Math.sin(a2), d;
+          for (d = 1; d <= 80; d++) if (at(x + c2 * d, y + s2 * d) >= lv) solid = d > solid ? d : solid;
+        }
+        out.push({ label: label, prog: +prog.toFixed(3), reach: +r.toFixed(1),
+                   cap: +(r0 * PUDDLE_MAX).toFixed(1), solid: solid,
+                   'in': +(ins / N).toFixed(3), thru: +(thru / N).toFixed(3) });
+      }
+      for (i = 0; i < e.nodes.length; i++) {
+        if (!S.nodeDone[i] && !(S.nodeProg[i] > 0.01)) continue;
+        var nd = e.nodes[i];
+        one(nd.label, nd.x, nd.y, nd.r, S.nodeDone[i] ? 1 : S.nodeProg[i]);
+      }
+      one('crumb', e.inoc.x, e.inoc.y, RES_R / PUDDLE_R, 1 - originFrac(e));
+      return out;
+    },
     /* harness only: the body test as it last stood — agents off the body,
        and how many islands of five or more agents are standing off it */
     body: function () {
