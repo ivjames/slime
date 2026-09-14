@@ -93,14 +93,35 @@ function stat(a) {
        pair. */
     const reached = await page.waitForFunction(a => {
       const S = window.SLIME.S;
-      if (window.SLIME.steps() >= a.cap && S.paused) return true;
-      if (S.simT > 2 && !S.running) return true;
-      return a.at ? S.simT >= a.at : (S.holdT0 >= 0 && S.simT - S.holdT0 >= a.after);
+      const due = (window.SLIME.steps() >= a.cap && S.paused)
+               || (S.simT > 2 && !S.running)
+               || (a.at ? S.simT >= a.at : (S.holdT0 >= 0 && S.simT - S.holdT0 >= a.after));
+      /* FREEZE the dish at the moment the sample is due, instead of reading it
+         after the poll interval and a round trip have both elapsed on a
+         running plate. At turbo 8 the dish advances four sim seconds per real
+         second, so a 500 ms poll alone was worth up to two sim seconds of
+         drift — on a figure whose entire claim is the moment it is taken at,
+         and on a default moment (win + 15) that sits only three seconds under
+         WIN_HOLD, close enough that the drift could carry the sample past the
+         end of the run. runTo parks the dish on the step it has reached.
+
+         What is left is one poll plus a frame, not one frame: the freeze can
+         only fire on the poll that OBSERVES the moment, so the wait between
+         the moment falling due and that poll seeing it is still there. At
+         100 ms and turbo 8 that is about 0.4 sim seconds against the 2 the
+         500 ms poll was worth, and the round trip to the read — which was
+         unbounded, being a page evaluate on a running dish — is gone. */
+      if (due && S.running && !S.paused) { window.SLIME.runTo(window.SLIME.steps()); return false; }
+      return due;
     }, { at: AT, after: AFTER, cap: CAP },
-       { timeout: 900000, polling: 500 }).then(() => true).catch(() => false);
+       { timeout: 900000, polling: 100 }).then(() => true).catch(() => false);
     const r = await page.evaluate(n => {
       const S = window.SLIME.S;
-      const o = { t: +S.simT.toFixed(1), won: S.holdT0 >= 0, cover: window.SLIME.cover() };
+      /* sinceWin at full precision, because it is what `ok` is decided on and
+         the printed `t` is rounded for the eye */
+      const o = { t: +S.simT.toFixed(1), won: S.holdT0 >= 0,
+                  sinceWin: S.holdT0 >= 0 ? S.simT - S.holdT0 : -1,
+                  cover: window.SLIME.cover() };
       if (n) { o.levels = []; for (let i = 0; i < n; i++) o.levels.push(window.SLIME.cover(i)); }
       return o;
     }, LEVELS ? 7 : 0);
@@ -108,8 +129,17 @@ function stat(a) {
     /* Reaching the moment is the thing being asserted, so it is tested rather
        than assumed from the wait returning: the wait above also returns for a
        dish that stopped or capped BEFORE it, and counting that sample would
-       report a state from some earlier second under this second's heading. */
-    r.ok = reached && (AT ? r.t >= AT : r.won);
+       report a state from some earlier second under this second's heading.
+
+       On the win path that means testing the ELAPSED time and not merely that
+       a win happened. `won` alone passed a run that ended before win + AFTER
+       — trivially so for an AFTER above WIN_HOLD, where the run-ended clause
+       always fires first, and for any AFTER if the step cap lands in between.
+       The row was then pooled under a heading naming a moment it was not
+       taken at, which is the one thing this tool exists not to do. No
+       tolerance is needed: if the win clause is what fired, the dish was
+       frozen at that instant with the margin already met. */
+    r.ok = reached && (AT ? r.t >= AT : (r.won && r.sinceWin >= AFTER));
     rows.push(r);
     console.log(`${seed} ${r.ok ? 'ok ' : 'NOT MEASURABLE'} t=${r.t}  ` +
       r.cover.map(c => `${c.label} ${c.disc.toFixed(3)}/${c.dot.toFixed(3)}`).join('  '));
