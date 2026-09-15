@@ -14388,9 +14388,12 @@ function init() {
        Per station, all distances in grid cells (0.551 mm each, as cover()
        and mass() are):
 
-         core/crad  the mass, exactly as mass() reports it: lattice area at a
-                    weight of half or better, and how far the furthest of it
-                    stands from the station.
+         core/crad  the mass this station is standing in: the one connected
+                    piece of weight-half-or-better lattice, flooded from the
+                    station's own food, and how far the furthest of it
+                    stands from the station. NOT mass()'s figure, which is a
+                    fixed disc and on a crowded dish counts the neighbour's
+                    puddle as well — see the note in station().
          nearL      the nearest LIVE tree node to the station centre, out to
                     SCAN cells, and -1 for none in range. This is the figure
                     that separates "the tree never grew here" from "it grew
@@ -14416,13 +14419,22 @@ function init() {
                     (BODY_LEVELS[TREE_LV]) and at the one the MASS walks over
                     (BODY_LEVELS[PAD_MASK_LV]) — `disc` the share of the disc
                     the flood from the drop reaches, `geo` its step count.
-                    The two levels are not the same level, and that gap is
-                    the one thing a station can be an island BECAUSE of: the
-                    mass needs only the lower, the tree needs the higher, and
-                    between them the organism is drawn as a puddle with no
-                    line into it. This is the measurement that separates a
-                    tree that could have grown there and did not from one
-                    that had nothing at its level to grow along. */
+                    Over an in-plate disc: a station at the rim has the part
+                    of its disc that is off the plate left out of both, so
+                    the fraction is of the disc that exists.
+
+                    The two levels are not the same level, and the tempting
+                    reading is that the gap between them IS the defect — the
+                    mass needs only the lower, the tree needs the higher.
+                    That reading is wrong and this pair is what shows it
+                    rather than what supports it. Measured with treeTune's
+                    LV=0, which grows the tree at the mass's own level, the
+                    vein arrives at the same moment it did before; treeWhy
+                    says why, and the answer is that around an island station
+                    the window is bare at BOTH levels. A station is an island
+                    because the mass seeds at its own food and needs no
+                    connection to anything, while the tree can only extend
+                    from its own front. */
     tree: function () {
       var e = S.exp, out = [], i, SCAN = 60;
       padWalk();
@@ -14601,9 +14613,12 @@ function init() {
         for (var x = x0; x <= x1; x += sp) {
           var h = mix32(x, y, 7);
           var jx = x + (h % sp), jy = y + ((h >>> 8) % sp);
-          if (jx < 2 || jy < 2 || jx >= GW - 2 || jy >= GH - 2) { wall++; continue; }
+          /* the radius first: an edge point outside the window is not this
+             window's wall, and counting it made `wall` a figure about the
+             plate's rim rather than about the station */
           var dxs = jx + 0.5 - nd.x, dys = jy + 0.5 - nd.y;
           if (dxs * dxs + dys * dys > R * R) continue;
+          if (jx < 2 || jy < 2 || jx >= GW - 2 || jy >= GH - 2) { wall++; continue; }
           var c = jy * GW + jx;
           if (wallM[c]) { wall++; continue; }
           if (trail[c] < lv) { nolv++; continue; }
