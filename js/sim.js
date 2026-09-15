@@ -14431,6 +14431,7 @@ function init() {
          disc. Whole-plate and allocating, which is why it is here and not
          in the sim: nothing on the page calls it. */
       var floodSeen = new Uint8Array(NCELL), floodD = new Int32Array(NCELL), floodQ = new Int32Array(NCELL);
+      var massSeen = new Uint8Array(LW * LH), massQ = new Int32Array(LW * LH);
       function flood(lv) {
         floodSeen.fill(0);
         var h = 0, t = 0, sc = (e.inoc.y | 0) * GW + (e.inoc.x | 0);
@@ -14468,15 +14469,38 @@ function init() {
       mCells = flood(BODY_LEVELS[PAD_MASK_LV]);
       var mMark = floodSeen.slice(), mDist = floodD.slice();
       function station(label, cx, cy, prog, sr) {
-        /* the mass, on the lattice, as mass() takes it */
-        var core = 0, crad = 0, R = 35, lx = cx * 0.5, ly = cy * 0.5, x, y;
+        /* THIS station's mass, and not the neighbourhood's. mass() takes a
+           disc of radius R around the station, which is right when the dish
+           spaces its flakes out and wrong when it does not: on a crowded
+           plate the disc swallows the next station's puddle, `crad` pins to
+           the cap, and the vein search below then ranges over half the plate
+           and answers about somebody else's trunk. So the mass is flooded
+           from the station's own food instead, over lattice cells at a weight
+           of half or better, and what comes back is the one piece the station
+           is standing in. */
+        var core = 0, crad = 0, R = 35, lx = cx * 0.5, ly = cy * 0.5, x, y, q;
         var x0 = Math.max(0, Math.floor(lx - R)), x1 = Math.min(LW - 1, Math.ceil(lx + R));
         var y0 = Math.max(0, Math.floor(ly - R)), y1 = Math.min(LH - 1, Math.ceil(ly + R));
+        var lr = Math.max(1, sr * 0.5), qh = 0, qt = 0;
+        for (y = y0; y <= y1; y++) for (x = x0; x <= x1; x++) massSeen[y * LW + x] = 0;
         for (y = y0; y <= y1; y++) for (x = x0; x <= x1; x++) {
-          var w = padW[y * LW + x]; if (w < 0.5) continue;
-          var mx = x + 0.5 - lx, my = y + 0.5 - ly, m2 = mx * mx + my * my;
-          if (m2 > R * R) continue;
+          var sx2 = x + 0.5 - lx, sy2 = y + 0.5 - ly;
+          if (sx2 * sx2 + sy2 * sy2 > lr * lr) continue;
+          var sc = y * LW + x;
+          if (padW[sc] < 0.5 || massSeen[sc]) continue;
+          massSeen[sc] = 1; massQ[qt++] = sc;
+        }
+        while (qh < qt) {
+          var mc = massQ[qh++], mcx = mc % LW, mcy = (mc / LW) | 0;
+          var ox2 = mcx + 0.5 - lx, oy2 = mcy + 0.5 - ly, m2 = ox2 * ox2 + oy2 * oy2;
           core++; if (m2 > crad) crad = m2;
+          for (q = 0; q < 4; q++) {
+            var nx2 = mcx + (q === 0 ? -1 : q === 1 ? 1 : 0), ny2 = mcy + (q === 2 ? -1 : q === 3 ? 1 : 0);
+            if (nx2 < x0 || ny2 < y0 || nx2 > x1 || ny2 > y1) continue;
+            var nc2 = ny2 * LW + nx2;
+            if (massSeen[nc2] || padW[nc2] < 0.5) continue;
+            massSeen[nc2] = 1; massQ[qt++] = nc2;
+          }
         }
         crad = 2 * Math.sqrt(crad);
         /* the tree, in cells, over the nodes the painter would consider */
@@ -14515,9 +14539,11 @@ function init() {
             else if (tw[node] < minw) minw = tw[node];
             node = p;
           }
-          sp = { n: n, minw: +(minw < 1e9 ? minw : 0).toFixed(2),
-                 minband: minw < 1e9 ? treeBand(minw) : -1, ghost: ghost, cut: cut,
-                 root: node === 0 };
+          /* a station standing ON the root has no chain to walk, so the
+             thinnest width on it is the node's own rather than nothing */
+          if (minw > 1e8) minw = tw[best];
+          sp = { n: n, minw: +minw.toFixed(2), minband: treeBand(minw),
+                 ghost: ghost, cut: cut, root: node === 0 };
         }
         floodSeen.set(tMark); floodD.set(tDist);
         var tLv = onDisc(cx, cy, sr);
@@ -14544,6 +14570,71 @@ function init() {
                levels: { tree: BODY_LEVELS[TREE_LV], mass: BODY_LEVELS[PAD_MASK_LV],
                          treeCells: tCells, massCells: mCells },
                bands: VEIN_BANDS.map(function (b) { return b.w; }) };
+    },
+    /* harness only: WHY a station has no tree in it. Replays treeGrow's own
+       attractor pass over a window around the station and classifies every
+       jittered lattice point it would visit, so "the tree has not grown here"
+       gets a reason instead of a restatement.
+
+         wall/off   the point is in a wall or off the plate
+         nolv       tissue below the growth level: nothing for the tree to
+                    stand on, which is the threshold story
+         spent      tcov -- a node's kill disc already claimed this attractor,
+                    so it will never pull anything again
+         far        at the level and unspent, but no LIVE node within
+                    TREE_INF: there IS something to grow into and nothing
+                    near enough to be pulled by it
+         pull       at the level, unspent, and within reach of a live node --
+                    a real pull, which the next pass acts on
+
+       `pull` is the number that decides it. Zero pulls in the window means
+       the tree cannot move toward this station at all this pass, whatever
+       the tissue is doing. */
+    treeWhy: function (ni, R) {
+      var e = S.exp, nd = ni == null ? e.nodes[0] : e.nodes[ni];
+      R = R || 60;
+      var lv = BODY_LEVELS[TREE_LV], sp = TREE_SP;
+      var wall = 0, nolv = 0, spent = 0, far = 0, pull = 0, pullNear = 1e9;
+      var x0 = Math.max(0, ((nd.x - R) / sp | 0) * sp), x1 = Math.min(GW - 1, nd.x + R);
+      var y0 = Math.max(0, ((nd.y - R) / sp | 0) * sp), y1 = Math.min(GH - 1, nd.y + R);
+      for (var y = y0; y <= y1; y += sp) {
+        for (var x = x0; x <= x1; x += sp) {
+          var h = mix32(x, y, 7);
+          var jx = x + (h % sp), jy = y + ((h >>> 8) % sp);
+          if (jx < 2 || jy < 2 || jx >= GW - 2 || jy >= GH - 2) { wall++; continue; }
+          var dxs = jx + 0.5 - nd.x, dys = jy + 0.5 - nd.y;
+          if (dxs * dxs + dys * dys > R * R) continue;
+          var c = jy * GW + jx;
+          if (wallM[c]) { wall++; continue; }
+          if (trail[c] < lv) { nolv++; continue; }
+          if (tcov[c]) { spent++; continue; }
+          var n = treeNearest(jx, jy);
+          if (n < 0) { far++; continue; }
+          pull++;
+          var pd = Math.sqrt((tx[n] - nd.x) * (tx[n] - nd.x) + (ty[n] - nd.y) * (ty[n] - nd.y));
+          if (pd < pullNear) pullNear = pd;
+        }
+      }
+      var lv0 = BODY_LEVELS[PAD_MASK_LV], nolv0 = 0, spent0 = 0, far0 = 0, pull0 = 0;
+      for (y = y0; y <= y1; y += sp) {
+        for (x = x0; x <= x1; x += sp) {
+          var h2 = mix32(x, y, 7);
+          var jx2 = x + (h2 % sp), jy2 = y + ((h2 >>> 8) % sp);
+          if (jx2 < 2 || jy2 < 2 || jx2 >= GW - 2 || jy2 >= GH - 2) continue;
+          var ax = jx2 + 0.5 - nd.x, ay = jy2 + 0.5 - nd.y;
+          if (ax * ax + ay * ay > R * R) continue;
+          var c2 = jy2 * GW + jx2;
+          if (wallM[c2]) continue;
+          if (trail[c2] < lv0) { nolv0++; continue; }
+          if (tcov[c2]) { spent0++; continue; }
+          if (treeNearest(jx2, jy2) < 0) { far0++; continue; }
+          pull0++;
+        }
+      }
+      return { label: nd.label, R: R, lv: lv,
+               at: { wall: wall, nolv: nolv, spent: spent, far: far, pull: pull,
+                     pullNear: pullNear < 1e9 ? +pullNear.toFixed(1) : -1 },
+               atMassLv: { lv: lv0, nolv: nolv0, spent: spent0, far: far0, pull: pull0 } };
     },
     /* harness only: the tree's growth level, so an option can be swept in one
        page rather than one build each. Set BEFORE SLIME.start() — the tree is

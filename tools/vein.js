@@ -69,6 +69,7 @@ const MASSMIN = +(process.env.MASSMIN === undefined ? 100 : process.env.MASSMIN)
 const LV = process.env.LV === undefined ? null : +process.env.LV;
 const CAP = +(process.env.CAP || 60000);
 const MM = 0.551;   /* mm a grid cell is, per the README */
+const SCAN = 60;    /* cells SLIME.tree() looks for a node in; -1 means none */
 
 const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css',
                '.json': 'application/json', '.png': 'image/png', '.svg': 'image/svg+xml',
@@ -144,7 +145,13 @@ function verdict(s) {
       const ok = reached && now >= t - 0.5;
       const r = await page.evaluate(async () => {
         await new Promise(res => requestAnimationFrame(() => requestAnimationFrame(res)));
-        return window.SLIME.tree();
+        const t = window.SLIME.tree();
+        /* treeWhy replays treeGrow's own attractor pass, so it is only worth
+           its cost on a station that has something to explain */
+        t.stations.forEach((s, i) => {
+          if (s.core > 0 && s.inC === 0 && i < window.SLIME.S.exp.nodes.length) s.why = window.SLIME.treeWhy(i, 60);
+        });
+        return t;
       });
       if (ROWS) console.log(`\n${CASE}/${seed}  t=${now}${ok ? '' : '  NOT MEASURABLE'}` +
         `   nodes ${r.nodes.n} (${r.nodes.live} live, ${r.nodes.ghost} ghost)` +
@@ -169,10 +176,14 @@ function verdict(s) {
           : 'spine   -';
         console.log(`  ${s.label.replace('flake ', 'f').padEnd(7)} prog ${s.prog.toFixed(2)}` +
           `  core ${pad(s.core, 5)} crad ${pad(s.crad, 5)}` +
-          `  nearL ${pad(s.nearL, 5)} (${pad((s.nearL * MM).toFixed(1), 5)} mm)` +
+          `  nearL ${pad(s.nearL < 0 ? `>${SCAN}` : s.nearL, 5)}` +
+          ` (${pad(s.nearL < 0 ? '  -' : (s.nearL * MM).toFixed(1), 5)} mm)` +
           `  in ${pad(s.inC, 3)}/gh ${pad(s.ghC, 3)}  wmax ${s.wmax.toFixed(2)}/b${s.band}` +
           `  carry ${pad(s.carry, 2)}  ${sp}` +
-          `  joined tree ${s.tLv.disc.toFixed(2)} mass ${s.mLv.disc.toFixed(2)}  ${v}`);
+          `  joined tree ${s.tLv.disc.toFixed(2)} mass ${s.mLv.disc.toFixed(2)}  ${v}` +
+          (s.why ? `  [why: nolv ${s.why.at.nolv} spent ${s.why.at.spent} far ${s.why.at.far}` +
+                   ` pull ${s.why.at.pull} near ${s.why.at.pullNear}` +
+                   ` | at mass lv: nolv ${s.why.atMassLv.nolv} far ${s.why.atMassLv.far} pull ${s.why.atMassLv.pull}]` : ''));
       }
       if (SHOTS) {
         const f = path.join(SHOTS, `${CASE}-${seed}-t${pad(t, 3).replace(/ /g, '0')}.png`);

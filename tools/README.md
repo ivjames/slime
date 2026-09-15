@@ -289,3 +289,107 @@ that is the whole choice the layer offers:
 | 13@0.6  | 29–34 cells | 7.0 % | 0.55 |
 | 18@0.43 | 32–37 cells | 9.1 % | 0.26 |
 | 26@0.3  | 36–41 cells | 12.8 % | 0.21 |
+
+## vein.js
+
+Whether a station wearing a mass has a vein drawn INTO it.
+
+The complaint this was written for: a pad two thirds covered by a puddle that
+no bright line reaches — tissue plainly on the food, and nothing on the plate
+saying how the organism got there. The two layers are drawn from different
+state. `PAD_BUDGET` seeds at each station's own food and spends a travel
+budget outward from it; the tree grows from the inoculation drop into
+`trail >= BODY_LEVELS[TREE_LV]` and can only ever extend from its own front.
+Nothing makes them agree, so a station can carry one and not the other.
+
+```bash
+node tools/vein.js                          # five dishes' worth is the sweep
+T0=10 T1=150 DT=5 node tools/vein.js        # the scan, by default
+ROWS=1 SEEDS=efe8ba node tools/vein.js      # every station at every moment
+TIMES=45 node tools/vein.js                 # or just this moment
+LV=0 node tools/vein.js                     # the tree at the mass's level
+SHOTS=/tmp/shots node tools/vein.js         # write the plate as a png too
+```
+
+Five verdicts, in the last column of each row:
+
+- **ISLAND** — a mass is drawn and no live tree node stands in it.
+- **FAINT** — a live node stands in it and the widest is a band-0 hairline,
+  0.34 cells = 0.19 mm, which is what the record's own ink texture is.
+- **GHOST** — the widest one's chain home crosses a ghosted segment.
+- **CUT** — the chain home crosses a segment `paintTree` drops for a wall.
+- **ok** — a node in the mass, band 1 or better, chain home solid.
+
+### The station's own mass, and not the neighbourhood's
+
+`mass.js` takes its figures over a disc of radius 35 lattice cells around each
+station. That is right on a dish that spaces its flakes out and wrong on one
+that does not: the disc swallows the next station's puddle, `crad` pins to the
+cap, and a vein search over that radius then answers about somebody else's
+trunk. On EXP-03 that produced twelve `FAINT` verdicts at stations whose own
+`prog` was 0.00 — stations with no mass at all, sitting inside a neighbour's.
+
+So this floods instead, from the station's own food, over lattice cells at a
+weight of half or better, and measures the one piece the station is standing
+in. It is the same figure on EXP-01 and a different one wherever stations
+crowd.
+
+### The gap, which is the number a fix has to move
+
+Sampling on a fixed interval turns the verdicts into a per-station figure that
+does not depend on where the samples fell: when the mass first appears, when a
+live node first stands inside it, and the gap between them.
+
+Measured over EXP-01/03/08/09/16, four seeds each, 10–150 s at 5 s:
+
+| dish | stations with a gap | mean | worst |
+|---|---|---|---|
+| EXP-01 | 3 of 20 | 14.8 s | 19.8 s |
+| EXP-03 | 3 of 40 | 5.0 s | 5.2 s |
+| EXP-09 | 1 of 16 | 5.1 s | 5.1 s |
+| EXP-08, EXP-16 | 0 of 72 | — | — |
+
+It concentrates in EXP-01, which is the open plate with its four flakes in the
+corners — the dish where the culture reaches food across bare agar rather than
+down a channel. Every gap closes; none is permanent.
+
+### treeWhy, which is why it is not a threshold
+
+The obvious reading is that the tree's level is stricter than the mass's —
+`BODY_LEVELS[TREE_LV]` is 9 against `BODY_LEVELS[PAD_MASK_LV]` 6 — and that
+lowering it would let the tree follow. `LV=0` measures that, and it does not:
+on EXP-01/efe8ba the vein still arrives at t=50.1, unchanged.
+
+`SLIME.treeWhy(node, R)` says why. It replays `treeGrow`'s own attractor pass
+over a window and classifies every jittered lattice point it would visit:
+`nolv` below the growth level, `spent` already claimed by a node's kill disc,
+`far` at the level and unspent with no live node within `TREE_INF`, and `pull`
+a real pull the next pass acts on. On the island station, through the window:
+
+```
+  t    nearL |  level 9:  nolv spent  far  pull  pullNear | level 6: nolv  far  pull
+ 30.1   34.7 |             834    10    4     3      34.7 |           820   12     3
+ 40.3   34.7 |             797    10   30    14      34.7 |           757   43    26
+ 45.1   34.0 |             778    28   38     7      34.0 |           732   51    14
+ 50.1    4.2 |             765    81    0     5      12.1 |           720    0    19
+```
+
+`nolv` is ~800 of ~860 in-plate points at BOTH levels: the window is bare
+agar, and level 6 offers only forty more points than level 9. That is why
+lowering the level buys nothing — there is no tissue to grow into either way.
+
+`far` is the defect's signature. It counts tissue that IS at the growth level
+and unspent and has no live node near enough to be pulled by it — the flake's
+own local mass, which agents reached and are eating. It climbs 4 → 38 across
+the window and collapses to 0 the moment the vein arrives.
+
+`pullNear` sits at 34.7 for twenty seconds and then jumps to 12.1. The front
+does not creep toward the flake; it is held, and then crosses thirty cells at
+once, which is one second of growth at `TREE_STEP` x the pass rate.
+
+So the mechanism is not a threshold. The mass layer seeds at a station
+independently and needs no connection to anything; the tree is by construction
+one connected thing rooted at the drop. A flake the runners have reached grows
+an island of tissue the mass draws at once and the tree cannot reach, because
+the agar between them holds no tissue at any level the renderer uses — the
+runners' own path decayed behind them.
