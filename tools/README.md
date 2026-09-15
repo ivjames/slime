@@ -289,3 +289,162 @@ that is the whole choice the layer offers:
 | 13@0.6  | 29–34 cells | 7.0 % | 0.55 |
 | 18@0.43 | 32–37 cells | 9.1 % | 0.26 |
 | 26@0.3  | 36–41 cells | 12.8 % | 0.21 |
+
+## ink.js
+
+Glow versus ink, as numbers.
+
+The plate draws two things out of the same tissue: the vein LINES, stroked
+from `VEIN_BANDS`, and the MASS heaped on the food, filled from `BODY_STYLE`
+under the weight `PAD_BUDGET` builds. The complaint this exists to answer is
+that they do not read as one drawing system — the lines look like ink and the
+masses look like light. That is an adjective. This turns it into figures.
+
+```bash
+node tools/ink.js                             # EXP-01/efe8ba at 137 s
+SEEDS=11f9a2 TIMES=45,120 node tools/ink.js
+SHOTS=/tmp/ink node tools/ink.js              # plate and per-station crops
+MASS=10/0/0/0,5/1/0/4 node tools/ink.js       # sweep how the mass is drawn
+```
+
+`MASS` is `levels/ramp/rule/steps` — `MASS_LEVELS`, `MASS_RAMP`, `MASS_RULE`
+and `PAD_STEPS` in `sim.js`, swept one page rather than one build each, the
+way `mass.js`'s `TUNE` sweeps the weight. Each option also prints the weight's
+own `step`, so what a change costs on the figure the layer was previously held
+to is on the same line as what it buys.
+
+### How the two layers are told apart
+
+They are the same yellow on the composite, so they are separated by
+DIFFERENCE. `SLIME.layers()` holds either half of the vein canvas out of the
+picture; the plate is rendered three times — whole, without the mass, without
+the lines — and a pixel belongs to a layer if holding that layer out moved it
+by a lightness step anyone could see. Everything else is identical in all
+three and is in neither mask, which is why the food's own marker sitting on
+top of a pad needs no special case anywhere in the tool.
+
+`layers()` repaints by hand rather than setting a dirty flag and waiting, and
+that is load-bearing: the moment worth asking about is a FINISHED run, and a
+run that has stopped gets no next frame — the loop cancels its own rAF and the
+result screen renders once. A probe that waited for a frame would measure the
+picture it had already taken.
+
+Lightness is CIE L\*, 0..100, and colour is its chroma. A step in L\* is a step
+the eye can weigh; a step in alpha is not, because the same alpha over the
+agar and over a trunk are different pictures.
+
+### What it measures
+
+- **edge** — the 10-90 distance across the layer's own boundary, in cells.
+  For a line, profiled across the stroke; for the mass, along 360 rays out of
+  each station, scanning inward from the far end so a trunk crossing a ray
+  cannot move the answer.
+- **rim** — the L\* step the layer takes where it meets bare agar, per device
+  pixel. Bare agar and not merely "not this layer": the food's marker is a
+  cased disc laid over the pads, and left in, its dark casing was the whole of
+  the mass's p99.
+- **tones** — distinct RGB values in the layer, how many hold at least 1 % of
+  it, and the share of it in its commonest six.
+- **L\* / chroma** — where the layer sits, chroma compared only at 55–75 L\*
+  where both layers hold area, since anything's chroma collapses as it fades
+  out over the agar.
+- **ladders** — the two ramps themselves, as the tones they are painted in.
+
+### What it found
+
+On EXP-01/efe8ba at 137 s — the won plate the complaint was made about — at
+1806x1118, 4.30 device pixels a cell:
+
+| | lines | mass |
+|---|---|---|
+| edge 10-90 | 0.23 cells (one device pixel, the floor of the measurement) | 6.0–8.25 cells, p90 11.8–18.0 |
+| rim step vs agar | p50 9.6, p99 60.5 L\* a pixel | p50 1.5, p99 14.6 |
+| agar-adjacent pairs per 1000 px of own area | 611 | 32 |
+| tones over 1 % | 4 | 9 |
+| share in commonest six | 46.9 % | 21.9 % |
+| ramp | 8.0 L\* over 4 steps, **2.00 a step** | 7.3 L\* over 8 steps, **0.91 a step** |
+
+Three things fall out of that and the third was the surprise.
+
+The mass has essentially **no boundary**: its falloff is 26 to 36 times wider
+than a line's, and it meets bare agar at thirty-two places per thousand pixels
+of itself where a line meets it at six hundred. That is the layer working as
+designed — a fade, not a clip.
+
+Its **own ten tones are invisible as tones**. They span 7.3 L\*, 0.91 a step,
+at or under what reads as a step at all, where the six line bands step 2.00.
+So the mass carries no tonal structure of its own and every bit of variation
+across it is the weight's smooth radial ramp. That is the recipe for a lamp,
+and it is why no choice of tone ladder moves the edge figure: measured, the
+band ramp takes 6.0–8.25 cells to 5.5–7.5, which is nothing.
+
+And the mass's outermost tone is the one **white-walked** tone on the plate —
+L\* 88 at chroma 44, where every other rung of both ladders sits at 54 to 72.
+Every mass on the dish is fringed in a colour the line system never uses.
+
+Two claims that were in the air when this was written did not survive it. The
+mass's alpha does not accumulate toward its core: `BODY_ALPHA` is 0.30, 0.60,
+0.90 and then 1 for the remaining seven, so levels 3 and up simply cover. And
+the core is not brighter than the trunks running into it in the picture — the
+mass tops out at L\* 82.5 against the lines' 86.8, because `PAD_A` caps the
+weight at 0.92. It is brighter by 1 L\* in the ladder and darker by 4 on the
+plate.
+
+### What the dials do to it
+
+`step` is `SLIME.mass()`'s, unchanged in definition from `mass.js`: the
+largest step the weight takes between neighbouring lattice cells, anywhere and
+where the tissue is wide. The clip scored 0.92 on the second of those.
+
+| levels/ramp/rule/steps | mass edge 10-90 | rim p50 | tones over 1 % | commonest six | step any/wide |
+|---|---|---|---|---|---|
+| 10/0/0/0 — as built | 6.0–8.25 | 1.5 | 9 | 21.9 % | 0.631 / 0.265 |
+| 5/0/0/0 — five levels | 6.5–12.5 | 1.4 | 5 | 32.5 % | 0.631 / 0.265 |
+| 5/1/0/0 — five, band ramp | 5.5–7.5 | 1.6 | 5 | 32.3 % | 0.631 / 0.265 |
+| 5/1/1/0 — and rules | 5.75–7.5 | 1.6 | 5 | 29.1 % | 0.631 / 0.265 |
+| 5/1/0/4 — and a weight in four steps | 5.25–9.0 | 5.0 | 8 | 45.1 % | 0.69 / **0.23** |
+| 10/0/0/4 | 5.75–9.0 | 3.6 | 10 | 29.1 % | 0.69 / **0.23** |
+
+The lines' own figures, for the column each of those is trying to reach: rim
+p50 9.6, four tones over 1 %, 46.9 % in the commonest six.
+
+Read across it: the three PAINT dials move the tone columns and leave the edge
+alone, because the edge is the weight's. Only `PAD_STEPS` moves the rim, and
+even it is half absorbed by the mask's bilinear upscale — the weight lives at
+half the plate's resolution, so a step in it is spread over two cells on the
+way up, which is why quantising into four steps raises the rim from 1.5 to
+5.0 rather than to the lines' 9.6.
+
+Four steps is the setting to quantise at, and not because it is round. The
+worst step where the tissue is wide is then exactly one band, 0.23, which is
+UNDER the continuous weight's own 0.265. Three steps is one band too but that
+band is 0.307, worse than what ships. Six and eight do not come out at one
+band at all — where the underlying weight changes fast, neighbours round to
+bands two and three apart, and they score 0.307 and 0.345. Measured, not
+reasoned:
+
+| PAD_STEPS | 3 | 4 | 6 | 8 |
+|---|---|---|---|---|
+| step where wide | 0.307 | **0.23** | 0.307 | 0.345 |
+| rim p50 | 6.0 | 5.0 | 3.6 | 3.1 |
+| share in commonest six | 48.8 % | 45.1 % | 41.7 % | 39.7 % |
+
+### Cost
+
+Tracing is where this layer's cost is (see `PAD_BUDGET`), and the mass now
+traces only the levels it fills, so drawing it in five is cheaper than ten.
+At turbo 32 on EXP-01/11f9a2 grown to 45 s, five reps, on a cloud box that
+runs the whole plate at about half the rate the figure in `PAD_BUDGET` was
+taken at:
+
+| | steps/s | rebuild |
+|---|---|---|
+| `main` | 63 63 65 67 68 | 10.6–12.4 ms |
+| this branch, as built | 58 60 62 65 69 | 10.6–12.1 ms |
+| five levels | 62 67 70 | 9.9–10.1 ms |
+| five levels, weight in four steps | 65 66 69 | 10.0–10.3 ms |
+
+The ranges overlap and the rebuild times do not separate, so the dials cost
+nothing measurable at the default and the five-level settings are, if
+anything, cheaper. Absolute rates here are not comparable with the ones in
+`sim.js`; the box is.
