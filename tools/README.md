@@ -594,3 +594,118 @@ looks: an earlier pass measured `main` at 63–68 and this branch's default at
 load drift between two windows hours apart. The box moves; only a batch is a
 comparison. Absolute rates here are not comparable with the ones in `sim.js`
 either, for the same reason.
+## vein.js
+
+Whether a station wearing a mass has a vein drawn INTO it.
+
+The complaint this was written for: a pad two thirds covered by a puddle that
+no bright line reaches — tissue plainly on the food, and nothing on the plate
+saying how the organism got there. The two layers are drawn from different
+state. `PAD_BUDGET` seeds at each station's own food and spends a travel
+budget outward from it; the tree grows from the inoculation drop into
+`trail >= BODY_LEVELS[TREE_LV]` and can only ever extend from its own front.
+Nothing makes them agree, so a station can carry one and not the other.
+
+```bash
+node tools/vein.js                          # five dishes' worth is the sweep
+T0=10 T1=150 DT=5 node tools/vein.js        # the scan, by default
+ROWS=1 SEEDS=efe8ba node tools/vein.js      # every station at every moment
+TIMES=45 node tools/vein.js                 # or just this moment
+LV=0 node tools/vein.js                     # the tree at the mass's level
+SHOTS=/tmp/shots node tools/vein.js         # write the plate as a png too
+```
+
+Five verdicts, in the last column of each row:
+
+- **ISLAND** — a mass is drawn and no live tree node stands in it.
+- **FAINT** — a live node stands in it and the widest is a band-0 hairline,
+  0.34 cells = 0.19 mm, which is what the record's own ink texture is.
+- **GHOST** — the widest one's chain home crosses a ghosted segment.
+- **CUT** — the chain home crosses a segment `paintTree` drops for a wall.
+- **ok** — a node in the mass, band 1 or better, chain home solid.
+
+### The station's own mass, and not the neighbourhood's
+
+`mass.js` takes its figures over a disc of radius 35 lattice cells around each
+station. That is right on a dish that spaces its flakes out and wrong on one
+that does not: the disc swallows the next station's puddle, `crad` pins to the
+cap, and a vein search over that radius then answers about somebody else's
+trunk. On EXP-03 that produced twelve `FAINT` verdicts at stations whose own
+`prog` was 0.00 — stations with no mass at all, sitting inside a neighbour's.
+
+So this floods instead, from the station's own food, over lattice cells at a
+weight of half or better, and measures the one piece the station is standing
+in. It is the same figure on EXP-01 and a different one wherever stations
+crowd.
+
+### The gap, which is the number a fix has to move
+
+Sampling on a fixed interval turns the verdicts into a per-station figure that
+does not depend on where the samples fell: when the mass first appears, when a
+live node first stands inside it, and the gap between them.
+
+Measured over EXP-01/03/08/09/16, four seeds each, 10–150 s at 5 s — 3,944
+station-moments, of which 20 are ISLAND and 4 FAINT:
+
+| dish | stations with a gap | mean | worst |
+|---|---|---|---|
+| EXP-01 | 3 of 20 | 15.0 s | 20.0 s |
+| EXP-08 | 3 of 36 | 11.6 s | 24.8 s |
+| EXP-16 | 1 of 36 | 10.0 s | 10.0 s |
+| EXP-03 | 1 of 40 | 5.0 s | 5.0 s |
+| EXP-09 | 1 of 16 | 5.0 s | 5.0 s |
+
+Nine stations of 148. It is worst by RATE on EXP-01, the open plate with its
+four flakes in the corners — the dish where the culture reaches food across
+bare agar rather than down a channel — and worst by DURATION on EXP-08, where
+`3039/blend 1:2` waits 24.8 s at 38.7 cells (21.3 mm) of separation. Every gap
+closes; none is permanent.
+
+Both of those rows are the ones the fixed-radius mass got wrong, in opposite
+directions, which is the argument for the flood above rather than a
+preference. Taken over a disc, EXP-03 showed twelve FAINT verdicts that do not
+exist — stations with no mass of their own sitting inside a neighbour's — and
+EXP-08 showed NO gap at all, because the inflated radius kept finding a
+neighbour's trunk and scoring it `ok`. A measure that invents defects and
+hides them is not conservative in either direction.
+
+### treeWhy, which is why it is not a threshold
+
+The obvious reading is that the tree's level is stricter than the mass's —
+`BODY_LEVELS[TREE_LV]` is 9 against `BODY_LEVELS[PAD_MASK_LV]` 6 — and that
+lowering it would let the tree follow. `LV=0` measures that, and it does not:
+on EXP-01/efe8ba the vein still arrives at t=50.1, unchanged.
+
+`SLIME.treeWhy(node, R)` says why. It replays `treeGrow`'s own attractor pass
+over a window and classifies every jittered lattice point it would visit:
+`nolv` below the growth level, `spent` already claimed by a node's kill disc,
+`far` at the level and unspent with no live node within `TREE_INF`, and `pull`
+a real pull the next pass acts on. On the island station, through the window:
+
+```
+  t    nearL |  level 9:  nolv spent  far  pull  pullNear | level 6: nolv  far  pull
+ 30.1   34.7 |             834    10    4     3      34.7 |           820   12     3
+ 40.3   34.7 |             797    10   30    14      34.7 |           757   43    26
+ 45.1   34.0 |             778    28   38     7      34.0 |           732   51    14
+ 50.1    4.2 |             765    81    0     5      12.1 |           720    0    19
+```
+
+`nolv` is ~800 of ~860 in-plate points at BOTH levels: the window is bare
+agar, and level 6 offers only forty more points than level 9. That is why
+lowering the level buys nothing — there is no tissue to grow into either way.
+
+`far` is the defect's signature. It counts tissue that IS at the growth level
+and unspent and has no live node near enough to be pulled by it — the flake's
+own local mass, which agents reached and are eating. It climbs 4 → 38 across
+the window and collapses to 0 the moment the vein arrives.
+
+`pullNear` sits at 34.7 for twenty seconds and then jumps to 12.1. The front
+does not creep toward the flake; it is held, and then crosses thirty cells at
+once, which is one second of growth at `TREE_STEP` x the pass rate.
+
+So the mechanism is not a threshold. The mass layer seeds at a station
+independently and needs no connection to anything; the tree is by construction
+one connected thing rooted at the drop. A flake the runners have reached grows
+an island of tissue the mass draws at once and the tree cannot reach, because
+the agar between them holds no tissue at any level the renderer uses — the
+runners' own path decayed behind them.
