@@ -14506,10 +14506,19 @@ function init() {
         if (o.MASKLV != null) PAD_MASK_LV = o.MASKLV;
         if (o.SWEEPS != null) PAD_SWEEPS = o.SWEEPS;
         if (o.A != null) PAD_A = o.A;
-        if (o.STEPS != null) PAD_STEPS = o.STEPS | 0;
+        /* Clamped at the setter and not merely guarded at the paint. A
+           negative count is inert where the weight is quantised — the guard
+           there reads `> 0` — but it would be stored, and this function's own
+           getter would then report a weight quantised into minus three steps
+           to a harness that believed it. A dial that validates the shape of
+           its argument and not its range is a dial that lies. */
+        if (o.STEPS != null) PAD_STEPS = Math.max(0, o.STEPS | 0);
         if (o.on != null) PAD_BUDGET = !!o.on;
         fieldDirty = true; dirtyFrames = REBUILD_EVERY;
         treeDirty = true; treePaintT = -1e9;
+        /* as massTune does, and for the same reason: a finished run gets no
+           next frame to pick a dirty flag up on */
+        if (cv && S.exp) render();
       }
       return { B: PAD_B, DREF: PAD_D_REF, HOLD: PAD_HOLD, SWEEPS: PAD_SWEEPS,
                MASKLV: PAD_MASK_LV, A: PAD_A, STEPS: PAD_STEPS, on: PAD_BUDGET };
@@ -14523,7 +14532,7 @@ function init() {
         if (o.rule != null) MASS_RULE = o.rule ? 1 : 0;
         /* the weight's own dial, set from here as well because it is part of
            the same choice — see PAD_STEPS */
-        if (o.steps != null) PAD_STEPS = o.steps | 0;
+        if (o.steps != null) PAD_STEPS = Math.max(0, o.steps | 0);
         massPlan();
         fieldDirty = true; dirtyFrames = REBUILD_EVERY;
         treeDirty = true; treePaintT = -1e9;
