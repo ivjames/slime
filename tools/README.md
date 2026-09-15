@@ -340,18 +340,30 @@ Sampling on a fixed interval turns the verdicts into a per-station figure that
 does not depend on where the samples fell: when the mass first appears, when a
 live node first stands inside it, and the gap between them.
 
-Measured over EXP-01/03/08/09/16, four seeds each, 10–150 s at 5 s:
+Measured over EXP-01/03/08/09/16, four seeds each, 10–150 s at 5 s — 3,944
+station-moments, of which 20 are ISLAND and 4 FAINT:
 
 | dish | stations with a gap | mean | worst |
 |---|---|---|---|
-| EXP-01 | 3 of 20 | 14.8 s | 19.8 s |
-| EXP-03 | 3 of 40 | 5.0 s | 5.2 s |
-| EXP-09 | 1 of 16 | 5.1 s | 5.1 s |
-| EXP-08, EXP-16 | 0 of 72 | — | — |
+| EXP-01 | 3 of 20 | 15.0 s | 20.0 s |
+| EXP-08 | 3 of 36 | 11.6 s | 24.8 s |
+| EXP-16 | 1 of 36 | 10.0 s | 10.0 s |
+| EXP-03 | 1 of 40 | 5.0 s | 5.0 s |
+| EXP-09 | 1 of 16 | 5.0 s | 5.0 s |
 
-It concentrates in EXP-01, which is the open plate with its four flakes in the
-corners — the dish where the culture reaches food across bare agar rather than
-down a channel. Every gap closes; none is permanent.
+Nine stations of 148. It is worst by RATE on EXP-01, the open plate with its
+four flakes in the corners — the dish where the culture reaches food across
+bare agar rather than down a channel — and worst by DURATION on EXP-08, where
+`3039/blend 1:2` waits 24.8 s at 38.7 cells (21.3 mm) of separation. Every gap
+closes; none is permanent.
+
+Both of those rows are the ones the fixed-radius mass got wrong, in opposite
+directions, which is the argument for the flood above rather than a
+preference. Taken over a disc, EXP-03 showed twelve FAINT verdicts that do not
+exist — stations with no mass of their own sitting inside a neighbour's — and
+EXP-08 showed NO gap at all, because the inflated radius kept finding a
+neighbour's trunk and scoring it `ok`. A measure that invents defects and
+hides them is not conservative in either direction.
 
 ### treeWhy, which is why it is not a threshold
 
