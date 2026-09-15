@@ -624,6 +624,31 @@ Five verdicts, in the last column of each row:
 - **CUT** — the chain home crosses a segment `paintTree` drops for a wall.
 - **ok** — a node in the mass, band 1 or better, chain home solid.
 
+### Its mass figures predate the mass this plate now draws
+
+Everything below was measured on the walk as it stood at `d003a2e`. The
+`ink.js` work above then changed what `padWalk` does — `PAD_VEIN` discounts
+travel along a vein — and `station()` runs `padWalk` itself, so every `core`
+and `crad` in this section is now an understatement.
+
+Checked on the reported plate rather than assumed. EXP-01/efe8ba at t=45,
+before and after:
+
+| station | core, then | core, now | crad, then | crad, now | verdict |
+|---|---|---|---|---|---|
+| flake a | 464 | 520 | 21.2 | 25.2 | ISLAND, both |
+| flake b | 548 | 620 | 20.2 | 28.5 | ok, both |
+| flake c | 448 | 604 | 20.2 | 39.1 | ok, both |
+| flake d | 600 | 656 | 20.2 | 24.7 | ok, both |
+| crumb | 1836 | 3276 | 43.9 | 60.1 | ok, both |
+
+So the VERDICTS and the diagnosis below are untouched: the island is still an
+island, and it is still an island for the reason `treeWhy` gives. What moved
+is the size of the mass each station wears. The gap sweep over five dishes has
+not been re-run; a larger mass can only ever contain MORE tree nodes, so if
+those figures move at all they move toward fewer ISLANDs, and this section's
+counts are the conservative ones.
+
 ### The station's own mass, and not the neighbourhood's
 
 `mass.js` takes its figures over a disc of radius 35 lattice cells around each
