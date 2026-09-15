@@ -8373,6 +8373,30 @@ var PAD_A       = 0.92;       /* the mass's alpha where the weight is one */
    and that distinction is the whole argument for whether this is admissible.
    It is the owner's call and not the renderer's. */
 var PAD_STEPS   = 0;
+/* And those steps drawn as SHAPES rather than as a raster mask.
+   -----------------------------------------------------------------
+   The weight is a field on a half-resolution lattice, and it reaches the
+   picture as an image blitted up to the plate's scale — bilinearly, because
+   the alternative at that ratio is lattice-sized blocks. That upscale is a
+   two-cell blur, which is exactly right for a fade and exactly wrong for a
+   step: quantise the weight into four and the picture barely moves, because
+   the blur puts the ramp back. Measured, PAD_STEPS alone takes the mass's
+   step against bare agar from 1.5 to 5.0 L* where the lines take 9.6.
+
+   So the bands are traced instead. traceMass already cuts a lattice mask
+   into a smoothed outline — it is how the lobe layer draws a swelling as a
+   swelling — and the mass had been the one layer on the plate not using it.
+   Each band of the quantised weight becomes a Path2D, filled innermost
+   first so every pixel takes its own band's alpha under destination-over,
+   and the mask stops being a bitmap. The steps then survive to the plate at
+   whatever size it is drawn, and the outermost band is a drawn boundary,
+   which is the thing the fade was written to avoid. That it FOLLOWS the
+   walk — which follows the tissue's thinness — is the whole argument for
+   why it is not the clip's arc. Requires PAD_STEPS. */
+var PAD_VEC     = 0;
+var padTier = new Int8Array(LW * LH);   /* the weight in whole steps, for the trace */
+var padBand = [];                       /* a Path2D per step, 1..PAD_STEPS */
+var padBandN = 0;
 /* The weight lives at HALF the plate's resolution, and costs nowhere near
    half the picture: it is a soft mask multiplied against contours traced at
    full resolution, so what a coarse mask buys is four times less walking and
@@ -8392,6 +8416,7 @@ var padW = new Float32Array(LW * LH);   /* the weight, 0..1 */
 var padC = new Float32Array(LW * LH);   /* the cost of crossing it, budget a cell */
 var pbX0 = 0, pbY0 = 0, pbX1 = -1, pbY1 = -1;   /* the lattice box anything painted lies in */
 var padCv = null, padCtx = null, padImg = null;   /* the weight as a mask */
+var padVv = null, padVctx = null;                 /* ...or as outlines, under PAD_VEC */
 var padScr = null, padSctx = null;                /* the levels, before they are masked */
 
 /* the film's half-width: the same two-sweep chamfer bodyDist runs, on the
@@ -8515,7 +8540,7 @@ function padWalk() {
     for (x = 0; x < LW; x++) {
       i = r3 + x;
       var g = padG[i], w;
-      if (g < 0 || g >= PAD_B) { padW[i] = 0; continue; }
+      if (g < 0 || g >= PAD_B) { padW[i] = 0; padTier[i] = 0; continue; }
       if (g <= hold) w = 1;
       else { var u = 1 - (g - hold) / span; w = u * u * (3 - 2 * u); }
       /* rounded UP, so the outermost band is a whole step rather than a
@@ -8523,6 +8548,7 @@ function padWalk() {
          massField and the box below read `w > 0`, which is unchanged */
       if (PAD_STEPS > 0) w = Math.ceil(w * PAD_STEPS) / PAD_STEPS;
       padW[i] = w;
+      if (PAD_STEPS > 0) padTier[i] = Math.round(w * PAD_STEPS);
       if (w <= 0) continue;
       if (x < pbX0) pbX0 = x;
       if (x > pbX1) pbX1 = x;
@@ -8607,16 +8633,20 @@ function paintMass(c, sx, sy) {
     padCtx = padCv.getContext('2d');
     padImg = padCtx.createImageData(LW, LH);
   }
-  var px = padImg.data, bw = pbX1 - pbX0 + 1, bh = pbY1 - pbY0 + 1;
-  for (y = pbY0; y <= pbY1; y++) {
-    var row = y * LW;
-    for (x = pbX0; x <= pbX1; x++) {
-      var i = row + x, o = i * 4, w = padW[i];
-      px[o] = 255; px[o + 1] = 255; px[o + 2] = 255;
-      px[o + 3] = w > 0 ? Math.round(w * 255 * PAD_A) : 0;
+  var bw = pbX1 - pbX0 + 1, bh = pbY1 - pbY0 + 1;
+  var vec = padBandN > 0;
+  if (!vec) {
+    var px = padImg.data;
+    for (y = pbY0; y <= pbY1; y++) {
+      var row = y * LW;
+      for (x = pbX0; x <= pbX1; x++) {
+        var i = row + x, o = i * 4, w = padW[i];
+        px[o] = 255; px[o + 1] = 255; px[o + 2] = 255;
+        px[o + 3] = w > 0 ? Math.round(w * 255 * PAD_A) : 0;
+      }
     }
+    padCtx.putImageData(padImg, 0, 0, pbX0, pbY0, bw, bh);
   }
-  padCtx.putImageData(padImg, 0, 0, pbX0, pbY0, bw, bh);
   var W = c.canvas.width, H = c.canvas.height;
   if (!padScr) { padScr = document.createElement('canvas'); padSctx = padScr.getContext('2d'); }
   if (padScr.width !== W || padScr.height !== H) { padScr.width = W; padScr.height = H; }
@@ -8644,7 +8674,29 @@ function paintMass(c, sx, sy) {
   }
   padSctx.setTransform(1, 0, 0, 1, 0, 0);
   padSctx.globalCompositeOperation = 'destination-in';
-  padSctx.drawImage(padCv, pbX0, pbY0, bw, bh, dx0, dy0, dw, dh);
+  if (vec) {
+    /* the mask at the plate's own resolution, as filled outlines. Innermost
+       band first and the rest under it: destination-over paints only where
+       nothing has been painted, so each pixel keeps its own band's alpha
+       instead of accumulating the ones outside it. */
+    if (!padVv) { padVv = document.createElement('canvas'); padVctx = padVv.getContext('2d'); }
+    if (padVv.width !== W || padVv.height !== H) { padVv.width = W; padVv.height = H; }
+    padVctx.setTransform(1, 0, 0, 1, 0, 0);
+    padVctx.clearRect(0, 0, W, H);
+    padVctx.globalCompositeOperation = 'source-over';
+    padVctx.setTransform(sx, 0, 0, sy, 0, 0);
+    for (k = padBandN; k >= 1; k--) {
+      if (!padBand[k]) continue;
+      padVctx.fillStyle = 'rgba(255,255,255,' + (k / padBandN * PAD_A) + ')';
+      padVctx.fill(padBand[k]);
+      padVctx.globalCompositeOperation = 'destination-over';
+    }
+    padVctx.setTransform(1, 0, 0, 1, 0, 0);
+    padVctx.globalCompositeOperation = 'source-over';
+    padSctx.drawImage(padVv, dx0, dy0, dw, dh, dx0, dy0, dw, dh);
+  } else {
+    padSctx.drawImage(padCv, pbX0, pbY0, bw, bh, dx0, dy0, dw, dh);
+  }
   padSctx.globalCompositeOperation = 'source-over';
   c.save();
   c.setTransform(1, 0, 0, 1, 0, 0);
@@ -10044,14 +10096,19 @@ var MS_TO    = [-1, 3, 0, 3, 1, 3, 0, 3, 2, 2, 0, 2, 1, 1, 0, -1];
 var MS_FROM2 = [-1, -1, -1, -1, -1, 2, -1, -1, -1, -1, 3, -1, -1, -1, -1, -1];
 var MS_TO2   = [-1, -1, -1, -1, -1, 1, -1, -1, -1, -1, 2, -1, -1, -1, -1, -1];
 var msEid = [0, 0, 0, 0];
-function traceMass(minTier, out) {
+/* `tier` is the lattice field being cut: the lobe layer's own `ltier`, or the
+   mass's quantised weight (see PAD_VEC). It is a parameter rather than the
+   global it used to be because the mass wants exactly this — a lattice mask
+   traced as a smoothed outline — and had been making do with a raster mask
+   upscaled bilinearly, which is a blur where this is an edge. */
+function traceMass(tier, minTier, out) {
   var NE = LW * LH, lx, ly, e;
   lnext.fill(-1);
   for (ly = 0; ly < LH - 1; ly++) {
     for (lx = 0; lx < LW - 1; lx++) {
       var n = ly * LW + lx;
-      var c = (ltier[n] >= minTier ? 1 : 0) | (ltier[n + 1] >= minTier ? 2 : 0) |
-              (ltier[n + LW + 1] >= minTier ? 4 : 0) | (ltier[n + LW] >= minTier ? 8 : 0);
+      var c = (tier[n] >= minTier ? 1 : 0) | (tier[n + 1] >= minTier ? 2 : 0) |
+              (tier[n + LW + 1] >= minTier ? 4 : 0) | (tier[n + LW] >= minTier ? 8 : 0);
       if (c === 0 || c === 15) continue;
       /* edges: 0 top (H lx,ly), 1 right (V lx+1,ly), 2 bottom (H lx,ly+1), 3 left (V lx,ly) */
       msEid[0] = n; msEid[1] = NE + n + 1; msEid[2] = n + LW; msEid[3] = NE + n;
@@ -10219,7 +10276,15 @@ function buildVeins() {
   if (BODY) {
     /* the mass's weight first: it is what the contours are traced inside,
        and the quads worth looking at are the ones it stands on */
-    if (PAD_BUDGET && !BODY_FILL) { padWalk(); massField(); }
+    if (PAD_BUDGET && !BODY_FILL) {
+      padWalk(); massField();
+      /* and the weight's own bands, as outlines — see PAD_VEC. Beside the
+         contour trace rather than in paintMass, because it is the same kind
+         of cost and belongs on the same clock. */
+      padBandN = (PAD_VEC && PAD_STEPS > 0) ? PAD_STEPS : 0;
+      padBand.length = 0;
+      for (b = 1; b <= padBandN; b++) padBand[b] = pbX1 >= pbX0 ? traceMass(padTier, b, 0) : null;
+    }
     for (y = 0; y < (BODY_FILL ? GH - 1 : 0); y++) {
       var rowB = y * GW;
       for (x = 0; x < GW - 1; x++) {
@@ -10875,9 +10940,9 @@ function buildVeins() {
      between two. The mask path for the veil's punch is the widest outline a
      quarter-cell wider still, as the discs' was. */
   if (lsegN) {
-    var lps = [traceMass(0, LOBE_OUT), traceMass(1, LOBE_OUT), traceMass(2, LOBE_OUT)];
+    var lps = [traceMass(ltier, 0, LOBE_OUT), traceMass(ltier, 1, LOBE_OUT), traceMass(ltier, 2, LOBE_OUT)];
     lobePath = lps[0] ? lps : null;
-    lobeMaskPath = lps[0] ? traceMass(0, LOBE_OUT + 0.25) : null;
+    lobeMaskPath = lps[0] ? traceMass(ltier, 0, LOBE_OUT + 0.25) : null;
   } else {
     lobePath = null;
     lobeMaskPath = null;
@@ -14533,12 +14598,13 @@ function init() {
         /* the weight's own dial, set from here as well because it is part of
            the same choice — see PAD_STEPS */
         if (o.steps != null) PAD_STEPS = Math.max(0, o.steps | 0);
+        if (o.vec != null) PAD_VEC = o.vec ? 1 : 0;
         massPlan();
         fieldDirty = true; dirtyFrames = REBUILD_EVERY;
         treeDirty = true; treePaintT = -1e9;
         if (cv && S.exp) render();
       }
-      return { levels: massLv.length, ramp: MASS_RAMP, rule: MASS_RULE, steps: PAD_STEPS,
+      return { levels: massLv.length, ramp: MASS_RAMP, rule: MASS_RULE, steps: PAD_STEPS, vec: PAD_VEC,
                at: massLv.slice(), trail: massLv.map(function (i) { return BODY_LEVELS[i]; }),
                tones: massSt.slice() };
     },

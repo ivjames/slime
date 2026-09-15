@@ -67,9 +67,9 @@ const CAP = +(process.env.CAP || 60000);
 /* `levels/ramp/rule` per option — MASS_LEVELS, MASS_RAMP and MASS_RULE in
    sim.js. `as built` is whatever the checkout ships and is the default. */
 const MASS = (process.env.MASS || '').split(',').filter(Boolean).map(v => {
-  const m = /^(\d+)\/([01])\/([01])\/(\d+)$/.exec(v.trim());
-  if (!m) throw new Error(`MASS wants levels/ramp/rule/steps, got ${v}`);
-  return { levels: +m[1], ramp: +m[2], rule: +m[3], steps: +m[4], label: m[0] };
+  const m = /^(\d+)\/([01])\/([01])\/(\d+)(?:\/([01]))?$/.exec(v.trim());
+  if (!m) throw new Error(`MASS wants levels/ramp/rule/steps[/vec], got ${v}`);
+  return { levels: +m[1], ramp: +m[2], rule: +m[3], steps: +m[4], vec: +(m[5] || 0), label: m[0] };
 });
 
 const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css',
@@ -378,7 +378,8 @@ function probeInPage() {
       const label = opt ? opt.label : 'as built';
       const w = await page.evaluate(() => window.SLIME.mass());
       console.log(`  --- ${label}  ${plan.levels} levels at trail ${plan.trail.join(',')}` +
-                  `  ramp ${plan.ramp ? 'band' : 'body'}  rule ${plan.rule}  steps ${plan.steps}`);
+                  `  ramp ${plan.ramp ? 'band' : 'body'}  rule ${plan.rule}  steps ${plan.steps}` +
+                  `  mask ${plan.vec ? 'outlines' : 'raster'}`);
       console.log(`  weight    step ${w.step.any}/${w.step.wide}   plate ${w.plate.pct}%` +
                   `   quads ${w.plate.quads} (${w.plate.ofPlate}%)` +
                   `   reach ${w.stations.map(st => st.crad).join(' ')}`);
@@ -452,7 +453,7 @@ function probeInPage() {
         console.log(`  ${path.join(SHOTS, base)}-<station>.png`);
       }
       }
-      await page.evaluate(o => window.SLIME.massTune(o), { levels: 10, ramp: 0, rule: 0, steps: 0 });
+      await page.evaluate(o => window.SLIME.massTune(o), { levels: 10, ramp: 0, rule: 0, steps: 0, vec: 0 });
       await page.evaluate(a => { window.SLIME.S.paused = false; window.SLIME.runTo(a); }, CAP);
     }
     if (errs.length) console.log('  page errors:', errs.slice(0, 2));

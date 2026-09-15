@@ -437,8 +437,46 @@ On 11f9a2 at 120 s the same three settings run 1.6 / 2.1 / 5.5 on the rim and
 The lines' own figures, for the column each of those is trying to reach: rim
 p50 9.6, four tones over 1 %, 46.9 % in the commonest six.
 
-Read across it: the three PAINT dials move the tone columns and leave the edge
-alone, because the edge is the weight's. Only `PAD_STEPS` moves the rim, and
+### The blur that was eating the steps
+
+`PAD_STEPS` on its own moves the picture much less than the weight it
+quantises would suggest, and the reason is downstream of it. The weight lives
+on a half-resolution lattice and reaches the plate as an image blitted up
+bilinearly, which is a two-cell ramp — exactly right for a fade and exactly
+wrong for a step. Quantise into four and the upscale puts the ramp back.
+
+`PAD_VEC` draws the bands instead. `traceMass` already cuts a lattice mask
+into a smoothed outline; it is how the lobe layer draws a swelling as a
+swelling, and the mass was the one layer on the plate not using it. Each band
+becomes a Path2D, filled innermost-first under `destination-over` so every
+pixel keeps its own band's alpha, and the mask stops being a bitmap.
+
+The same weight, the same `step`, the mask drawn two ways — on EXP-01/efe8ba
+at 137 s, against the lines' own 9.6 and 46.9 %:
+
+| PAD_STEPS 4 | mass edge 10-90 | rim p50 | commonest six |
+|---|---|---|---|
+| raster mask | 5.25–9.0 | 5.0 | 45.1 % |
+| outlines | 5.25–9.0 | **8.5** | **56.8 %** |
+
+And what fewer bands buy, all with outlines, with what they cost on the
+figure the layer is held to:
+
+| bands | rim p50 | commonest six | step where wide |
+|---|---|---|---|
+| 4 | 8.5 | 56.8 % | **0.23** |
+| 3 | 10.2 | 60.9 % | 0.307 |
+| 1 | 22.1 | 84.3 % | 0.92 |
+
+One band is a single flat shape with a hard edge, and it scores **exactly what
+the circular clip scored**, 0.92. The difference from the clip is that its
+shape is the walk's, so it is the tissue's, and it closes no arc the tissue did
+not close — but the step figure cannot tell those apart and does not pretend
+to. Four is the only setting that is stepped and still under the continuous
+weight's own 0.265.
+
+Read across the table above it: the three PAINT dials move the tone columns and
+leave the edge alone, because the edge is the weight's. Only `PAD_STEPS` moves the rim, and
 even it is half absorbed by the mask's bilinear upscale — the weight lives at
 half the plate's resolution, so a step in it is spread over two cells on the
 way up, which is why quantising into four steps raises the rim from 1.5 to
@@ -468,12 +506,17 @@ taken at:
 
 | | steps/s | rebuild |
 |---|---|---|
-| `main` | 63 63 65 67 68 | 10.6–12.4 ms |
-| this branch, as built | 58 60 62 65 69 | 10.6–12.1 ms |
-| five levels | 62 67 70 | 9.9–10.1 ms |
-| five levels, weight in four steps | 65 66 69 | 10.0–10.3 ms |
+| `main` | 46 46 47 | 12.3 ms |
+| this branch, as built | 47 47 47 | 12.3–12.5 ms |
+| five levels, four bands, outlines | 46 46 47 | 13.1–13.2 ms |
+| five levels, one band, outlines | 47 49 49 | 12.0–12.5 ms |
 
-The ranges overlap and the rebuild times do not separate, so the dials cost
-nothing measurable at the default and the five-level settings are, if
-anything, cheaper. Absolute rates here are not comparable with the ones in
-`sim.js`; the box is.
+Four lattice traces a rebuild cost about 0.8 ms of a 12 ms rebuild and nothing
+the step rate can see. The default is indistinguishable from `main`.
+
+These four runs are one batch, back to back, and that matters more than it
+looks: an earlier pass measured `main` at 63–68 and this branch's default at
+58–69 and the medians differed by three, which read like a regression and was
+load drift between two windows hours apart. The box moves; only a batch is a
+comparison. Absolute rates here are not comparable with the ones in `sim.js`
+either, for the same reason.
