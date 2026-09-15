@@ -6965,6 +6965,77 @@ var BODY_ALPHA  = [0.30, 0.60, 0.90, 1, 1, 1, 1, 1, 1, 1];
 var BODY_STYLE  = [];
 var bodyPath = [];
 (function () { for (var i = 0; i < BODY_LEVELS.length; i++) bodyPath.push(null); })();
+/* HOW THE MASS IS DRAWN, as against where it is.
+   -----------------------------------------------------------------
+   The ten levels above are graded for a body drawn WHOLE (BODY_FILL), where
+   a tube has to shade from its edge to its crest and five levels read as
+   posterised. The mass layer inherited them, and on the mass they do a
+   different thing: measured, the ten tones span 7.3 L* — 0.91 a step, at or
+   under what reads as a step at all — so the mass carries no visible tonal
+   structure of its own and every bit of variation in it comes from the
+   WEIGHT, which is a smooth radial fade. That is the recipe for a lamp, and
+   "the material pads are not reading as part of the vector line system" is
+   what it looks like from outside. The line bands beside it step 2.00 L*,
+   more than twice, over six tones.
+
+   So the mass's own drawing is three dials, none of which touches the weight
+   — the weight is what makes the layer edgeless and is not up for
+   renegotiation (see PAD_BUDGET). tools/ink.js measures what each does, and
+   measures that none of the three moves the edge figure by anything: what
+   does is PAD_STEPS, which is the weight's own dial and sits beside it.
+
+   LEVELS — how many of BODY_LEVELS' ten the mass is filled with, spread
+   evenly across them and always including the first and last. Fewer means
+   each step is bigger and the mass is stepped like a drawing rather than
+   shaded like a light. It also traces fewer contours, so it is cheaper.
+
+   RAMP — 0 takes each level's tone from BODY_STYLE, the body's own lamp
+   walk. 1 takes them from VEIN_BANDS instead, the ramp the lines are stroked
+   from, so the two layers are drawn out of one set of tones; it stops below
+   the widest band, whose tone belongs to the core's tubes and is the
+   brightest thing on the plate. A band ramp therefore caps at five levels,
+   because there are only five bands under that one.
+
+   RULE — a hairline on each drawn contour, at the thinnest band's width, in
+   the next tone UP its own ramp, the way a crest is a band brighter than the
+   tube it lies on. This is an EDGE, which is the thing
+   the weight exists to abolish; what makes it admissible is that it is an
+   edge the TISSUE put there — a contour of the body, cut by the same
+   destination-in as everything else here, so it fades out with the weight
+   and closes no arc the tissue did not close. Measure it before believing
+   that. */
+var MASS_LEVELS = 10;
+var MASS_RAMP   = 0;
+var MASS_RULE   = 0;
+var massLv = [];      /* which of BODY_LEVELS the mass fills, outermost first */
+var massSt = [];      /* and the style each of them is filled with */
+var massRl = [];      /* and the style its rule is stroked in, under MASS_RULE */
+function massPlan() {
+  /* the band ramp has five tones under the core's; the body ramp has ten */
+  var n = MASS_RAMP ? VEIN_BANDS.length - 1 : BODY_LEVELS.length;
+  if (n > MASS_LEVELS) n = MASS_LEVELS;
+  if (n < 2) n = 2;
+  massLv.length = 0; massSt.length = 0; massRl.length = 0;
+  for (var k = 0; k < n; k++) {
+    var idx = Math.round(k * (BODY_LEVELS.length - 1) / (n - 1));
+    if (massLv.length && idx <= massLv[massLv.length - 1]) continue;
+    var j = massLv.length;
+    massSt.push(MASS_RAMP ? VEIN_BANDS[j].style : BODY_STYLE[idx]);
+    massLv.push(idx);
+  }
+  /* A rule is a CREST: one band brighter than the tissue it lies on, which is
+     the rule the line layer is built on (see VEIN_BANDS — a line is a
+     highlight only where it is lighter than what it lies on). So each
+     contour's rule is the next tone up its own ramp, and the innermost
+     contour — the packed core — takes the core tubes' own tone, which is
+     where that tone belongs. On the body ramp the next tone up is under a
+     lightness step (0.91 L*), so the rule is nearly invisible there: it is
+     a band-ramp idea and the numbers say so. */
+  for (var q = 0; q < massLv.length; q++) {
+    massRl.push(MASS_RAMP ? VEIN_BANDS[Math.min(q + 1, VEIN_BANDS.length - 1)].style
+                          : BODY_STYLE[Math.min(massLv[q + 1] == null ? 9 : massLv[q + 1], BODY_LEVELS.length - 1)]);
+  }
+}
 /* a loop shorter than this is speckle or a pinhole: at 16 crossings it is
    a blob under four cells across, which drawn was a droplet beside the
    tube it fell off */
@@ -8284,6 +8355,24 @@ var PAD_D_REF   = 6;          /* cells of half-width a step costs one unit at */
 var PAD_B       = 18;         /* the budget, in those units */
 var PAD_HOLD    = 0.43;       /* share of it held at full weight before the fade starts */
 var PAD_A       = 0.92;       /* the mass's alpha where the weight is one */
+/* The weight in whole steps rather than continuously, 0 for continuous. This
+   is the one dial here that touches the WEIGHT and not merely the paint, and
+   it is the only one that changes what the layer reads as: measured, the mass
+   reads as light because every bit of variation across it is a smooth ramp,
+   and no choice of tone ladder moves that (tools/ink.js). Quantised, the same
+   weight draws the same shape in flat bands.
+
+   What it costs is an EDGE, which is what this whole layer was written to
+   abolish, and the cost is exactly 1/PAD_STEPS of PAD_A at every band
+   boundary including the last. That is the figure SLIME.mass() already
+   reports as `step`, so it is comparable with what is already known: the
+   clip scored 0.92 and the continuous weight 0.265 where the tissue is wide.
+   Four steps is 0.23 — under the continuous weight's own worst step, though
+   taken at every boundary rather than at one place. The shape those bands
+   take is the walk's, which is the tissue's; it is not the clip's circle,
+   and that distinction is the whole argument for whether this is admissible.
+   It is the owner's call and not the renderer's. */
+var PAD_STEPS   = 0;
 /* The weight lives at HALF the plate's resolution, and costs nowhere near
    half the picture: it is a soft mask multiplied against contours traced at
    full resolution, so what a coarse mask buys is four times less walking and
@@ -8429,6 +8518,10 @@ function padWalk() {
       if (g < 0 || g >= PAD_B) { padW[i] = 0; continue; }
       if (g <= hold) w = 1;
       else { var u = 1 - (g - hold) / span; w = u * u * (3 - 2 * u); }
+      /* rounded UP, so the outermost band is a whole step rather than a
+         sliver and the mask covers exactly the cells it covered before —
+         massField and the box below read `w > 0`, which is unchanged */
+      if (PAD_STEPS > 0) w = Math.ceil(w * PAD_STEPS) / PAD_STEPS;
       padW[i] = w;
       if (w <= 0) continue;
       if (x < pbX0) pbX0 = x;
@@ -8534,10 +8627,20 @@ function paintMass(c, sx, sy) {
   padSctx.setTransform(sx, 0, 0, sy, 0, 0);
   /* the paths are the mass's own — massField traced them from a field that is
      zero outside the weight — so this fills the box and not the plate */
-  for (k = 0; k < BODY_LEVELS.length; k++) {
-    if (!bodyPath[k]) continue;
-    padSctx.fillStyle = BODY_STYLE[k];
-    padSctx.fill(bodyPath[k], 'evenodd');
+  for (k = 0; k < massLv.length; k++) {
+    if (!bodyPath[massLv[k]]) continue;
+    padSctx.fillStyle = massSt[k];
+    padSctx.fill(bodyPath[massLv[k]], 'evenodd');
+  }
+  /* and the rules, after every fill rather than beside its own, so a step's
+     line is not buried under the step above it — see MASS_RULE */
+  if (MASS_RULE) {
+    padSctx.lineWidth = VEIN_BANDS[0].w;
+    for (k = 0; k < massLv.length; k++) {
+      if (!bodyPath[massLv[k]]) continue;
+      padSctx.strokeStyle = massRl[k];
+      padSctx.stroke(bodyPath[massLv[k]]);
+    }
   }
   padSctx.setTransform(1, 0, 0, 1, 0, 0);
   padSctx.globalCompositeOperation = 'destination-in';
@@ -8651,6 +8754,15 @@ function treeBand(w) {
   return b;
 }
 
+/* Harness only: either half of this canvas held out of the picture, so a
+   probe can render the plate twice and DIFFERENCE one layer out of it. The
+   mass and the lines are the two things drawn here and the question they
+   raise — whether they read as one drawing system — is a question about each
+   one's own pixels, which on a composite nobody can separate by eye. Both
+   default to drawn, nothing in the page sets them, and neither is reachable
+   without SLIME.layers(). See tools/ink.js. */
+var HIDE_MASS = false, HIDE_LINES = false;
+
 /* The picture: every node's segment to its parent, batched by quantised
    width, widest first so hairlines land on the trunks they leave.
    Ghosts under everything, pale. Into vgc, which the composite lays
@@ -8709,15 +8821,15 @@ function paintTree() {
   vgctx.lineCap = 'round';
   vgctx.lineJoin = 'round';
   /* the puddles first, under everything */
-  paintPuddles(vgctx, sx, sy);
-  if (ghost) {
+  if (!HIDE_MASS) paintPuddles(vgctx, sx, sy);
+  if (ghost && !HIDE_LINES) {
     vgctx.globalAlpha = TREE_GHOST_A;
     vgctx.lineWidth = TREE_GHOST_W;
     vgctx.strokeStyle = VEIN_BANDS[0].style;
     vgctx.stroke(ghost);
     vgctx.globalAlpha = 1;
   }
-  for (k = keys - 1; k >= 1; k--) {
+  for (k = HIDE_LINES ? 0 : keys - 1; k >= 1; k--) {
     if (!paths[k]) continue;
     var w2 = k / TREE_WQ;
     vgctx.lineWidth = w2;
@@ -9404,6 +9516,9 @@ function tintVeins(vein) {
   for (var kb = 0; kb < BODY_LEVELS.length; kb++) {
     BODY_STYLE[kb] = rgba(kb === 0 ? mixWhite(vein, 0.42) : mixLamp(vein, BODY_HOT[kb]), '' + BODY_ALPHA[kb]);
   }
+  /* which of those the mass draws, and out of which ramp — both read off the
+     styles just solved, so the plan cannot outlive the palette that made it */
+  massPlan();
   /* a tube's tone by its width — see tubeHot. Only the TUBES renderer, which
      the plate ships off; the puddles follow the tree's ramp instead, for the
      reason written at puddleBand. */
@@ -10121,9 +10236,14 @@ function buildVeins() {
       for (b = 0; b < BODY_LEVELS.length; b++) bodyPath[b] = traceIso(bodyV, BODY_LEVELS[b], true);
       recPath = traceIso(recV, BODY_LEVELS[REC_LEVEL], false);
     } else if (PAD_BUDGET) {
-      /* the mass's levels, traced inside its own weight — see massField */
-      for (b = 0; b < BODY_LEVELS.length; b++) {
-        bodyPath[b] = massQN ? traceIso(massV, BODY_LEVELS[b], false, null, massQ, massQN) : null;
+      /* the mass's levels, traced inside its own weight — see massField.
+         Only the levels it actually FILLS: the trace was what this layer's
+         cost turned out to be (see PAD_BUDGET), so a mass drawn in fewer
+         steps is traced in fewer too rather than tracing ten and throwing
+         some away. */
+      for (b = 0; b < BODY_LEVELS.length; b++) bodyPath[b] = null;
+      for (b = 0; b < massLv.length && massQN; b++) {
+        bodyPath[massLv[b]] = traceIso(massV, BODY_LEVELS[massLv[b]], false, null, massQ, massQN);
       }
       recPath = null;
     } else {
@@ -14386,12 +14506,66 @@ function init() {
         if (o.MASKLV != null) PAD_MASK_LV = o.MASKLV;
         if (o.SWEEPS != null) PAD_SWEEPS = o.SWEEPS;
         if (o.A != null) PAD_A = o.A;
+        if (o.STEPS != null) PAD_STEPS = o.STEPS | 0;
         if (o.on != null) PAD_BUDGET = !!o.on;
         fieldDirty = true; dirtyFrames = REBUILD_EVERY;
         treeDirty = true; treePaintT = -1e9;
       }
       return { B: PAD_B, DREF: PAD_D_REF, HOLD: PAD_HOLD, SWEEPS: PAD_SWEEPS,
-               MASKLV: PAD_MASK_LV, A: PAD_A, on: PAD_BUDGET };
+               MASKLV: PAD_MASK_LV, A: PAD_A, STEPS: PAD_STEPS, on: PAD_BUDGET };
+    },
+    /* harness only: the mass's drawing dials, so a sweep is one page rather
+       than one build each — as padTune is for its weight. See MASS_LEVELS. */
+    massTune: function (o) {
+      if (o) {
+        if (o.levels != null) MASS_LEVELS = o.levels | 0;
+        if (o.ramp != null) MASS_RAMP = o.ramp ? 1 : 0;
+        if (o.rule != null) MASS_RULE = o.rule ? 1 : 0;
+        /* the weight's own dial, set from here as well because it is part of
+           the same choice — see PAD_STEPS */
+        if (o.steps != null) PAD_STEPS = o.steps | 0;
+        massPlan();
+        fieldDirty = true; dirtyFrames = REBUILD_EVERY;
+        treeDirty = true; treePaintT = -1e9;
+        if (cv && S.exp) render();
+      }
+      return { levels: massLv.length, ramp: MASS_RAMP, rule: MASS_RULE, steps: PAD_STEPS,
+               at: massLv.slice(), trail: massLv.map(function (i) { return BODY_LEVELS[i]; }),
+               tones: massSt.slice() };
+    },
+    /* harness only: hold either half of the vein canvas out of the picture,
+       so a probe can render the plate with and without one layer and take the
+       difference. That difference is the only way to say what the mass alone
+       or the lines alone contribute to a pixel — on the composite they are
+       the same yellow. See tools/ink.js. */
+    layers: function (o) {
+      if (o) {
+        if (o.mass != null) HIDE_MASS = !o.mass;
+        if (o.lines != null) HIDE_LINES = !o.lines;
+        treeDirty = true; treePaintT = -1e9;
+        fieldDirty = true; dirtyFrames = REBUILD_EVERY;
+        /* Repainted here rather than left to the next frame, because the
+           moment this is most worth asking about is a FINISHED run — and a
+           run that has stopped gets no next frame: the loop cancels its own
+           rAF, and the result screen renders once by hand. A probe that
+           waited for a frame would read the picture it had already taken. */
+        if (cv && S.exp) render();
+      }
+      return { mass: !HIDE_MASS, lines: !HIDE_LINES };
+    },
+    /* harness only: the two ramps, as the strings they are actually painted
+       with. The mass walks BODY_HOT and the lines walk VEIN_BANDS, and
+       whether those are one ramp or two is the question the owner asked —
+       so it is answered from the styles themselves rather than from the
+       constants a reader would have to re-derive them from. */
+    ink: function () {
+      return { tint: TINT.slice(), lamp: LAMP.slice(),
+               body: BODY_STYLE.slice(), levels: BODY_LEVELS.slice(),
+               hot: BODY_HOT.slice(), alpha: BODY_ALPHA.slice(),
+               bands: VEIN_BANDS.map(function (b) {
+                 return { w: b.w, hot: b.hot, style: b.style, alpha: b.alpha };
+               }),
+               tip: TIP_STYLE, padA: PAD_A };
     },
     /* harness only: the mass layer's clip, measured. For each station the
        pads are painted at, the radius padReach hands the clip and what the
