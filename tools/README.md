@@ -496,6 +496,78 @@ reasoned:
 | rim p50 | 6.0 | 5.0 | 3.6 | 3.1 |
 | share in commonest six | 48.8 % | 45.1 % | 41.7 % | 39.7 % |
 
+### The two things "unaware of the lines" turned out to be
+
+Drawn crisply, the mass stopped reading as light and started reading as a
+shape the lines knew nothing about. That was two separate faults and only one
+of them was about shape.
+
+**The silhouette.** The walk is costed on the FILM's half-width, which is
+broad wherever there is any tissue at all, so a pad's lobes point wherever the
+film happens to be wide and the trunks arrive at its edge and stop dead.
+`PAD_VEIN` discounts the cost of crossing a cell a vein runs through, in
+proportion to that vein's width, so the budget reaches further along a trunk
+than across bare sheet and the pad grows arms down the veins leaving its
+station. The base cost stays the film's, which is what keeps `PAD_BUDGET`'s
+argument intact: a flake with film and no tube yet still gets its mass.
+
+The first version of this dial normalised the vein's width against
+`TREE_WMAX`, and moved the picture by nothing. `TREE_WMAX` is 4.4, the cap the
+pipe model is clamped at, and a dish does not reach it: on EXP-01/efe8ba at
+137 s the widest live segment measures **2.77** and the mean is **1.31**, so
+the discount was running at a third of its nominal strength. It is normalised
+on `VEIN_BANDS`' second-widest band now — the width at which the line renderer
+itself starts calling a segment a trunk — and read off the bands rather than
+written as a number.
+
+| PAD_VEIN | 0 | 0.55 | 0.75 | 0.9 |
+|---|---|---|---|---|
+| origin reach, cells | 38.1 | 39.2 | 45.2 | **58.6** |
+| of the plate | 12.7 % | 13.6 % | 14.2 % | 14.9 % |
+
+**The tone, which was the renderer's own rule being broken.** `VEIN_BANDS`
+says it in its own comment: a line is a highlight only where it is lighter
+than the tissue it lies on. The mass's band ramp ran up to the second-widest
+band — the TRUNK's own tone — so a trunk crossing a pad was drawn in exactly
+the tone it was lying on and vanished into it. Every line that met a mass
+stopped at it. `MASS_CAP` is the brightest band the mass may reach, with its
+levels spread over `0..MASS_CAP`:
+
+| MASS_CAP | 4 (the trunk band) | 2 | 1 |
+|---|---|---|---|
+| mass ceiling, L\* | 81.6 | 76.9 | 75.9 |
+| mass median, L\* | 75.4 | 75.4 | 64.8 |
+| the lines' ceiling | 86.4 | 86.4 | 86.4 |
+
+A capped ramp also makes levels redundant — several of them come out the same
+tone, and a level whose tone equals the one outside it draws nothing, because
+the levels nest. Those are dropped rather than traced to be painted invisible:
+five levels asked for under cap 2 is three traced. The band index has to come
+from the level's place on the ramp and not from the surviving count, or the
+ramp stalls the moment anything is dropped and the plan collapses to its first
+two tones — which is what the first version of the dedupe did, and what the
+figures caught.
+
+### What the plate ships
+
+Chosen by the owner off rendered comparisons, not by the renderer: five levels
+on the band ramp capped at band 2, the weight in ONE step drawn as outlines
+and discounted along the veins at 0.9.
+
+| | lines | mass, as built | mass, as shipped |
+|---|---|---|---|
+| edge 10-90, cells | 0.23 | 6.0–8.25 | **0.5–2.5** |
+| rim step vs agar | 9.6 | 1.5 | **20.0** |
+| tones over 1 % | 5 | 9 | **3** |
+| share in commonest six | 47.5 % | 21.9 % | **88.0 %** |
+| median L\* | 28.1 | 63.8 | 75.4 |
+
+One weight band means `step` is 0.92 both ways — **the figure the old circular
+clip scored**. That is the honest cost and it was named before the choice was
+made: what makes it not a return to the clip is that the shape is the walk's,
+so it is the tissue's, and it now runs out along the veins. The step figure
+cannot tell those apart and this file does not pretend it can.
+
 ### Cost
 
 Tracing is where this layer's cost is (see `PAD_BUDGET`), and the mass now
@@ -504,15 +576,17 @@ At turbo 32 on EXP-01/11f9a2 grown to 45 s, five reps, on a cloud box that
 runs the whole plate at about half the rate the figure in `PAD_BUDGET` was
 taken at:
 
-| | steps/s | rebuild |
-|---|---|---|
-| `main` | 46 46 47 | 12.3 ms |
-| this branch, as built | 47 47 47 | 12.3–12.5 ms |
-| five levels, four bands, outlines | 46 46 47 | 13.1–13.2 ms |
-| five levels, one band, outlines | 47 49 49 | 12.0–12.5 ms |
+| | steps/s | rebuild | composite |
+|---|---|---|---|
+| `main` | 42 46 48 | 12.3–12.6 ms | 45.3–46.9 ms |
+| as shipped | 43 51 54 | 12.3–12.5 ms | 38.9–47.1 ms |
 
-Four lattice traces a rebuild cost about 0.8 ms of a 12 ms rebuild and nothing
-the step rate can see. The default is indistinguishable from `main`.
+No regression, and the composite is equal or lower: the shipped mass traces
+three contours where the old one traced ten, and its mask is filled outlines
+rather than a per-pixel image write. An earlier measurement of four bands
+under the raster mask put the rebuild at 13.1–13.2 ms against 12.3, so four
+lattice traces cost about 0.8 ms; one band costs a quarter of that and the
+seven contour traces it saves more than pay for it.
 
 These four runs are one batch, back to back, and that matters more than it
 looks: an earlier pass measured `main` at 63–68 and this branch's default at

@@ -6978,16 +6978,25 @@ var bodyPath = [];
    what it looks like from outside. The line bands beside it step 2.00 L*,
    more than twice, over six tones.
 
-   So the mass's own drawing is three dials, none of which touches the weight
-   — the weight is what makes the layer edgeless and is not up for
-   renegotiation (see PAD_BUDGET). tools/ink.js measures what each does, and
-   measures that none of the three moves the edge figure by anything: what
-   does is PAD_STEPS, which is the weight's own dial and sits beside it.
+   These dials were measured against that (tools/ink.js) and the owner picked
+   what the plate now ships: five levels on the line bands' ramp, capped two
+   bands below the core tubes', with the weight in ONE step drawn as an
+   outline and discounted along the veins. None of the three below touches
+   the weight; what does is PAD_STEPS, PAD_VEC and PAD_VEIN, which sit beside
+   it. The shipped mass is a drawn shape with a hard edge, and that edge
+   scores what the old circular clip scored — 0.92 — on SLIME.mass()'s step.
+   The difference from the clip, and the reason this is not a return to it,
+   is that the shape is the WALK's, so it is the tissue's: it closes no arc
+   the tissue did not close, and it runs out along the veins. That was the
+   owner's call on a rendered comparison, not the renderer's.
 
-   LEVELS — how many of BODY_LEVELS' ten the mass is filled with, spread
-   evenly across them and always including the first and last. Fewer means
-   each step is bigger and the mass is stepped like a drawing rather than
-   shaded like a light. It also traces fewer contours, so it is cheaper.
+   LEVELS — how many of BODY_LEVELS' ten the mass is asked for, spread evenly
+   across them and always including the first and last. Fewer means each step
+   is bigger and the mass is stepped like a drawing rather than shaded like a
+   light. It also traces fewer contours, so it is cheaper — and fewer still
+   than it is asked for, since a level whose tone the cap has made equal to
+   the one outside it draws nothing and is dropped. Five asked for under cap
+   2 is three traced.
 
    RAMP — 0 takes each level's tone from BODY_STYLE, the body's own lamp
    walk. 1 takes them from VEIN_BANDS instead, the ramp the lines are stroked
@@ -7004,9 +7013,27 @@ var bodyPath = [];
    destination-in as everything else here, so it fades out with the weight
    and closes no arc the tissue did not close. Measure it before believing
    that. */
-var MASS_LEVELS = 10;
-var MASS_RAMP   = 0;
+var MASS_LEVELS = 5;
+var MASS_RAMP   = 1;
 var MASS_RULE   = 0;
+/* The brightest band the mass's ramp may reach, with its levels spread over
+   0..MASS_CAP rather than over every band below the core tubes'.
+
+   It defaults to the second-widest band, which is the TRUNK's own tone — and
+   that default is measurably wrong for the thing this layer is being asked
+   to do. VEIN_BANDS says it in its own comment: a line is a highlight only
+   where it is lighter than the tissue it lies on. Fill a pad to the trunk
+   band and a trunk crossing that pad is drawn in exactly the tone it is
+   lying on, so it vanishes into the mass — which is the mass failing to know
+   about the lines, stated as a tone rather than as a shape. Capping lower
+   leaves every line that crosses a pad brighter than it, by the same margin
+   the body's own levels leave for the core tubes. */
+var MASS_CAP    = 2;
+function massBand(j, n) {
+  var cap = Math.min(MASS_CAP, VEIN_BANDS.length - 2);
+  if (cap < 0) cap = 0;
+  return n < 2 ? cap : Math.round(j * cap / (n - 1));
+}
 var massLv = [];      /* which of BODY_LEVELS the mass fills, outermost first */
 var massSt = [];      /* and the style each of them is filled with */
 var massRl = [];      /* and the style its rule is stroked in, under MASS_RULE */
@@ -7019,8 +7046,21 @@ function massPlan() {
   for (var k = 0; k < n; k++) {
     var idx = Math.round(k * (BODY_LEVELS.length - 1) / (n - 1));
     if (massLv.length && idx <= massLv[massLv.length - 1]) continue;
-    var j = massLv.length;
-    massSt.push(MASS_RAMP ? VEIN_BANDS[j].style : BODY_STYLE[idx]);
+    /* k and NOT massLv.length: the band is this level's place on the ramp,
+       which is fixed by how many levels were asked for, not by how many
+       survived the dedupe below. Taking it from the surviving count stalls
+       the ramp the moment anything is dropped and collapses the whole plan
+       to its first two tones. */
+    var st = MASS_RAMP ? VEIN_BANDS[massBand(k, n)].style : BODY_STYLE[idx];
+    /* A level whose tone equals the one outside it draws nothing: the levels
+       nest, so filling the outer one and then the inner one in the same
+       colour is the outer one. Under a capped ramp several levels share a
+       tone, and tracing them is a contour traced to be painted invisible —
+       the trace being where this layer's cost actually is (see PAD_BUDGET).
+       Dropped only with the rules off: a rule is drawn ON each contour, so
+       with MASS_RULE the same-toned levels are not redundant. */
+    if (!MASS_RULE && massSt.length && st === massSt[massSt.length - 1]) continue;
+    massSt.push(st);
     massLv.push(idx);
   }
   /* A rule is a CREST: one band brighter than the tissue it lies on, which is
@@ -7032,7 +7072,8 @@ function massPlan() {
      lightness step (0.91 L*), so the rule is nearly invisible there: it is
      a band-ramp idea and the numbers say so. */
   for (var q = 0; q < massLv.length; q++) {
-    massRl.push(MASS_RAMP ? VEIN_BANDS[Math.min(q + 1, VEIN_BANDS.length - 1)].style
+    massRl.push(MASS_RAMP ? VEIN_BANDS[Math.min(massBand(q, massLv.length) + 1, VEIN_BANDS.length - 1)].style
+
                           : BODY_STYLE[Math.min(massLv[q + 1] == null ? 9 : massLv[q + 1], BODY_LEVELS.length - 1)]);
   }
 }
@@ -8372,7 +8413,7 @@ var PAD_A       = 0.92;       /* the mass's alpha where the weight is one */
    take is the walk's, which is the tissue's; it is not the clip's circle,
    and that distinction is the whole argument for whether this is admissible.
    It is the owner's call and not the renderer's. */
-var PAD_STEPS   = 0;
+var PAD_STEPS   = 1;
 /* And those steps drawn as SHAPES rather than as a raster mask.
    -----------------------------------------------------------------
    The weight is a field on a half-resolution lattice, and it reaches the
@@ -8393,7 +8434,54 @@ var PAD_STEPS   = 0;
    which is the thing the fade was written to avoid. That it FOLLOWS the
    walk — which follows the tissue's thinness — is the whole argument for
    why it is not the clip's arc. Requires PAD_STEPS. */
-var PAD_VEC     = 0;
+var PAD_VEC     = 1;
+/* And the walk told about the LINES.
+   -----------------------------------------------------------------
+   The mass and the lines are grown from different things. The lines are the
+   vein tree; the mass is a budget walked out through the FILM's half-width,
+   which is broad wherever there is any tissue at all. So a pad's lobes point
+   wherever the film happens to be wide, the trunks arrive at its edge and
+   stop dead, and the two shapes plainly do not know about each other — which
+   is the complaint restated once the mass is drawn crisply enough to see it.
+
+   PAD_VEIN discounts the cost of crossing a lattice cell a vein runs through,
+   in proportion to that vein's width against the widest trunk. The budget
+   then reaches further along a trunk than across bare sheet, so a pad grows
+   arms down the veins leaving its station and tapers where they thin — which
+   is what a pad IS: the place the lines run into and thicken.
+
+   The base cost stays the film's, and that is deliberate. PAD_BUDGET costs
+   the walk on the film rather than on the tube mask because a flake being
+   eaten at 45 s has film on it and no tube yet, and a mass that waited for
+   the tube would arrive at each flake only once the tube did — the defect
+   the layer exists to cure. A DISCOUNT keeps that: with no vein anywhere
+   near, the walk is exactly what it was. */
+var PAD_VEIN    = 0.9;
+var padVeinW = new Float32Array(LW * LH);   /* widest vein across each lattice cell */
+/* the live tree, stamped onto the lattice. Straight segments node to parent
+   rather than paintTree's quadratics: this is a cost field a budget is spent
+   against, a half-cell of chord error is nowhere in the picture, and the
+   curve costs a spline evaluation per cell to remove it. */
+function padVeinMask() {
+  padVeinW.fill(0);
+  if (!(PAD_VEIN > 0)) return;
+  for (var i = 1; i < tN; i++) {
+    if (!tstate[i]) continue;
+    var p = tpar[i];
+    if (p < 0) continue;
+    var x0 = tx[p] * 0.5, y0 = ty[p] * 0.5;
+    var dx = tx[i] * 0.5 - x0, dy = ty[i] * 0.5 - y0;
+    var n = Math.ceil(Math.max(Math.abs(dx), Math.abs(dy)));
+    if (n < 1) n = 1;
+    var w = tw[i];
+    for (var t = 0; t <= n; t++) {
+      var lx = (x0 + dx * t / n) | 0, ly = (y0 + dy * t / n) | 0;
+      if (lx < 0 || ly < 0 || lx >= LW || ly >= LH) continue;
+      var k = ly * LW + lx;
+      if (w > padVeinW[k]) padVeinW[k] = w;
+    }
+  }
+}
 var padTier = new Int8Array(LW * LH);   /* the weight in whole steps, for the trace */
 var padBand = [];                       /* a Path2D per step, 1..PAD_STEPS */
 var padBandN = 0;
@@ -8477,6 +8565,7 @@ var PAD_SWEEPS = 4;
 function padWalk() {
   var e = S.exp, i, x, y, c, d, a, s2, N = LW * LH;
   padDist(BODY_LEVELS[PAD_MASK_LV]);
+  padVeinMask();
   for (i = 0; i < N; i++) {
     var h = padD[i];
     if (h <= 0) { padG[i] = -1; padC[i] = 0; continue; }
@@ -8486,6 +8575,22 @@ function padWalk() {
        non-zero reading is one lattice step, which is two cells, so the
        dearest a step can be is PAD_D_REF. */
     padC[i] = 2 * PAD_D_REF / h;
+    /* ...and cheaper along a vein, by that vein's share of the widest trunk,
+       so a trunk carries the mass further than a twig does — see PAD_VEIN */
+    if (PAD_VEIN > 0 && padVeinW[i] > 0) {
+      /* Against the TRUNK BAND's own width, not TREE_WMAX. TREE_WMAX is the
+         cap the pipe model is clamped at and a dish does not reach it: on
+         EXP-01/efe8ba at 137 s the widest live segment measures 2.77 against
+         the cap's 4.4 and the mean is 1.31, so a discount normalised on the
+         cap runs at a third of its nominal strength and the first sweep of
+         this dial moved the picture by nothing. VEIN_BANDS' second-widest
+         band is the width at which the line renderer itself starts calling a
+         segment a trunk, which is the reference this wants — and it is read
+         off the bands rather than written here, so it cannot drift from
+         them. */
+      var vw = padVeinW[i] / VEIN_BANDS[VEIN_BANDS.length - 2].w;
+      padC[i] *= 1 - PAD_VEIN * (vw > 1 ? 1 : vw);
+    }
   }
   /* the seeds: tissue standing on a station's own food. A flake with nothing
      on it yet seeds nothing and is drawn nothing, which is the honest
@@ -14599,12 +14704,15 @@ function init() {
            the same choice — see PAD_STEPS */
         if (o.steps != null) PAD_STEPS = Math.max(0, o.steps | 0);
         if (o.vec != null) PAD_VEC = o.vec ? 1 : 0;
+        if (o.vein != null) PAD_VEIN = Math.max(0, Math.min(0.95, +o.vein || 0));
+        if (o.cap != null) MASS_CAP = Math.max(0, Math.min(VEIN_BANDS.length - 2, o.cap | 0));
         massPlan();
         fieldDirty = true; dirtyFrames = REBUILD_EVERY;
         treeDirty = true; treePaintT = -1e9;
         if (cv && S.exp) render();
       }
-      return { levels: massLv.length, ramp: MASS_RAMP, rule: MASS_RULE, steps: PAD_STEPS, vec: PAD_VEC,
+      return { levels: massLv.length, ramp: MASS_RAMP, rule: MASS_RULE, steps: PAD_STEPS,
+               vec: PAD_VEC, vein: PAD_VEIN, cap: MASS_CAP,
                at: massLv.slice(), trail: massLv.map(function (i) { return BODY_LEVELS[i]; }),
                tones: massSt.slice() };
     },
