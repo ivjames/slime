@@ -359,24 +359,39 @@ On EXP-01/efe8ba at 137 s — the won plate the complaint was made about — at
 |---|---|---|
 | edge 10-90 | 0.23 cells (one device pixel, the floor of the measurement) | 6.0–8.25 cells, p90 11.8–18.0 |
 | rim step vs agar | p50 9.6, p99 60.5 L\* a pixel | p50 1.5, p99 14.6 |
-| agar-adjacent pairs per 1000 px of own area | 611 | 32 |
 | tones over 1 % | 4 | 9 |
 | share in commonest six | 46.9 % | 21.9 % |
-| ramp | 8.0 L\* over 4 steps, **2.00 a step** | 7.3 L\* over 8 steps, **0.91 a step** |
+| ramp above its first rung | 8.0 L\* over 4, **2.00 a rung** | 7.3 L\* over 8, **0.91 a rung** |
 
 Three things fall out of that and the third was the surprise.
 
 The mass has essentially **no boundary**: its falloff is 26 to 36 times wider
-than a line's, and it meets bare agar at thirty-two places per thousand pixels
-of itself where a line meets it at six hundred. That is the layer working as
-designed — a fade, not a clip.
+than a line's, and where it does meet bare agar it steps 1.5 L\* against a
+line's 9.6. That is the layer working as designed — a fade, not a clip.
 
-Its **own ten tones are invisible as tones**. They span 7.3 L\*, 0.91 a step,
-at or under what reads as a step at all, where the six line bands step 2.00.
-So the mass carries no tonal structure of its own and every bit of variation
-across it is the weight's smooth radial ramp. That is the recipe for a lamp,
-and it is why no choice of tone ladder moves the edge figure: measured, the
-band ramp takes 6.0–8.25 cells to 5.5–7.5, which is nothing.
+What that comparison is NOT is the two `n` counts, and the first draft of this
+section used them: 192,360 boundary pairs for the lines against 5,829 for the
+mass reads like a twentyfold difference in edge-ness and is mostly a fact
+about SHAPE. A layer made of hairlines has far more boundary per unit of its
+own area than a layer made of blobs, whatever either one does at that
+boundary. The step size is the figure; the count is the sample.
+
+Its **own ten tones are invisible as tones**. Above the first rung they span
+7.3 L\*, 0.91 a rung, at or under what reads as a step at all, where the six
+line bands step 2.00. So the mass carries no tonal structure of its own and
+every bit of variation across it is the weight's smooth radial ramp. That is
+the recipe for a lamp, and it is why no choice of tone ladder moves the edge
+figure: measured, the band ramp takes 6.0–8.25 cells to 5.5–7.5, which is
+nothing.
+
+"Above the first rung" is a judgement and the tool prints both spans so it can
+be seen being made. On the body ramp rung 0 is not on the ramp at all — it is
+the film's white walk, the one tone on the plate that does not walk toward the
+lamp — and a mean that includes it reports the body ramp stepping DOWN, at
+-0.08 a rung. The same rung is dropped from the bands for comparability, and
+that costs the comparison nothing it wants: it makes the LINE ramp look finer
+than it is, 2.00 against 3.86 over all six, so 0.91 against 2.00 is the
+conservative reading of the gap.
 
 And the mass's outermost tone is the one **white-walked** tone on the plate —
 L\* 88 at chroma 44, where every other rung of both ladders sits at 54 to 72.

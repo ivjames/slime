@@ -24,16 +24,22 @@
  *            For a line, measured across the stroke; for the mass, along rays
  *            out of each station. This is "hard edge" against "no edge at
  *            all", as one number each.
- *   rim    — the largest L* step the layer takes against what lies outside
- *            it, P99 and max over every boundary pixel pair. An edge in a
- *            picture is a step in a line.
+ *   rim    — the L* step the layer takes where it meets BARE AGAR, per device
+ *            pixel, as p50/p99/max. An edge in a picture is a step in a line.
+ *            Compare the steps between the layers and not the counts: a thin
+ *            stroke has far more boundary per unit of its own area than a
+ *            blob does, so `n` is mostly a fact about shape.
  *   tones  — distinct RGB values holding at least 1% of the layer's area, and
  *            the share of the layer in its commonest six. A drawing made of
  *            flat strokes lives in a handful of tones; a bloom lives in
  *            hundreds.
- *   L*     — where the layer sits in lightness: its floor, median and ceiling,
- *            and the ceiling against the widest line's own tone. "The core is
- *            brighter than the trunks running into it" is that comparison.
+ *   L*     — where the layer sits in lightness: its floor, median and ceiling.
+ *   chroma — how much colour it holds at 55-75 L*, the band both layers have
+ *            area in; compared only there, since anything's chroma collapses
+ *            as it fades out over the agar.
+ *   ladders— the two ramps as the tones they are painted in, and the size of
+ *            a rung. A ramp whose rung is under a lightness step carries no
+ *            structure the eye can find.
  *
  *   node tools/ink.js                          # EXP-01/efe8ba at 137 s
  *   SEEDS=11f9a2 TIMES=45,120 node tools/ink.js
@@ -400,10 +406,22 @@ function probeInPage() {
       console.log(`            mass  p10 ${f2(mm.C.lo)} mid ${f2(mm.C.mid)} p90 ${f2(mm.C.hi)}  (n=${mm.C.n})`);
       const ladder = (styles, alphas) =>
         styles.map((st, k) => `${labOf(st).L.toFixed(0)}/${labOf(st).C.toFixed(0)}@${alphas[k]}`).join('  ');
+      /* Both spans, because dropping the first rung is a judgement and a
+         reader recomputing from the printed ladder has to be able to see it
+         was made. It is dropped because on the body ramp rung 0 is not on the
+         ramp at all — it is the film's white walk, the one tone on the plate
+         that is not a walk toward the lamp — and a mean that includes it
+         reports the ramp stepping DOWN. The same rung is dropped from the
+         bands for comparability, which costs the comparison nothing it wants:
+         it makes the line ramp look finer than it is (2.00 a rung against
+         3.80 over all five), so the gap this measures is the conservative
+         one. */
       const rungs = styles => {
         const L = styles.map(st => labOf(st).L);
-        return `${(L[L.length - 1] - L[1]).toFixed(1)} L* over ${L.length - 2} steps, ` +
-               `${((L[L.length - 1] - L[1]) / (L.length - 2)).toFixed(2)} a step`;
+        const n = L.length;
+        const all = (L[n - 1] - L[0]) / (n - 1), off = (L[n - 1] - L[1]) / (n - 2);
+        return `${(L[n - 1] - L[1]).toFixed(1)} L* over ${n - 2} rungs above the first, ` +
+               `${off.toFixed(2)} a rung  (all ${n} rungs: ${all.toFixed(2)})`;
       };
       console.log(`  ladders   (L*/chroma of the tone each level is painted in, and the alpha it is laid at)`);
       console.log(`            body  ${ladder(r.ink.body, r.ink.alpha)}`);
@@ -441,7 +459,9 @@ function probeInPage() {
     await page.close();
   }
   console.log('\n  edge: the 10-90 distance across the layer\'s own boundary, in cells (0.551 mm each)');
-  console.log('  rim:  the L* step the layer takes against what lies outside it, per cell');
+  console.log('  rim:  the L* step the layer takes where it meets bare agar, per device pixel.');
+  console.log('        Compare the steps, not the n: a thin stroke has far more boundary per');
+  console.log('        unit of its own area than a blob, so n is mostly a fact about shape.');
   console.log('  tones: distinct RGB values in the layer, and the share of it in its commonest six');
   await browser.close();
   srv.close();
