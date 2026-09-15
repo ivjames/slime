@@ -14376,6 +14376,290 @@ function init() {
                plate: { cells: tot * 4, pct: +(100 * tot / N).toFixed(1),
                         quads: massQN, ofPlate: +(100 * massQN / ((GH - 1) * GW)).toFixed(1) } };
     },
+    /* harness only: the LINE layer at each station, measured beside the mass
+       so the two are read off one moment.
+
+       The complaint this answers is a station wearing a mass that no vein
+       reaches: tissue plainly on the food, and nothing drawn saying how the
+       organism got there. Both halves have to come from the same walk, so
+       this runs padWalk itself and reports the mass figures next to the tree
+       ones rather than asking the caller to line up two calls.
+
+       Per station, all distances in grid cells (0.551 mm each, as cover()
+       and mass() are):
+
+         core/crad  the mass this station is standing in: the one connected
+                    piece of weight-half-or-better lattice, flooded from the
+                    station's own food, and how far the furthest of it
+                    stands from the station. NOT mass()'s figure, which is a
+                    fixed disc and on a crowded dish counts the neighbour's
+                    puddle as well — see the note in station().
+         nearL      the nearest LIVE tree node to the station centre, out to
+                    SCAN cells, and -1 for none in range. This is the figure
+                    that separates "the tree never grew here" from "it grew
+                    here and is not visible".
+         inC        live nodes standing inside crad — inside the drawn mass.
+         ghC        ghost nodes there, which are drawn at TREE_GHOST_W under
+                    TREE_GHOST_A and are the faint-path hypothesis.
+         wmax/band  the widest live node inside crad and the band it strokes
+                    in. A node with one leaf under it is TREE_W0 = 0.32 and
+                    lands in VEIN_BANDS[0] — a 0.34-cell hairline at 0.90
+                    alpha over the record's ink, which is the "it is drawn
+                    and cannot be seen" hypothesis.
+         carry      the largest tcarry inside crad: whether the flow walk
+                    thinks any pair's path runs through this station.
+         spine      the chain from that widest node up tpar to the root:
+                    `n` segments, `minw` the thinnest drawn LIVE width on it,
+                    `ghost` segments drawn as ghost instead, and `cut`
+                    segments paintTree draws nothing for at all because a
+                    wall stands on an end. A station is "obviously connected"
+                    only if cut is 0 and minw is a width the eye can hold.
+         tLv/mLv    whether the station's own disc is joined to the drop
+                    through tissue at the level the TREE grows into
+                    (BODY_LEVELS[TREE_LV]) and at the one the MASS walks over
+                    (BODY_LEVELS[PAD_MASK_LV]) — `disc` the share of the disc
+                    the flood from the drop reaches, `geo` its step count.
+                    Over an in-plate disc: a station at the rim has the part
+                    of its disc that is off the plate left out of both, so
+                    the fraction is of the disc that exists.
+
+                    The two levels are not the same level, and the tempting
+                    reading is that the gap between them IS the defect — the
+                    mass needs only the lower, the tree needs the higher.
+                    That reading is wrong and this pair is what shows it
+                    rather than what supports it. Measured with treeTune's
+                    LV=0, which grows the tree at the mass's own level, the
+                    vein arrives at the same moment it did before; treeWhy
+                    says why, and the answer is that around an island station
+                    the window is bare at BOTH levels. A station is an island
+                    because the mass seeds at its own food and needs no
+                    connection to anything, while the tree can only extend
+                    from its own front. */
+    tree: function () {
+      var e = S.exp, out = [], i, SCAN = 60;
+      padWalk();
+      /* A flood from the inoculation drop over cells at or above `lv`,
+         8-connected and stopped by walls, reported against one station's
+         disc. Whole-plate and allocating, which is why it is here and not
+         in the sim: nothing on the page calls it. */
+      var floodSeen = new Uint8Array(NCELL), floodD = new Int32Array(NCELL), floodQ = new Int32Array(NCELL);
+      var massSeen = new Uint8Array(LW * LH), massQ = new Int32Array(LW * LH);
+      function flood(lv) {
+        floodSeen.fill(0);
+        var h = 0, t = 0, sc = (e.inoc.y | 0) * GW + (e.inoc.x | 0);
+        if (trail[sc] < lv || wallM[sc]) return 0;
+        floodQ[t++] = sc; floodSeen[sc] = 1; floodD[sc] = 0;
+        while (h < t) {
+          var c = floodQ[h++], cx = c % GW, cy = (c / GW) | 0;
+          for (var oy = -1; oy <= 1; oy++) for (var ox = -1; ox <= 1; ox++) {
+            var nx = cx + ox, ny = cy + oy;
+            if (nx < 0 || ny < 0 || nx >= GW || ny >= GH) continue;
+            var nc = ny * GW + nx;
+            if (floodSeen[nc] || wallM[nc] || trail[nc] < lv) continue;
+            floodSeen[nc] = 1; floodD[nc] = floodD[c] + 1; floodQ[t++] = nc;
+          }
+        }
+        return t;
+      }
+      function onDisc(cx, cy, r) {
+        var hit = 0, tot = 0, geo = -1;
+        for (var yy = Math.floor(cy - r); yy <= Math.ceil(cy + r); yy++)
+          for (var xx = Math.floor(cx - r); xx <= Math.ceil(cx + r); xx++) {
+            var dx = xx + 0.5 - cx, dy = yy + 0.5 - cy;
+            if (dx * dx + dy * dy > r * r) continue;
+            if (yy < 0 || xx < 0 || yy >= GH || xx >= GW) continue;
+            var c = yy * GW + xx; tot++;
+            if (!floodSeen[c]) continue;
+            hit++;
+            if (geo < 0 || floodD[c] < geo) geo = floodD[c];
+          }
+        return { disc: +(tot ? hit / tot : 0).toFixed(3), geo: geo };
+      }
+      var tCells = 0, mCells = 0, tMark = new Uint8Array(NCELL), tDist = new Int32Array(NCELL);
+      tCells = flood(BODY_LEVELS[TREE_LV]);
+      tMark.set(floodSeen); tDist.set(floodD);
+      mCells = flood(BODY_LEVELS[PAD_MASK_LV]);
+      var mMark = floodSeen.slice(), mDist = floodD.slice();
+      function station(label, cx, cy, prog, sr) {
+        /* THIS station's mass, and not the neighbourhood's. mass() takes a
+           disc of radius R around the station, which is right when the dish
+           spaces its flakes out and wrong when it does not: on a crowded
+           plate the disc swallows the next station's puddle, `crad` pins to
+           the cap, and the vein search below then ranges over half the plate
+           and answers about somebody else's trunk. So the mass is flooded
+           from the station's own food instead, over lattice cells at a weight
+           of half or better, and what comes back is the one piece the station
+           is standing in. */
+        var core = 0, crad = 0, R = 35, lx = cx * 0.5, ly = cy * 0.5, x, y, q;
+        var x0 = Math.max(0, Math.floor(lx - R)), x1 = Math.min(LW - 1, Math.ceil(lx + R));
+        var y0 = Math.max(0, Math.floor(ly - R)), y1 = Math.min(LH - 1, Math.ceil(ly + R));
+        var lr = Math.max(1, sr * 0.5), qh = 0, qt = 0;
+        for (y = y0; y <= y1; y++) for (x = x0; x <= x1; x++) massSeen[y * LW + x] = 0;
+        for (y = y0; y <= y1; y++) for (x = x0; x <= x1; x++) {
+          var sx2 = x + 0.5 - lx, sy2 = y + 0.5 - ly;
+          if (sx2 * sx2 + sy2 * sy2 > lr * lr) continue;
+          var sc = y * LW + x;
+          if (padW[sc] < 0.5 || massSeen[sc]) continue;
+          massSeen[sc] = 1; massQ[qt++] = sc;
+        }
+        while (qh < qt) {
+          var mc = massQ[qh++], mcx = mc % LW, mcy = (mc / LW) | 0;
+          var ox2 = mcx + 0.5 - lx, oy2 = mcy + 0.5 - ly, m2 = ox2 * ox2 + oy2 * oy2;
+          core++; if (m2 > crad) crad = m2;
+          for (q = 0; q < 4; q++) {
+            var nx2 = mcx + (q === 0 ? -1 : q === 1 ? 1 : 0), ny2 = mcy + (q === 2 ? -1 : q === 3 ? 1 : 0);
+            if (nx2 < x0 || ny2 < y0 || nx2 > x1 || ny2 > y1) continue;
+            var nc2 = ny2 * LW + nx2;
+            if (massSeen[nc2] || padW[nc2] < 0.5) continue;
+            massSeen[nc2] = 1; massQ[qt++] = nc2;
+          }
+        }
+        crad = 2 * Math.sqrt(crad);
+        /* the tree, in cells, over the nodes the painter would consider */
+        /* the tree scan gets its OWN counter. Sharing the enclosing function's
+           `i` left it at tN when station() returned, so the loop over the
+           dish's flakes ran once and every dish read as a one-flake dish. */
+        var nearL = -1, nearG = -1, inC = 0, ghC = 0, wmax = 0, best = -1, carry = 0, k;
+        for (k = 0; k < tN; k++) {
+          var dx = tx[k] - cx, dy = ty[k] - cy, d = Math.sqrt(dx * dx + dy * dy);
+          if (d > SCAN) continue;
+          if (tstate[k]) {
+            if (nearL < 0 || d < nearL) nearL = d;
+            if (d <= crad) {
+              inC++;
+              if (tcarry[k] > carry) carry = tcarry[k];
+              if (tw[k] > wmax) { wmax = tw[k]; best = k; }
+            }
+          } else {
+            if (nearG < 0 || d < nearG) nearG = d;
+            if (d <= crad) ghC++;
+          }
+        }
+        /* the chain home. Walked over tpar, which is what paintTree strokes;
+           a join is a second edge and is not on this path, so a station
+           reached only through a fusion reads here as whatever its tpar
+           chain is, which is the honest answer to "is the TRUNK drawn". */
+        var sp = null;
+        if (best >= 0) {
+          var n = 0, minw = 1e9, ghost = 0, cut = 0, node = best, guard = 0;
+          while (node > 0 && guard++ < TREE_MAX) {
+            var p = tpar[node]; if (p < 0) break;
+            n++;
+            if (wallM[(ty[node] | 0) * GW + (tx[node] | 0)] ||
+                wallM[(ty[p] | 0) * GW + (tx[p] | 0)]) cut++;
+            else if (!tstate[node]) ghost++;
+            else if (tw[node] < minw) minw = tw[node];
+            node = p;
+          }
+          /* a station standing ON the root has no chain to walk, so the
+             thinnest width on it is the node's own rather than nothing */
+          if (minw > 1e8) minw = tw[best];
+          sp = { n: n, minw: +minw.toFixed(2), minband: treeBand(minw),
+                 ghost: ghost, cut: cut, root: node === 0 };
+        }
+        floodSeen.set(tMark); floodD.set(tDist);
+        var tLv = onDisc(cx, cy, sr);
+        floodSeen.set(mMark); floodD.set(mDist);
+        var mLv = onDisc(cx, cy, sr);
+        out.push({ label: label, prog: +prog.toFixed(3),
+                   core: core * 4, crad: +crad.toFixed(1),
+                   nearL: +nearL.toFixed(1), nearG: +nearG.toFixed(1),
+                   inC: inC, ghC: ghC, carry: carry,
+                   wmax: +wmax.toFixed(2), band: wmax > 0 ? treeBand(wmax) : -1,
+                   spine: sp, tLv: tLv, mLv: mLv });
+      }
+      for (i = 0; i < e.nodes.length; i++) {
+        var nd = e.nodes[i];
+        station(nd.label, nd.x, nd.y, S.nodeDone[i] ? 1 : S.nodeProg[i], nd.r);
+      }
+      station('crumb', e.inoc.x, e.inoc.y, 1 - originFrac(e), RES_R / PUDDLE_R);
+      /* the same walk the tree's own painter runs, so the plate figure is of
+         what is drawn and not of what the arrays hold */
+      var live = 0, ghost = 0;
+      for (i = 0; i < tN; i++) { if (tstate[i]) live++; else ghost++; }
+      fieldDirty = true; dirtyFrames = REBUILD_EVERY;
+      return { stations: out, nodes: { n: tN, live: live, ghost: ghost },
+               levels: { tree: BODY_LEVELS[TREE_LV], mass: BODY_LEVELS[PAD_MASK_LV],
+                         treeCells: tCells, massCells: mCells },
+               bands: VEIN_BANDS.map(function (b) { return b.w; }) };
+    },
+    /* harness only: WHY a station has no tree in it. Replays treeGrow's own
+       attractor pass over a window around the station and classifies every
+       jittered lattice point it would visit, so "the tree has not grown here"
+       gets a reason instead of a restatement.
+
+         wall/off   the point is in a wall or off the plate
+         nolv       tissue below the growth level: nothing for the tree to
+                    stand on, which is the threshold story
+         spent      tcov -- a node's kill disc already claimed this attractor,
+                    so it will never pull anything again
+         far        at the level and unspent, but no LIVE node within
+                    TREE_INF: there IS something to grow into and nothing
+                    near enough to be pulled by it
+         pull       at the level, unspent, and within reach of a live node --
+                    a real pull, which the next pass acts on
+
+       `pull` is the number that decides it. Zero pulls in the window means
+       the tree cannot move toward this station at all this pass, whatever
+       the tissue is doing. */
+    treeWhy: function (ni, R) {
+      var e = S.exp, nd = ni == null ? e.nodes[0] : e.nodes[ni];
+      R = R || 60;
+      var lv = BODY_LEVELS[TREE_LV], sp = TREE_SP;
+      var wall = 0, nolv = 0, spent = 0, far = 0, pull = 0, pullNear = 1e9;
+      var x0 = Math.max(0, ((nd.x - R) / sp | 0) * sp), x1 = Math.min(GW - 1, nd.x + R);
+      var y0 = Math.max(0, ((nd.y - R) / sp | 0) * sp), y1 = Math.min(GH - 1, nd.y + R);
+      for (var y = y0; y <= y1; y += sp) {
+        for (var x = x0; x <= x1; x += sp) {
+          var h = mix32(x, y, 7);
+          var jx = x + (h % sp), jy = y + ((h >>> 8) % sp);
+          /* the radius first: an edge point outside the window is not this
+             window's wall, and counting it made `wall` a figure about the
+             plate's rim rather than about the station */
+          var dxs = jx + 0.5 - nd.x, dys = jy + 0.5 - nd.y;
+          if (dxs * dxs + dys * dys > R * R) continue;
+          if (jx < 2 || jy < 2 || jx >= GW - 2 || jy >= GH - 2) { wall++; continue; }
+          var c = jy * GW + jx;
+          if (wallM[c]) { wall++; continue; }
+          if (trail[c] < lv) { nolv++; continue; }
+          if (tcov[c]) { spent++; continue; }
+          var n = treeNearest(jx, jy);
+          if (n < 0) { far++; continue; }
+          pull++;
+          var pd = Math.sqrt((tx[n] - nd.x) * (tx[n] - nd.x) + (ty[n] - nd.y) * (ty[n] - nd.y));
+          if (pd < pullNear) pullNear = pd;
+        }
+      }
+      var lv0 = BODY_LEVELS[PAD_MASK_LV], nolv0 = 0, spent0 = 0, far0 = 0, pull0 = 0;
+      for (y = y0; y <= y1; y += sp) {
+        for (x = x0; x <= x1; x += sp) {
+          var h2 = mix32(x, y, 7);
+          var jx2 = x + (h2 % sp), jy2 = y + ((h2 >>> 8) % sp);
+          if (jx2 < 2 || jy2 < 2 || jx2 >= GW - 2 || jy2 >= GH - 2) continue;
+          var ax = jx2 + 0.5 - nd.x, ay = jy2 + 0.5 - nd.y;
+          if (ax * ax + ay * ay > R * R) continue;
+          var c2 = jy2 * GW + jx2;
+          if (wallM[c2]) continue;
+          if (trail[c2] < lv0) { nolv0++; continue; }
+          if (tcov[c2]) { spent0++; continue; }
+          if (treeNearest(jx2, jy2) < 0) { far0++; continue; }
+          pull0++;
+        }
+      }
+      return { label: nd.label, R: R, lv: lv,
+               at: { wall: wall, nolv: nolv, spent: spent, far: far, pull: pull,
+                     pullNear: pullNear < 1e9 ? +pullNear.toFixed(1) : -1 },
+               atMassLv: { lv: lv0, nolv: nolv0, spent: spent0, far: far0, pull: pull0 } };
+    },
+    /* harness only: the tree's growth level, so an option can be swept in one
+       page rather than one build each. Set BEFORE SLIME.start() — the tree is
+       a record of what the trail was as it grew, not a function of what the
+       trail is now, so changing it mid-run measures neither setting. */
+    treeTune: function (o) {
+      if (o && o.LV != null) TREE_LV = o.LV;
+      return { LV: TREE_LV, level: BODY_LEVELS[TREE_LV],
+               massLV: PAD_MASK_LV, massLevel: BODY_LEVELS[PAD_MASK_LV] };
+    },
     /* harness only: the budget's dials, so a sweep is one page rather than
        one build each */
     padTune: function (o) {
