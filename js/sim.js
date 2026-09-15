@@ -8483,6 +8483,17 @@ function padVeinMask() {
   }
 }
 var padTier = new Int8Array(LW * LH);   /* the weight in whole steps, for the trace */
+/* The tiers live in an Int8Array, so a step count over 127 wraps them
+   NEGATIVE and traceMass's `>= minTier` then cuts bands that are not there.
+   Nothing in the page sets a count at all and no sane one is anywhere near
+   it, which is exactly the kind of argument that makes a range check feel
+   unnecessary and leaves a harness free to hand in 200 and get a silently
+   wrong picture. Clamped where the dial is read, not where it is used. */
+var PAD_STEPS_MAX = 64;
+function padSteps(v) {
+  v = v | 0;
+  return v < 0 ? 0 : (v > PAD_STEPS_MAX ? PAD_STEPS_MAX : v);
+}
 var padBand = [];                       /* a Path2D per step, 1..PAD_STEPS */
 var padBandN = 0;
 /* The weight lives at HALF the plate's resolution, and costs nowhere near
@@ -14682,7 +14693,7 @@ function init() {
            getter would then report a weight quantised into minus three steps
            to a harness that believed it. A dial that validates the shape of
            its argument and not its range is a dial that lies. */
-        if (o.STEPS != null) PAD_STEPS = Math.max(0, o.STEPS | 0);
+        if (o.STEPS != null) PAD_STEPS = padSteps(o.STEPS);
         if (o.on != null) PAD_BUDGET = !!o.on;
         fieldDirty = true; dirtyFrames = REBUILD_EVERY;
         treeDirty = true; treePaintT = -1e9;
@@ -14702,7 +14713,7 @@ function init() {
         if (o.rule != null) MASS_RULE = o.rule ? 1 : 0;
         /* the weight's own dial, set from here as well because it is part of
            the same choice — see PAD_STEPS */
-        if (o.steps != null) PAD_STEPS = Math.max(0, o.steps | 0);
+        if (o.steps != null) PAD_STEPS = padSteps(o.steps);
         if (o.vec != null) PAD_VEC = o.vec ? 1 : 0;
         if (o.vein != null) PAD_VEIN = Math.max(0, Math.min(0.95, +o.vein || 0));
         if (o.cap != null) MASS_CAP = Math.max(0, Math.min(VEIN_BANDS.length - 2, o.cap | 0));
