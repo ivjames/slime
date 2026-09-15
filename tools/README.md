@@ -390,6 +390,16 @@ mass tops out at L\* 82.5 against the lines' 86.8, because `PAD_A` caps the
 weight at 0.92. It is brighter by 1 L\* in the ladder and darker by 4 on the
 plate.
 
+Confirmed on a second dish rather than left as one plate's figures.
+EXP-01/11f9a2 at 120 s, the seed `PAD_BUDGET`'s own numbers were taken on:
+
+| | lines | mass |
+|---|---|---|
+| edge 10-90 | 0.23 cells | 4.75–6.75 cells, p90 13.5–19.3 |
+| rim step vs agar | p50 9.6 | p50 1.6 |
+| tones over 1 % | 5 | 9 |
+| share in commonest six | 46.7 % | 23.7 % |
+
 ### What the dials do to it
 
 `step` is `SLIME.mass()`'s, unchanged in definition from `mass.js`: the
@@ -404,6 +414,10 @@ where the tissue is wide. The clip scored 0.92 on the second of those.
 | 5/1/1/0 — and rules | 5.75–7.5 | 1.6 | 5 | 29.1 % | 0.631 / 0.265 |
 | 5/1/0/4 — and a weight in four steps | 5.25–9.0 | 5.0 | 8 | 45.1 % | 0.69 / **0.23** |
 | 10/0/0/4 | 5.75–9.0 | 3.6 | 10 | 29.1 % | 0.69 / **0.23** |
+
+On 11f9a2 at 120 s the same three settings run 1.6 / 2.1 / 5.5 on the rim and
+23.7 % / 36.5 % / 48.2 % in the commonest six, against that plate's lines at
+9.6 and 46.7 % — so the ordering is the dish's, not the seed's.
 
 The lines' own figures, for the column each of those is trying to reach: rim
 p50 9.6, four tones over 1 %, 46.9 % in the commonest six.
