@@ -290,6 +290,310 @@ that is the whole choice the layer offers:
 | 18@0.43 | 32–37 cells | 9.1 % | 0.26 |
 | 26@0.3  | 36–41 cells | 12.8 % | 0.21 |
 
+## ink.js
+
+Glow versus ink, as numbers.
+
+The plate draws two things out of the same tissue: the vein LINES, stroked
+from `VEIN_BANDS`, and the MASS heaped on the food, filled from `BODY_STYLE`
+under the weight `PAD_BUDGET` builds. The complaint this exists to answer is
+that they do not read as one drawing system — the lines look like ink and the
+masses look like light. That is an adjective. This turns it into figures.
+
+```bash
+node tools/ink.js                             # EXP-01/efe8ba at 137 s
+SEEDS=11f9a2 TIMES=45,120 node tools/ink.js
+SHOTS=/tmp/ink node tools/ink.js              # plate and per-station crops
+MASS=10/0/0/0,5/1/0/4 node tools/ink.js       # sweep how the mass is drawn
+```
+
+`MASS` is `levels/ramp/rule/steps` — `MASS_LEVELS`, `MASS_RAMP`, `MASS_RULE`
+and `PAD_STEPS` in `sim.js`, swept one page rather than one build each, the
+way `mass.js`'s `TUNE` sweeps the weight. Each option also prints the weight's
+own `step`, so what a change costs on the figure the layer was previously held
+to is on the same line as what it buys.
+
+### How the two layers are told apart
+
+They are the same yellow on the composite, so they are separated by
+DIFFERENCE. `SLIME.layers()` holds either half of the vein canvas out of the
+picture; the plate is rendered three times — whole, without the mass, without
+the lines — and a pixel belongs to a layer if holding that layer out moved it
+by a lightness step anyone could see. Everything else is identical in all
+three and is in neither mask, which is why the food's own marker sitting on
+top of a pad needs no special case anywhere in the tool.
+
+`layers()` repaints by hand rather than setting a dirty flag and waiting, and
+that is load-bearing: the moment worth asking about is a FINISHED run, and a
+run that has stopped gets no next frame — the loop cancels its own rAF and the
+result screen renders once. A probe that waited for a frame would measure the
+picture it had already taken.
+
+Lightness is CIE L\*, 0..100, and colour is its chroma. A step in L\* is a step
+the eye can weigh; a step in alpha is not, because the same alpha over the
+agar and over a trunk are different pictures.
+
+### What it measures
+
+- **edge** — the 10-90 distance across the layer's own boundary, in cells.
+  For a line, profiled across the stroke; for the mass, along 360 rays out of
+  each station, scanning inward from the far end so a trunk crossing a ray
+  cannot move the answer.
+- **rim** — the L\* step the layer takes where it meets bare agar, per device
+  pixel. Bare agar and not merely "not this layer": the food's marker is a
+  cased disc laid over the pads, and left in, its dark casing was the whole of
+  the mass's p99.
+- **tones** — distinct RGB values in the layer, how many hold at least 1 % of
+  it, and the share of it in its commonest six.
+- **L\* / chroma** — where the layer sits, chroma compared only at 55–75 L\*
+  where both layers hold area, since anything's chroma collapses as it fades
+  out over the agar.
+- **ladders** — the two ramps themselves, as the tones they are painted in.
+
+### What it found
+
+On EXP-01/efe8ba at 137 s — the won plate the complaint was made about — at
+1806x1118, 4.30 device pixels a cell:
+
+| | lines | mass |
+|---|---|---|
+| edge 10-90 | 0.23 cells (one device pixel, the floor of the measurement) | 6.0–8.25 cells, p90 11.8–18.0 |
+| rim step vs agar | p50 9.6, p99 60.5 L\* a pixel | p50 1.5, p99 14.6 |
+| tones over 1 % | 4 | 9 |
+| share in commonest six | 46.9 % | 21.9 % |
+| ramp above its first rung | 8.0 L\* over 4, **2.00 a rung** | 7.3 L\* over 8, **0.91 a rung** |
+
+Three things fall out of that and the third was the surprise.
+
+The mass has essentially **no boundary**: its falloff is 26 to 36 times wider
+than a line's, and where it does meet bare agar it steps 1.5 L\* against a
+line's 9.6. That is the layer working as designed — a fade, not a clip.
+
+What that comparison is NOT is the two `n` counts, and the first draft of this
+section used them: 192,360 boundary pairs for the lines against 5,829 for the
+mass reads like a twentyfold difference in edge-ness and is mostly a fact
+about SHAPE. A layer made of hairlines has far more boundary per unit of its
+own area than a layer made of blobs, whatever either one does at that
+boundary. The step size is the figure; the count is the sample.
+
+Its **own ten tones are invisible as tones**. Above the first rung they span
+7.3 L\*, 0.91 a rung, at or under what reads as a step at all, where the six
+line bands step 2.00. So the mass carries no tonal structure of its own and
+every bit of variation across it is the weight's smooth radial ramp. That is
+the recipe for a lamp, and it is why no choice of tone ladder moves the edge
+figure: measured, the band ramp takes 6.0–8.25 cells to 5.5–7.5, which is
+nothing.
+
+"Above the first rung" is a judgement and the tool prints both spans so it can
+be seen being made. On the body ramp rung 0 is not on the ramp at all — it is
+the film's white walk, the one tone on the plate that does not walk toward the
+lamp — and a mean that includes it reports the body ramp stepping DOWN, at
+-0.08 a rung. The same rung is dropped from the bands for comparability, and
+that costs the comparison nothing it wants: it makes the LINE ramp look finer
+than it is, 2.00 against 3.86 over all six, so 0.91 against 2.00 is the
+conservative reading of the gap.
+
+And the mass's outermost tone is the one **white-walked** tone on the plate —
+L\* 88 at chroma 44, where every other rung of both ladders sits at 54 to 72.
+Every mass on the dish is fringed in a colour the line system never uses.
+
+Two claims that were in the air when this was written did not survive it. The
+mass's alpha does not accumulate toward its core: `BODY_ALPHA` is 0.30, 0.60,
+0.90 and then 1 for the remaining seven, so levels 3 and up simply cover. And
+the core is not brighter than the trunks running into it in the picture — the
+mass tops out at L\* 82.5 against the lines' 86.8, because `PAD_A` caps the
+weight at 0.92. It is brighter by 1 L\* in the ladder and darker by 4 on the
+plate.
+
+Confirmed on a second dish rather than left as one plate's figures.
+EXP-01/11f9a2 at 120 s, the seed `PAD_BUDGET`'s own numbers were taken on:
+
+| | lines | mass |
+|---|---|---|
+| edge 10-90 | 0.23 cells | 4.75–6.75 cells, p90 13.5–19.3 |
+| rim step vs agar | p50 9.6 | p50 1.6 |
+| tones over 1 % | 5 | 9 |
+| share in commonest six | 46.7 % | 23.7 % |
+
+### What the dials do to it
+
+`step` is `SLIME.mass()`'s, unchanged in definition from `mass.js`: the
+largest step the weight takes between neighbouring lattice cells, anywhere and
+where the tissue is wide. The clip scored 0.92 on the second of those.
+
+| levels/ramp/rule/steps | mass edge 10-90 | rim p50 | tones over 1 % | commonest six | step any/wide |
+|---|---|---|---|---|---|
+| 10/0/0/0 — as built | 6.0–8.25 | 1.5 | 9 | 21.9 % | 0.631 / 0.265 |
+| 5/0/0/0 — five levels | 6.5–12.5 | 1.4 | 5 | 32.5 % | 0.631 / 0.265 |
+| 5/1/0/0 — five, band ramp | 5.5–7.5 | 1.6 | 5 | 32.3 % | 0.631 / 0.265 |
+| 5/1/1/0 — and rules | 5.75–7.5 | 1.6 | 5 | 29.1 % | 0.631 / 0.265 |
+| 5/1/0/4 — and a weight in four steps | 5.25–9.0 | 5.0 | 8 | 45.1 % | 0.69 / **0.23** |
+| 10/0/0/4 | 5.75–9.0 | 3.6 | 10 | 29.1 % | 0.69 / **0.23** |
+
+On 11f9a2 at 120 s the same three settings run 1.6 / 2.1 / 5.5 on the rim and
+23.7 % / 36.5 % / 48.2 % in the commonest six, against that plate's lines at
+9.6 and 46.7 % — so the ordering is the dish's, not the seed's.
+
+The lines' own figures, for the column each of those is trying to reach: rim
+p50 9.6, four tones over 1 %, 46.9 % in the commonest six.
+
+### The blur that was eating the steps
+
+`PAD_STEPS` on its own moves the picture much less than the weight it
+quantises would suggest, and the reason is downstream of it. The weight lives
+on a half-resolution lattice and reaches the plate as an image blitted up
+bilinearly, which is a two-cell ramp — exactly right for a fade and exactly
+wrong for a step. Quantise into four and the upscale puts the ramp back.
+
+`PAD_VEC` draws the bands instead. `traceMass` already cuts a lattice mask
+into a smoothed outline; it is how the lobe layer draws a swelling as a
+swelling, and the mass was the one layer on the plate not using it. Each band
+becomes a Path2D, filled innermost-first under `destination-over` so every
+pixel keeps its own band's alpha, and the mask stops being a bitmap.
+
+The same weight, the same `step`, the mask drawn two ways — on EXP-01/efe8ba
+at 137 s, against the lines' own 9.6 and 46.9 %:
+
+| PAD_STEPS 4 | mass edge 10-90 | rim p50 | commonest six |
+|---|---|---|---|
+| raster mask | 5.25–9.0 | 5.0 | 45.1 % |
+| outlines | 5.25–9.0 | **8.5** | **56.8 %** |
+
+And what fewer bands buy, all with outlines, with what they cost on the
+figure the layer is held to:
+
+| bands | rim p50 | commonest six | step where wide |
+|---|---|---|---|
+| 4 | 8.5 | 56.8 % | **0.23** |
+| 3 | 10.2 | 60.9 % | 0.307 |
+| 1 | 22.1 | 84.3 % | 0.92 |
+
+One band is a single flat shape with a hard edge, and it scores **exactly what
+the circular clip scored**, 0.92. The difference from the clip is that its
+shape is the walk's, so it is the tissue's, and it closes no arc the tissue did
+not close — but the step figure cannot tell those apart and does not pretend
+to. Four is the only setting that is stepped and still under the continuous
+weight's own 0.265.
+
+Read across the table above it: the three PAINT dials move the tone columns and
+leave the edge alone, because the edge is the weight's. Only `PAD_STEPS` moves the rim, and
+even it is half absorbed by the mask's bilinear upscale — the weight lives at
+half the plate's resolution, so a step in it is spread over two cells on the
+way up, which is why quantising into four steps raises the rim from 1.5 to
+5.0 rather than to the lines' 9.6.
+
+Four steps is the setting to quantise at, and not because it is round. The
+worst step where the tissue is wide is then exactly one band, 0.23, which is
+UNDER the continuous weight's own 0.265. Three steps is one band too but that
+band is 0.307, worse than what ships. Six and eight do not come out at one
+band at all — where the underlying weight changes fast, neighbours round to
+bands two and three apart, and they score 0.307 and 0.345. Measured, not
+reasoned:
+
+| PAD_STEPS | 3 | 4 | 6 | 8 |
+|---|---|---|---|---|
+| step where wide | 0.307 | **0.23** | 0.307 | 0.345 |
+| rim p50 | 6.0 | 5.0 | 3.6 | 3.1 |
+| share in commonest six | 48.8 % | 45.1 % | 41.7 % | 39.7 % |
+
+### The two things "unaware of the lines" turned out to be
+
+Drawn crisply, the mass stopped reading as light and started reading as a
+shape the lines knew nothing about. That was two separate faults and only one
+of them was about shape.
+
+**The silhouette.** The walk is costed on the FILM's half-width, which is
+broad wherever there is any tissue at all, so a pad's lobes point wherever the
+film happens to be wide and the trunks arrive at its edge and stop dead.
+`PAD_VEIN` discounts the cost of crossing a cell a vein runs through, in
+proportion to that vein's width, so the budget reaches further along a trunk
+than across bare sheet and the pad grows arms down the veins leaving its
+station. The base cost stays the film's, which is what keeps `PAD_BUDGET`'s
+argument intact: a flake with film and no tube yet still gets its mass.
+
+The first version of this dial normalised the vein's width against
+`TREE_WMAX`, and moved the picture by nothing. `TREE_WMAX` is 4.4, the cap the
+pipe model is clamped at, and a dish does not reach it: on EXP-01/efe8ba at
+137 s the widest live segment measures **2.77** and the mean is **1.31**, so
+the discount was running at a third of its nominal strength. It is normalised
+on `VEIN_BANDS`' second-widest band now — the width at which the line renderer
+itself starts calling a segment a trunk — and read off the bands rather than
+written as a number.
+
+| PAD_VEIN | 0 | 0.55 | 0.75 | 0.9 |
+|---|---|---|---|---|
+| origin reach, cells | 38.1 | 39.2 | 45.2 | **58.6** |
+| of the plate | 12.7 % | 13.6 % | 14.2 % | 14.9 % |
+
+**The tone, which was the renderer's own rule being broken.** `VEIN_BANDS`
+says it in its own comment: a line is a highlight only where it is lighter
+than the tissue it lies on. The mass's band ramp ran up to the second-widest
+band — the TRUNK's own tone — so a trunk crossing a pad was drawn in exactly
+the tone it was lying on and vanished into it. Every line that met a mass
+stopped at it. `MASS_CAP` is the brightest band the mass may reach, with its
+levels spread over `0..MASS_CAP`:
+
+| MASS_CAP | 4 (the trunk band) | 2 | 1 |
+|---|---|---|---|
+| mass ceiling, L\* | 81.6 | 76.9 | 75.9 |
+| mass median, L\* | 75.4 | 75.4 | 64.8 |
+| the lines' ceiling | 86.4 | 86.4 | 86.4 |
+
+A capped ramp also makes levels redundant — several of them come out the same
+tone, and a level whose tone equals the one outside it draws nothing, because
+the levels nest. Those are dropped rather than traced to be painted invisible:
+five levels asked for under cap 2 is three traced. The band index has to come
+from the level's place on the ramp and not from the surviving count, or the
+ramp stalls the moment anything is dropped and the plan collapses to its first
+two tones — which is what the first version of the dedupe did, and what the
+figures caught.
+
+### What the plate ships
+
+Chosen by the owner off rendered comparisons, not by the renderer: five levels
+on the band ramp capped at band 2, the weight in ONE step drawn as outlines
+and discounted along the veins at 0.9.
+
+| | lines | mass, as built | mass, as shipped |
+|---|---|---|---|
+| edge 10-90, cells | 0.23 | 6.0–8.25 | **0.5–2.5** |
+| rim step vs agar | 9.6 | 1.5 | **20.0** |
+| tones over 1 % | 5 | 9 | **3** |
+| share in commonest six | 47.5 % | 21.9 % | **88.0 %** |
+| median L\* | 28.1 | 63.8 | 75.4 |
+
+One weight band means `step` is 0.92 both ways — **the figure the old circular
+clip scored**. That is the honest cost and it was named before the choice was
+made: what makes it not a return to the clip is that the shape is the walk's,
+so it is the tissue's, and it now runs out along the veins. The step figure
+cannot tell those apart and this file does not pretend it can.
+
+### Cost
+
+Tracing is where this layer's cost is (see `PAD_BUDGET`), and the mass now
+traces only the levels it fills, so drawing it in five is cheaper than ten.
+At turbo 32 on EXP-01/11f9a2 grown to 45 s, five reps, on a cloud box that
+runs the whole plate at about half the rate the figure in `PAD_BUDGET` was
+taken at:
+
+| | steps/s | rebuild | composite |
+|---|---|---|---|
+| `main` | 42 46 48 | 12.3–12.6 ms | 45.3–46.9 ms |
+| as shipped | 43 51 54 | 12.3–12.5 ms | 38.9–47.1 ms |
+
+No regression, and the composite is equal or lower: the shipped mass traces
+three contours where the old one traced ten, and its mask is filled outlines
+rather than a per-pixel image write. An earlier measurement of four bands
+under the raster mask put the rebuild at 13.1–13.2 ms against 12.3, so four
+lattice traces cost about 0.8 ms; one band costs a quarter of that and the
+seven contour traces it saves more than pay for it.
+
+These four runs are one batch, back to back, and that matters more than it
+looks: an earlier pass measured `main` at 63–68 and this branch's default at
+58–69 and the medians differed by three, which read like a regression and was
+load drift between two windows hours apart. The box moves; only a batch is a
+comparison. Absolute rates here are not comparable with the ones in `sim.js`
+either, for the same reason.
 ## vein.js
 
 Whether a station wearing a mass has a vein drawn INTO it.
@@ -319,6 +623,31 @@ Five verdicts, in the last column of each row:
 - **GHOST** — the widest one's chain home crosses a ghosted segment.
 - **CUT** — the chain home crosses a segment `paintTree` drops for a wall.
 - **ok** — a node in the mass, band 1 or better, chain home solid.
+
+### Its mass figures predate the mass this plate now draws
+
+Everything below was measured on the walk as it stood at `d003a2e`. The
+`ink.js` work above then changed what `padWalk` does — `PAD_VEIN` discounts
+travel along a vein — and `station()` runs `padWalk` itself, so every `core`
+and `crad` in this section is now an understatement.
+
+Checked on the reported plate rather than assumed. EXP-01/efe8ba at t=45,
+before and after:
+
+| station | core, then | core, now | crad, then | crad, now | verdict |
+|---|---|---|---|---|---|
+| flake a | 464 | 520 | 21.2 | 25.2 | ISLAND, both |
+| flake b | 548 | 620 | 20.2 | 28.5 | ok, both |
+| flake c | 448 | 604 | 20.2 | 39.1 | ok, both |
+| flake d | 600 | 656 | 20.2 | 24.7 | ok, both |
+| crumb | 1836 | 3276 | 43.9 | 60.1 | ok, both |
+
+So the VERDICTS and the diagnosis below are untouched: the island is still an
+island, and it is still an island for the reason `treeWhy` gives. What moved
+is the size of the mass each station wears. The gap sweep over five dishes has
+not been re-run; a larger mass can only ever contain MORE tree nodes, so if
+those figures move at all they move toward fewer ISLANDs, and this section's
+counts are the conservative ones.
 
 ### The station's own mass, and not the neighbourhood's
 
