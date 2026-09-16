@@ -734,3 +734,51 @@ one connected thing rooted at the drop. A flake the runners have reached grows
 an island of tissue the mass draws at once and the tree cannot reach, because
 the agar between them holds no tissue at any level the renderer uses — the
 runners' own path decayed behind them.
+
+### Since SIM_V 17: the stalk does not decay
+
+The cause named above was answered in the simulation rather than the
+renderer: `STALK_HOLD` 0.997 → 1, so a runner's thread is permanent, the
+tree can follow it, and the frontier test becomes the stopping rule. Re-run
+on that build, two seeds by five dishes, 74 stations:
+
+| | SIM_V 16 | SIM_V 17 |
+|---|---|---|
+| stations with a gap | 9 of 148 (6.1 %) | 2 of 74 (2.7 %) |
+| worst gap | 24.8 s at 21.3 mm | ≤ 5.3 s — one sampling interval, both cases |
+| ISLAND moments | 20 of 3,944 | 2 of 1,990 |
+| GHOST / CUT | 0 | 0 |
+
+On the plate the complaint came from, `EXP-01/efe8ba`, every station takes
+its vein at the moment its mass appears.
+
+What that costs is the mass layer, which is where PR #80 found this layer's
+cost before: the trace. A permanent thread reads 10.8, over the level the
+walk crosses, so the walk took the lace for film until `PAD_STALK_EPS`
+stopped it; what is left is the trace over a plate that genuinely holds more
+tissue. Against `main` at #81, which redrew the mass more cheaply, the
+shipping build with `EPS` 4 measures 120.7 against 112.7 steps/s at turbo 32
+over three interleaved pairs, rebuild 8.8 against 11.0 ms. With `EPS` 0.5 and
+before #81 it had been 114.5 against 101.8. The residue is the body's own
+contour traces over a plate that holds some 2.5x the tissue at the tree's
+level — 90,000 cells against 50,000 at 120 s — and not the mass walk, which
+`EPS` bounds. One lever is left unpulled: #81's `PAD_VEIN` discounts the
+walk along every live tree segment, a band-0 hairline included, and on a
+permanent lace that is nearly every cell; a band floor on it is a measured
+follow-up, not a guess to make here.
+
+`padTune({EPS, MASKLV})` sweeps the two dials that trade the puddle's size
+against the trace. `EXP-01/11f9a2` at 120 s, base for reference at 11,441
+quads and 9 % of the plate:
+
+| MASKLV | EPS | trace quads | mass | flake a core | crumb core |
+|---|---|---|---|---|---|
+| 0 | 0.5 | 30,423 | 24.3 % | 3,108 | 7,684 |
+| 0 | 2 | 25,983 | 20.7 % | 3,088 | 5,680 |
+| 0 | 4 | 18,776 | 15.1 % | 2,928 | 2,840 |
+| 1 | 0.5 | 22,383 | 17.6 % | 2,724 | 3,728 |
+
+`EPS` moves the crumb's puddle and barely the flakes', because a flake pad is
+cytoplasm heaped well above any floor and the lace around the drop is not.
+`MASKLV` 1 costs the flakes a tenth of their pad for less trace saved. On the
+owner's plate at 45 s, `EPS` 4 leaves flake a at 700 cells against 748.

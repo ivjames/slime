@@ -422,8 +422,42 @@ var TIP_LAY  = 3.0;      // trail a tip lays per step, as a multiple of DEPOSIT
    runner stops, its stalk fades over the same sixteen seconds, and the
    cytoplasm that followed it is off the body only once the thread has gone
    from under it; then it is drawn home. A hair that shortens and fades
-   rather than a hair that snaps. */
-var STALK_HOLD = 0.997;  // per-step decay of the stalk: 36 -> 2 in ~16 s
+   rather than a hair that snaps.
+
+   That last paragraph is what this USED to do, at 0.997 — 36 down to 2 in
+   about sixteen seconds. It is now 1: the stalk does not decay at all, and a
+   runner's thread is permanent. The reason is a defect the mass layer made
+   visible and PR #82 measured. A flake the runners had reached wore a mass
+   with no vein drawn into it — nine stations of 148, for up to 24.8 s at
+   21.3 mm of separation — because the thread the runners went out on had
+   faded behind them before the growth tree could follow it. treeWhy put the
+   window around such a station at some 800 of 860 lattice points below the
+   tree's growth level, and it was bare at the MASS's level too: there was
+   nothing left to draw a line along. A path that does not decay is a path
+   the tree can follow, the body test can keep, and the eye can see the
+   organism arrived by.
+
+   Two consequences are the point rather than side effects.
+
+   The FRONTIER TEST becomes the death rule. A tip is a tip only while the
+   cell TIP_LOOK ahead reads under TIP_TRAIL — 9 — and a stalked cell floors
+   at STALK_W x 36 = 10.8, over it. So a runner looking into ground anything
+   has already stalked stops being a tip and goes back to being ordinary
+   cytoplasm where it stands. It does not die and it is not withdrawn; it
+   stops, which is what a pseudopod that has run out of anywhere to go does.
+   Nothing new implements that: making the thread permanent makes the test
+   that was already there mean "somewhere nothing has been" instead of
+   "somewhere nothing has been lately".
+
+   The margin is 10.8 against 9, which is 20 per cent and not much. It is
+   load-bearing in one direction only: were the floor UNDER TIP_TRAIL, a
+   runner would re-cross its own thread forever and the plate would fill.
+   Raising STALK_W or lowering TIP_TRAIL widens it; both move every dish, so
+   neither is done on a guess. See the outcome figures on the PR.
+
+   This moves every plate on every seed, which is why SIM_V goes up with it
+   and why saved best times do not survive it. */
+var STALK_HOLD = 1;      // the stalk does not decay: a runner's thread is permanent
 /* The floor is a fraction of the stalk, not the stalk. At the full value a
    runner's thread rendered as fat as a followed vein from the moment it was
    laid, because the trail under it read 36 whether anything had followed or
@@ -4339,7 +4373,39 @@ function step() {
     var tip = false;
     if (lx >= 0 && ly >= 0 && lx < GW && ly < GH) {
       var li = (ly | 0) * GW + (lx | 0);
-      tip = !wallM[li] && trail[li] < TIP_TRAIL;
+      var tl = trail[li];
+      /* Re-armed at a BARE station. Since the stalk stopped decaying (SIM_V
+         17) a runner facing ground anything has crossed stops being a tip,
+         which is the rule wanted -- and on a dish that asks the culture to
+         HOLD its stations it has a cost the rule did not intend: a station
+         that has been eaten and then goes bare sits inside stalked ground,
+         so nothing can become a tip on the way back to it, and it is
+         re-occupied only by followers drifting down the permanent tube.
+         Measured on EXP-15 (hold six at once): tips fall from ~400 to ~10,
+         one seed in three drops a station, and that seed then spends 140 s
+         at five of six -- a 2x clock on a dish whose base spread is 2.5%.
+         So inside the fan of a station that is eaten and not held, the
+         thread under the cell is not "somewhere the organism has been"; it
+         is somewhere it has LEFT, and the frontier test reads the trail
+         standing above the stalk's floor. Nowhere else changes: a runner
+         still stops for good on any ground it has crossed.
+
+         With it, over the same six seeds: the two that dropped a station
+         run +18% and +36% instead of +123% and +48%, the other four are
+         within 5% of base, and every one is won at 97-98 against 98. The
+         rest of the twenty dishes are byte-identical to the build without
+         this rule, which is the check that it fires only where it says.
+         The tail that remains is the approach: a follower has to drift
+         down the tube to the fan's edge before anything can become a tip
+         again. Widening the fan or re-arming further out would take more
+         of it back, and each is another dish-moving change with its own
+         sweep, so it is left here for the plate to be looked at first. */
+      var lf = feedAt[li];
+      if (lf >= 0 && S.nodeDone[lf] && S.nodeHeld && !S.nodeHeld[lf]) {
+        var lfl = stalkF[li] * STALK_W;
+        if (tl <= lfl) tl = 0;
+      }
+      tip = !wallM[li] && tl < TIP_TRAIL;
     }
     /* how well fed: the tube this tip is being supplied through */
     var feed = 0;
@@ -8392,6 +8458,33 @@ var PAD_BUDGET  = true;       /* the mass layer: budget, not clip */
    both stand down under BODY_FILL, which draws the whole body and has no
    mass to localise. */
 var PAD_MASK_LV = 0;          /* index into BODY_LEVELS: tissue the walk may cross */
+/* ...but not a runner's bare thread. Since the stalk stopped decaying (SIM_V
+   17) every cell a runner has crossed holds trail of STALK_W x 36 = 10.8 for
+   the rest of the run, which is over the level above, so the walk took the
+   whole permanent lace for film and spent its budget down it: at 120 s the
+   mass covered 37% of the plate against 9%, the trace visited 45,567 quads
+   against 11,441, and the rebuild took 19 ms against 12 -- a fifth of the
+   step rate, the same fifth PR #80 measured this layer costing before the
+   trace was bounded. The mass is the tissue heaped on food, not the record
+   of where a runner went, so a cell whose body stands no higher than the
+   stalk's floor is not ground the walk may cross. The margin is against the
+   ease: bodyV follows trail rather than equalling it, and a cell that has
+   only just been threaded can read a hair either side of the floor.
+
+   Four, and not the half-cell the ease alone would want, because the lace
+   round the drop is threads that followers have been down once or twice --
+   body a little over the floor, not a pad -- and at 0.5 the walk took all of
+   it. Swept on EXP-01/11f9a2 at 120 s (tools/README.md, vein.js): 0.5 traces
+   30,423 quads and paints 24% of the plate; 4 traces 18,776 and paints 15%,
+   against a base of 11,441 and 9%. The flake pads are cytoplasm heaped well
+   above any floor and barely notice -- flake a keeps 2,928 of 3,108 cells
+   there and 700 of 748 on efe8ba at 45 s -- while the drop's puddle comes
+   down from 7,684 to 2,840. Chosen from the renders, not from here. */
+var PAD_STALK_EPS = 4;        /* body above the stalk floor before a cell is film to the walk */
+function padOn(g, lv) {
+  var b = bodyV[g];
+  return b >= lv && b > stalkF[g] * STALK_W + PAD_STALK_EPS;
+}
 var PAD_D_REF   = 6;          /* cells of half-width a step costs one unit at */
 var PAD_B       = 18;         /* the budget, in those units */
 var PAD_HOLD    = 0.43;       /* share of it held at full weight before the fade starts */
@@ -8530,7 +8623,7 @@ function padDist(lv) {
     var lr = y * LW, gr = (y << 1) * GW;
     for (x = 0; x < LW; x++) {
       var g = gr + (x << 1);
-      var on = bodyV[g] >= lv || bodyV[g + 1] >= lv || bodyV[g + GW] >= lv || bodyV[g + GW + 1] >= lv;
+      var on = padOn(g, lv) || padOn(g + 1, lv) || padOn(g + GW, lv) || padOn(g + GW + 1, lv);
       padD[lr + x] = on ? DT_INF : 0;
     }
   }
@@ -12992,8 +13085,31 @@ var GHOST_ENT = 9;
        however COND_Q is set; and the scar's deposit is clamped at 1, so a
        doubled deposit reaches the clamp on a different sweep. Both are small
        and neither is a behaviour anyone tuned — but they are why this is a
-       SIM_V bump and not a free change. */
-var SIM_V = 16;   /* The plate a seed and tape produce is different, which is
+       SIM_V bump and not a free change.
+   17: the stalk does not decay. STALK_HOLD 0.997 -> 1, so a runner's thread
+       is permanent instead of fading over sixteen seconds, and the trail
+       under it is floored at STALK_W x 36 = 10.8 for the rest of the run.
+       Two things follow and both are the point. The tree can follow a
+       runner's path, which is what PR #82 measured the absence of: a station
+       the runners had reached wearing a mass with no vein into it, nine of
+       148 for up to 24.8 s. And the frontier test becomes a stopping rule
+       without anything being added to it — a tip needs the cell ahead under
+       TIP_TRAIL = 9, a stalked cell reads 10.8, so a runner facing ground
+       anything has already crossed stops being a tip and is ordinary
+       cytoplasm where it stands. It keeps its thread; it does not get
+       withdrawn for having stopped. Plus the one exception that rule
+       needed, at the frontier test: inside the fan of a station that is
+       eaten and not held, a runner may form again.
+
+       Measured, outcome.js over all twenty dishes at one seed: none
+       broken, every verdict kept. Ten dishes finish sooner -- the ones
+       about reach, EXP-06 and EXP-07 by a fifth, EXP-02 by 12% over nine
+       seeds -- because the culture keeps the corridors it has found.
+       Three finish later: EXP-12 +8%, EXP-16 +3%, and EXP-15 (hold six
+       at once) +18%, with a tail of +36% on one seed in six, for the
+       reason at the frontier test. Six are refine- or clock-bound and
+       cannot move. */
+var SIM_V = 17;   /* The plate a seed and tape produce is different, which is
                      what this byte is the contract for. Measured across three
                      dishes and three seeds, every case is still won and not one
                      mark or score moves.
@@ -13010,7 +13126,18 @@ var SIM_V = 16;   /* The plate a seed and tape produce is different, which is
                      inside a few per cent, and EXP-05 is refine-bound and
                      cannot move. Read "still won, marks unchanged" from these
                      sweeps; do not read the clock column without many more
-                     seeds than three. */
+                     seeds than three.
+
+                     That paragraph was written for entry 16 and its warning
+                     is the reason entry 17 is reported the way it is on its
+                     PR: outcome.js across three dishes and three seeds for
+                     whether the dish is still WON, and not one word read off
+                     the clock column, which at three seeds on a dish with
+                     bifurcations carries no signal. Entry 17 changes what a
+                     runner leaves behind it, so unlike 16 it is not trying to
+                     hold the organism still — but "still won" is the bar it
+                     has to clear, and a change that makes a dish unwinnable
+                     is not a fix however good the plate looks. */
 
 function ghostSig() {
   var h = mix32(SIM_V, Math.round(CUE_CAP * 1000), Math.round(CUE_REGEN * 1000));
@@ -13272,6 +13399,7 @@ function exitReplay() {
     if (FINAL_STATE.traceF) traceF.set(FINAL_STATE.traceF);
     if (FINAL_STATE.condF) condF.set(FINAL_STATE.condF);
     if (FINAL_STATE.scarF) scarF.set(FINAL_STATE.scarF);
+    if (FINAL_STATE.stalkF) stalkF.set(FINAL_STATE.stalkF);
     if (FINAL_STATE.fedF) fedF.set(FINAL_STATE.fedF);
     if (FINAL_STATE.padF) padF.set(FINAL_STATE.padF);
     if (FINAL_STATE.bodyF) bodyF.set(FINAL_STATE.bodyF);
@@ -14001,6 +14129,13 @@ function showResult(won) {
        more state worth restoring than tmpF does. */
     condF: new Float32Array(condF),
     scarF: new Float32Array(scarF),
+    /* and the stalk, for the conductivity's reason exactly: since SIM_V 17
+       it is a permanent floor under the trail, and the mass walk reads it
+       to tell a runner's bare thread from a pad. Left out, a replay left
+       early would put the finished dish's trail back over the abandoned
+       replay's threads, and the mass drawn on the verdict screen would be
+       the wrong run's. Found by review of #83. */
+    stalkF: new Float32Array(stalkF),
     /* and the return signal with its shade, for the same reason as the
        conductivity: the harness reads them, and the finished plate's should
        be the finished plate's */
@@ -14971,6 +15106,7 @@ function init() {
         if (o.MASKLV != null) PAD_MASK_LV = o.MASKLV;
         if (o.SWEEPS != null) PAD_SWEEPS = o.SWEEPS;
         if (o.A != null) PAD_A = o.A;
+        if (o.EPS != null) PAD_STALK_EPS = o.EPS;
         /* Clamped at the setter and not merely guarded at the paint. A
            negative count is inert where the weight is quantised — the guard
            there reads `> 0` — but it would be stored, and this function's own
@@ -14986,7 +15122,8 @@ function init() {
         if (cv && S.exp) render();
       }
       return { B: PAD_B, DREF: PAD_D_REF, HOLD: PAD_HOLD, SWEEPS: PAD_SWEEPS,
-               MASKLV: PAD_MASK_LV, A: PAD_A, STEPS: PAD_STEPS, on: PAD_BUDGET };
+               MASKLV: PAD_MASK_LV, A: PAD_A, EPS: PAD_STALK_EPS, STEPS: PAD_STEPS,
+               on: PAD_BUDGET };
     },
     /* harness only: the mass's drawing dials, so a sweep is one page rather
        than one build each — as padTune is for its weight. See MASS_LEVELS. */
