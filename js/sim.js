@@ -13399,6 +13399,7 @@ function exitReplay() {
     if (FINAL_STATE.traceF) traceF.set(FINAL_STATE.traceF);
     if (FINAL_STATE.condF) condF.set(FINAL_STATE.condF);
     if (FINAL_STATE.scarF) scarF.set(FINAL_STATE.scarF);
+    if (FINAL_STATE.stalkF) stalkF.set(FINAL_STATE.stalkF);
     if (FINAL_STATE.fedF) fedF.set(FINAL_STATE.fedF);
     if (FINAL_STATE.padF) padF.set(FINAL_STATE.padF);
     if (FINAL_STATE.bodyF) bodyF.set(FINAL_STATE.bodyF);
@@ -14128,6 +14129,13 @@ function showResult(won) {
        more state worth restoring than tmpF does. */
     condF: new Float32Array(condF),
     scarF: new Float32Array(scarF),
+    /* and the stalk, for the conductivity's reason exactly: since SIM_V 17
+       it is a permanent floor under the trail, and the mass walk reads it
+       to tell a runner's bare thread from a pad. Left out, a replay left
+       early would put the finished dish's trail back over the abandoned
+       replay's threads, and the mass drawn on the verdict screen would be
+       the wrong run's. Found by review of #83. */
+    stalkF: new Float32Array(stalkF),
     /* and the return signal with its shade, for the same reason as the
        conductivity: the harness reads them, and the finished plate's should
        be the finished plate's */
