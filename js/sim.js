@@ -4373,7 +4373,28 @@ function step() {
     var tip = false;
     if (lx >= 0 && ly >= 0 && lx < GW && ly < GH) {
       var li = (ly | 0) * GW + (lx | 0);
-      tip = !wallM[li] && trail[li] < TIP_TRAIL;
+      var tl = trail[li];
+      /* Re-armed at a BARE station. Since the stalk stopped decaying (SIM_V
+         17) a runner facing ground anything has crossed stops being a tip,
+         which is the rule wanted -- and on a dish that asks the culture to
+         HOLD its stations it has a cost the rule did not intend: a station
+         that has been eaten and then goes bare sits inside stalked ground,
+         so nothing can become a tip on the way back to it, and it is
+         re-occupied only by followers drifting down the permanent tube.
+         Measured on EXP-15 (hold six at once): tips fall from ~400 to ~10,
+         one seed in three drops a station, and that seed then spends 140 s
+         at five of six -- a 2x clock on a dish whose base spread is 2.5%.
+         So inside the fan of a station that is eaten and not held, the
+         thread under the cell is not "somewhere the organism has been"; it
+         is somewhere it has LEFT, and the frontier test reads the trail
+         standing above the stalk's floor. Nowhere else changes: a runner
+         still stops for good on any ground it has crossed. */
+      var lf = feedAt[li];
+      if (lf >= 0 && S.nodeDone[lf] && S.nodeHeld && !S.nodeHeld[lf]) {
+        var lfl = stalkF[li] * STALK_W;
+        if (tl <= lfl) tl = 0;
+      }
+      tip = !wallM[li] && tl < TIP_TRAIL;
     }
     /* how well fed: the tube this tip is being supplied through */
     var feed = 0;
