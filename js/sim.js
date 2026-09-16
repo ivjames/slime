@@ -422,8 +422,42 @@ var TIP_LAY  = 3.0;      // trail a tip lays per step, as a multiple of DEPOSIT
    runner stops, its stalk fades over the same sixteen seconds, and the
    cytoplasm that followed it is off the body only once the thread has gone
    from under it; then it is drawn home. A hair that shortens and fades
-   rather than a hair that snaps. */
-var STALK_HOLD = 0.997;  // per-step decay of the stalk: 36 -> 2 in ~16 s
+   rather than a hair that snaps.
+
+   That last paragraph is what this USED to do, at 0.997 — 36 down to 2 in
+   about sixteen seconds. It is now 1: the stalk does not decay at all, and a
+   runner's thread is permanent. The reason is a defect the mass layer made
+   visible and PR #82 measured. A flake the runners had reached wore a mass
+   with no vein drawn into it — nine stations of 148, for up to 24.8 s at
+   21.3 mm of separation — because the thread the runners went out on had
+   faded behind them before the growth tree could follow it. treeWhy put the
+   window around such a station at some 800 of 860 lattice points below the
+   tree's growth level, and it was bare at the MASS's level too: there was
+   nothing left to draw a line along. A path that does not decay is a path
+   the tree can follow, the body test can keep, and the eye can see the
+   organism arrived by.
+
+   Two consequences are the point rather than side effects.
+
+   The FRONTIER TEST becomes the death rule. A tip is a tip only while the
+   cell TIP_LOOK ahead reads under TIP_TRAIL — 9 — and a stalked cell floors
+   at STALK_W x 36 = 10.8, over it. So a runner looking into ground anything
+   has already stalked stops being a tip and goes back to being ordinary
+   cytoplasm where it stands. It does not die and it is not withdrawn; it
+   stops, which is what a pseudopod that has run out of anywhere to go does.
+   Nothing new implements that: making the thread permanent makes the test
+   that was already there mean "somewhere nothing has been" instead of
+   "somewhere nothing has been lately".
+
+   The margin is 10.8 against 9, which is 20 per cent and not much. It is
+   load-bearing in one direction only: were the floor UNDER TIP_TRAIL, a
+   runner would re-cross its own thread forever and the plate would fill.
+   Raising STALK_W or lowering TIP_TRAIL widens it; both move every dish, so
+   neither is done on a guess. See the outcome figures on the PR.
+
+   This moves every plate on every seed, which is why SIM_V goes up with it
+   and why saved best times do not survive it. */
+var STALK_HOLD = 1;      // the stalk does not decay: a runner's thread is permanent
 /* The floor is a fraction of the stalk, not the stalk. At the full value a
    runner's thread rendered as fat as a followed vein from the moment it was
    laid, because the trail under it read 36 whether anything had followed or
@@ -12691,8 +12725,20 @@ var GHOST_ENT = 9;
        however COND_Q is set; and the scar's deposit is clamped at 1, so a
        doubled deposit reaches the clamp on a different sweep. Both are small
        and neither is a behaviour anyone tuned — but they are why this is a
-       SIM_V bump and not a free change. */
-var SIM_V = 16;   /* The plate a seed and tape produce is different, which is
+       SIM_V bump and not a free change.
+   17: the stalk does not decay. STALK_HOLD 0.997 -> 1, so a runner's thread
+       is permanent instead of fading over sixteen seconds, and the trail
+       under it is floored at STALK_W x 36 = 10.8 for the rest of the run.
+       Two things follow and both are the point. The tree can follow a
+       runner's path, which is what PR #82 measured the absence of: a station
+       the runners had reached wearing a mass with no vein into it, nine of
+       148 for up to 24.8 s. And the frontier test becomes a stopping rule
+       without anything being added to it — a tip needs the cell ahead under
+       TIP_TRAIL = 9, a stalked cell reads 10.8, so a runner facing ground
+       anything has already crossed stops being a tip and is ordinary
+       cytoplasm where it stands. It keeps its thread; it does not get
+       withdrawn for having stopped. */
+var SIM_V = 17;   /* The plate a seed and tape produce is different, which is
                      what this byte is the contract for. Measured across three
                      dishes and three seeds, every case is still won and not one
                      mark or score moves.
@@ -12709,7 +12755,18 @@ var SIM_V = 16;   /* The plate a seed and tape produce is different, which is
                      inside a few per cent, and EXP-05 is refine-bound and
                      cannot move. Read "still won, marks unchanged" from these
                      sweeps; do not read the clock column without many more
-                     seeds than three. */
+                     seeds than three.
+
+                     That paragraph was written for entry 16 and its warning
+                     is the reason entry 17 is reported the way it is on its
+                     PR: outcome.js across three dishes and three seeds for
+                     whether the dish is still WON, and not one word read off
+                     the clock column, which at three seeds on a dish with
+                     bifurcations carries no signal. Entry 17 changes what a
+                     runner leaves behind it, so unlike 16 it is not trying to
+                     hold the organism still — but "still won" is the bar it
+                     has to clear, and a change that makes a dish unwinnable
+                     is not a fix however good the plate looks. */
 
 function ghostSig() {
   var h = mix32(SIM_V, Math.round(CUE_CAP * 1000), Math.round(CUE_REGEN * 1000));
