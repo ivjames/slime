@@ -14765,12 +14765,13 @@ function init() {
         if (o.MASKLV != null) PAD_MASK_LV = o.MASKLV;
         if (o.SWEEPS != null) PAD_SWEEPS = o.SWEEPS;
         if (o.A != null) PAD_A = o.A;
+        if (o.EPS != null) PAD_STALK_EPS = o.EPS;
         if (o.on != null) PAD_BUDGET = !!o.on;
         fieldDirty = true; dirtyFrames = REBUILD_EVERY;
         treeDirty = true; treePaintT = -1e9;
       }
       return { B: PAD_B, DREF: PAD_D_REF, HOLD: PAD_HOLD, SWEEPS: PAD_SWEEPS,
-               MASKLV: PAD_MASK_LV, A: PAD_A, on: PAD_BUDGET };
+               MASKLV: PAD_MASK_LV, A: PAD_A, EPS: PAD_STALK_EPS, on: PAD_BUDGET };
     },
     /* harness only: the mass layer's clip, measured. For each station the
        pads are painted at, the radius padReach hands the clip and what the
