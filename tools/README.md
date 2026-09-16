@@ -756,9 +756,16 @@ What that costs is the mass layer, which is where PR #80 found this layer's
 cost before: the trace. A permanent thread reads 10.8, over the level the
 walk crosses, so the walk took the lace for film until `PAD_STALK_EPS`
 stopped it; what is left is the trace over a plate that genuinely holds more
-tissue. Base against the build with the default `EPS` 0.5, interleaved on
-one box: 114.5 against 101.8 steps/s at turbo 32, rebuild 9.3 against
-12.9 ms.
+tissue. Against `main` at #81, which redrew the mass more cheaply, the
+shipping build with `EPS` 4 measures 120.7 against 112.7 steps/s at turbo 32
+over three interleaved pairs, rebuild 8.8 against 11.0 ms. With `EPS` 0.5 and
+before #81 it had been 114.5 against 101.8. The residue is the body's own
+contour traces over a plate that holds some 2.5x the tissue at the tree's
+level — 90,000 cells against 50,000 at 120 s — and not the mass walk, which
+`EPS` bounds. One lever is left unpulled: #81's `PAD_VEIN` discounts the
+walk along every live tree segment, a band-0 hairline included, and on a
+permanent lace that is nearly every cell; a band floor on it is a measured
+follow-up, not a guess to make here.
 
 `padTune({EPS, MASKLV})` sweeps the two dials that trade the puddle's size
 against the trace. `EXP-01/11f9a2` at 120 s, base for reference at 11,441
