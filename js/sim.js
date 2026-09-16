@@ -4388,7 +4388,18 @@ function step() {
          thread under the cell is not "somewhere the organism has been"; it
          is somewhere it has LEFT, and the frontier test reads the trail
          standing above the stalk's floor. Nowhere else changes: a runner
-         still stops for good on any ground it has crossed. */
+         still stops for good on any ground it has crossed.
+
+         With it, over the same six seeds: the two that dropped a station
+         run +18% and +36% instead of +123% and +48%, the other four are
+         within 5% of base, and every one is won at 97-98 against 98. The
+         rest of the twenty dishes are byte-identical to the build without
+         this rule, which is the check that it fires only where it says.
+         The tail that remains is the approach: a follower has to drift
+         down the tube to the fan's edge before anything can become a tip
+         again. Widening the fan or re-arming further out would take more
+         of it back, and each is another dish-moving change with its own
+         sweep, so it is left here for the plate to be looked at first. */
       var lf = feedAt[li];
       if (lf >= 0 && S.nodeDone[lf] && S.nodeHeld && !S.nodeHeld[lf]) {
         var lfl = stalkF[li] * STALK_W;
@@ -12775,7 +12786,18 @@ var GHOST_ENT = 9;
        TIP_TRAIL = 9, a stalked cell reads 10.8, so a runner facing ground
        anything has already crossed stops being a tip and is ordinary
        cytoplasm where it stands. It keeps its thread; it does not get
-       withdrawn for having stopped. */
+       withdrawn for having stopped. Plus the one exception that rule
+       needed, at the frontier test: inside the fan of a station that is
+       eaten and not held, a runner may form again.
+
+       Measured, outcome.js over all twenty dishes at one seed: none
+       broken, every verdict kept. Ten dishes finish sooner -- the ones
+       about reach, EXP-06 and EXP-07 by a fifth, EXP-02 by 12% over nine
+       seeds -- because the culture keeps the corridors it has found.
+       Three finish later: EXP-12 +8%, EXP-16 +3%, and EXP-15 (hold six
+       at once) +18%, with a tail of +36% on one seed in six, for the
+       reason at the frontier test. Six are refine- or clock-bound and
+       cannot move. */
 var SIM_V = 17;   /* The plate a seed and tape produce is different, which is
                      what this byte is the contract for. Measured across three
                      dishes and three seeds, every case is still won and not one
