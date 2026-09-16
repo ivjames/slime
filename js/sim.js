@@ -8335,6 +8335,23 @@ var PAD_BUDGET  = true;       /* the mass layer: budget, not clip */
    both stand down under BODY_FILL, which draws the whole body and has no
    mass to localise. */
 var PAD_MASK_LV = 0;          /* index into BODY_LEVELS: tissue the walk may cross */
+/* ...but not a runner's bare thread. Since the stalk stopped decaying (SIM_V
+   17) every cell a runner has crossed holds trail of STALK_W x 36 = 10.8 for
+   the rest of the run, which is over the level above, so the walk took the
+   whole permanent lace for film and spent its budget down it: at 120 s the
+   mass covered 37% of the plate against 9%, the trace visited 45,567 quads
+   against 11,441, and the rebuild took 19 ms against 12 -- a fifth of the
+   step rate, the same fifth PR #80 measured this layer costing before the
+   trace was bounded. The mass is the tissue heaped on food, not the record
+   of where a runner went, so a cell whose body stands no higher than the
+   stalk's floor is not ground the walk may cross. The margin is against the
+   ease: bodyV follows trail rather than equalling it, and a cell that has
+   only just been threaded can read a hair either side of the floor. */
+var PAD_STALK_EPS = 0.5;      /* body above the stalk floor before a cell is film to the walk */
+function padOn(g, lv) {
+  var b = bodyV[g];
+  return b >= lv && b > stalkF[g] * STALK_W + PAD_STALK_EPS;
+}
 var PAD_D_REF   = 6;          /* cells of half-width a step costs one unit at */
 var PAD_B       = 18;         /* the budget, in those units */
 var PAD_HOLD    = 0.43;       /* share of it held at full weight before the fade starts */
@@ -8372,7 +8389,7 @@ function padDist(lv) {
     var lr = y * LW, gr = (y << 1) * GW;
     for (x = 0; x < LW; x++) {
       var g = gr + (x << 1);
-      var on = bodyV[g] >= lv || bodyV[g + 1] >= lv || bodyV[g + GW] >= lv || bodyV[g + GW + 1] >= lv;
+      var on = padOn(g, lv) || padOn(g + 1, lv) || padOn(g + GW, lv) || padOn(g + GW + 1, lv);
       padD[lr + x] = on ? DT_INF : 0;
     }
   }
