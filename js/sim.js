@@ -8357,8 +8357,18 @@ var PAD_MASK_LV = 0;          /* index into BODY_LEVELS: tissue the walk may cro
    of where a runner went, so a cell whose body stands no higher than the
    stalk's floor is not ground the walk may cross. The margin is against the
    ease: bodyV follows trail rather than equalling it, and a cell that has
-   only just been threaded can read a hair either side of the floor. */
-var PAD_STALK_EPS = 0.5;      /* body above the stalk floor before a cell is film to the walk */
+   only just been threaded can read a hair either side of the floor.
+
+   Four, and not the half-cell the ease alone would want, because the lace
+   round the drop is threads that followers have been down once or twice --
+   body a little over the floor, not a pad -- and at 0.5 the walk took all of
+   it. Swept on EXP-01/11f9a2 at 120 s (tools/README.md, vein.js): 0.5 traces
+   30,423 quads and paints 24% of the plate; 4 traces 18,776 and paints 15%,
+   against a base of 11,441 and 9%. The flake pads are cytoplasm heaped well
+   above any floor and barely notice -- flake a keeps 2,928 of 3,108 cells
+   there and 700 of 748 on efe8ba at 45 s -- while the drop's puddle comes
+   down from 7,684 to 2,840. Chosen from the renders, not from here. */
+var PAD_STALK_EPS = 4;        /* body above the stalk floor before a cell is film to the walk */
 function padOn(g, lv) {
   var b = bodyV[g];
   return b >= lv && b > stalkF[g] * STALK_W + PAD_STALK_EPS;
