@@ -46,6 +46,11 @@ the deploy stamp note in `DEPLOY.md`. `head -1` because a page that polls its
 own build stamp carries a matching regex literal, which grep otherwise reports
 as a phantom second build.)
 
+## Also served from this checkout
+
+- `mozart/` — the Musical Dice Game (K. 516f), a separate static page at
+  `/mozart/`. Its own notes, sources and tests are in `mozart/README.md`.
+
 ## Things worth knowing
 
 - The droplet checkout is the web root, so anything committed here is public
