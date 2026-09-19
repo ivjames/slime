@@ -27,8 +27,7 @@ function say(text, { sticky = false, error = false } = {}) {
   clearTimeout(statusTimer);
   status.textContent = text;
   status.classList.toggle('is-error', error);
-  status.hidden = !text;
-  if (text && !sticky) statusTimer = setTimeout(() => { status.hidden = true; status.textContent = ''; }, 6000);
+  if (text && !sticky) statusTimer = setTimeout(() => { status.textContent = ''; }, 6000);
 }
 
 // ---------- rendering the 16 bars ----------
@@ -86,8 +85,10 @@ function renderBars() {
     reroll.disabled = !state.bars;
   }
   const has = Boolean(state.bars);
-  $('#play').disabled = !has || state.busy;
-  $('#download').disabled = !has || state.busy;
+  $('#play').disabled = !has;
+  $('#download').disabled = !has;
+  $('#play').setAttribute('aria-busy', String(state.busy));
+  $('#download').setAttribute('aria-busy', String(state.busy));
   $('#share').disabled = !has;
   $('#roll-unlocked').disabled = !has;
   $('#summary').hidden = !has;
@@ -203,8 +204,10 @@ async function onPlay() {
   }
 }
 
+let downloadLock = false;
 async function onDownload() {
-  if (!state.bars || state.busy) return;
+  if (!state.bars || downloadLock) return;
+  downloadLock = true;
   try {
     // The export is the same measures, the same buffers and the same bar spacing as playback.
     const sr = player.ctx ? player.sampleRate : 44100;
@@ -220,6 +223,8 @@ async function onDownload() {
     say(`WAV saved: ${(mix.length / sr).toFixed(1)} seconds, ${sr} Hz, 16-bit mono.`);
   } catch (err) {
     say(`Export failed: ${err.message}`, { error: true, sticky: true });
+  } finally {
+    downloadLock = false;
   }
 }
 

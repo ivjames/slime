@@ -28,7 +28,7 @@ export class Player {
   async ensureContext() {
     if (!AC) throw new Error('This browser has no Web Audio support.');
     if (!this.ctx) {
-      this.ctx = new AC({ latencyHint: 'playback' });
+      try { this.ctx = new AC({ latencyHint: 'playback' }); } catch { this.ctx = new AC(); }
       this.ctx.addEventListener('statechange', () => this.handleStateChange());
     }
     if (this.ctx.state !== 'running') {
@@ -68,7 +68,7 @@ export class Player {
       const data = floatBuffers.get(key);
       if (!data) throw new Error(`missing buffer ${key}`);
       const ab = this.ctx.createBuffer(1, data.length, sr);
-      ab.copyToChannel(data, 0);
+      ab.getChannelData(0).set(data);
       this.buffers.set(key, ab);
     }
     this.keyOf = keyOf;
@@ -151,8 +151,8 @@ export class Player {
     this.sources = [];
   }
 
-  /** Whether the playhead has run past the last bar (tail still ringing counts as done). */
-  get finished() { return this.state === 'playing' && this.positionSample() >= this.endSample; }
+  /** Whether the playhead has run past everything, the last bar's tail included. */
+  get finished() { return this.state === 'playing' && this.positionSample() >= this.totalSamples; }
 }
 
 export { measureSamples };
