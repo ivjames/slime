@@ -13469,6 +13469,7 @@ function exitReplay() {
     if (FINAL_STATE.condF) condF.set(FINAL_STATE.condF);
     if (FINAL_STATE.scarF) scarF.set(FINAL_STATE.scarF);
     if (FINAL_STATE.stalkF) stalkF.set(FINAL_STATE.stalkF);
+    if (FINAL_STATE.freshF) freshF.set(FINAL_STATE.freshF);
     if (FINAL_STATE.fedF) fedF.set(FINAL_STATE.fedF);
     if (FINAL_STATE.padF) padF.set(FINAL_STATE.padF);
     if (FINAL_STATE.bodyF) bodyF.set(FINAL_STATE.bodyF);
@@ -14205,6 +14206,10 @@ function showResult(won) {
        replay's threads, and the mass drawn on the verdict screen would be
        the wrong run's. Found by review of #83. */
     stalkF: new Float32Array(stalkF),
+    /* and the glow on the runners' fresh tracks: drawn on the verdict screen
+       like the rest of the overlay, so a replay left early must not leave
+       its own tracks lit over the finished dish. Found by review of #85. */
+    freshF: new Float32Array(freshF),
     /* and the return signal with its shade, for the same reason as the
        conductivity: the harness reads them, and the finished plate's should
        be the finished plate's */
