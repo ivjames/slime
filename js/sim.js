@@ -2422,11 +2422,6 @@ var inQ   = new Uint8Array(NCELL);
 var nodeDist = [];                     // per node: geodesic distance, built once
 var tmpF  = new Float32Array(NCELL);
 var stalkF = new Float32Array(NCELL);  // see STALK_HOLD
-/* How recently a runner crossed this cell, 1 the step it did and halving
-   every FRESH_HALF seconds after. Drawn and nothing else: the glow on a
-   runner's track (paintOverlay). No pass reads it and stateHash does not
-   hash it, so it moves no dish. */
-var freshF = new Float32Array(NCELL);
 var foodF = new Float32Array(NCELL);
 var statF = new Float32Array(NCELL);   // food*FOODW - hazard repel + wall penalty
 var cueF  = new Float32Array(NCELL);
@@ -2504,7 +2499,7 @@ var ah = new Float32Array(MAXA);
 var atip = new Uint8Array(MAXA);
 /* How many steps in a row this agent has been a tip. Drawn and nothing
    else: only a runner that has been out for FRESH_RUN steps lights its
-   track (freshLight), so the glow marks the long filaments rather than
+   track (runMark), so the light marks the long filaments rather than
    every agent that is a tip for a moment at the edge of the lace. Nothing
    in the simulation reads it. */
 var arun = new Uint16Array(MAXA);
@@ -2573,37 +2568,6 @@ var HAZ_ADD = [null, [38, 20, 9], [27, 12, 40], [30, 34, 40]];
 var CUE_ADD = [26, 24, 8];    // growth-cue haze, per unit of cueF
 var RET_ADD = [26, 6, 16];    // retract haze, per unit of retF
 var MAT_ADD = [7, 8, 11];     // slime mat, per unit of slimeF — ground only
-/* The glow on a runner's track, per unit of freshF, as a fraction of the
-   tissue colour: added onto the plate under the lines, so the newest stretch
-   of a thread is lit and the lit stretch shortens and dims behind the runner
-   as the branches come in along it. A second and a half to halve is about
-   twenty cells of lit track at a runner's speed, so it reads as the lit end
-   of each thread and not as a haze over the whole lace; cleared at FRESH_EPS, where it is
-   under two channels and no longer anything to see. */
-var FRESH_HALF = 1.5;
-var FRESH_HOLD = Math.pow(0.5, DT / FRESH_HALF);
-var FRESH_EPS  = 0.01;
-var FRESH_K    = 0.55;
-/* Steps a tip must have run before its track is lit: half a second. Most
-   tips are tips for a moment — on EXP-06/abc123 the median has run 8 to 20
-   steps and almost none reach 90 — forming and lapsing at the edge of the
-   lace, and lighting every one of them drew a beaded haze over the lace
-   rather than a lit end on the filaments that are going somewhere. Thirty
-   is about the longest third of them. */
-var FRESH_RUN  = 30;
-/* Lit as a soft spot three cells across rather than one cell: the layer is
-   the grid's own resolution scaled up to the canvas, and a track one cell
-   wide drew as a staircase of lit squares. Max, not add, so a runner sitting
-   still does not burn a hotter spot than one moving. */
-function freshAt(c, v) { if (freshF[c] < v) freshF[c] = v; }
-function freshLight(c) {
-  var x = c % GW, y = (c / GW) | 0;
-  if (freshF[c] < 1) freshF[c] = 1;
-  if (x > 0 && x < GW - 1 && y > 0 && y < GH - 1) {
-    freshAt(c - 1, 0.5); freshAt(c + 1, 0.5); freshAt(c - GW, 0.5); freshAt(c + GW, 0.5);
-    freshAt(c - GW - 1, 0.3); freshAt(c - GW + 1, 0.3); freshAt(c + GW - 1, 0.3); freshAt(c + GW + 1, 0.3);
-  }
-}
 var BRUSH_PEAK = 1.15;        // the brush cone's tip, the most cueF/retF holds
 
 /* Every ground the body's shaded rim can border, worst case: each hazard
@@ -2983,7 +2947,7 @@ function buildDish(e) {
   fieldDirty = true;
   dirtyFrames = REBUILD_EVERY;
   resetVeinTemporal();
-  trail.fill(0); tmpF.fill(0); stalkF.fill(0); freshF.fill(0); foodF.fill(0);
+  trail.fill(0); tmpF.fill(0); stalkF.fill(0); foodF.fill(0); runN = 0;
   cueF.fill(0); retF.fill(0); slimeF.fill(0); knotF.fill(0); traceF.fill(0);
   cueBoxNone();
   flowF.fill(0); condF.fill(0); scarF.fill(0);
@@ -3062,7 +3026,7 @@ function applyEvent(e, ev) {
            clock is reabsorbed early or late by up to ADRIFT_TIME on the
            strength of a wall appearing somewhere else in the dish. */
         ax[k] = ax[nAgents]; ay[k] = ay[nAgents]; ah[k] = ah[nAgents];
-        atip[k] = atip[nAgents]; astv[k] = astv[nAgents]; aoff[k] = aoff[nAgents]; aidle[k] = aidle[nAgents]; agoal[k] = agoal[nAgents]; arun[k] = arun[nAgents];
+        atip[k] = atip[nAgents]; astv[k] = astv[nAgents]; aoff[k] = aoff[nAgents]; aidle[k] = aidle[nAgents]; agoal[k] = agoal[nAgents]; arun[k] = arun[nAgents]; arx[k] = arx[nAgents]; ary[k] = ary[nAgents];
         continue;
       }
       k++;
@@ -3671,7 +3635,7 @@ function killWeakest() {
   if (occ[ci]) occ[ci]--;          /* every removal path decrements */
   nAgents--;
   ax[k] = ax[nAgents]; ay[k] = ay[nAgents]; ah[k] = ah[nAgents];
-  atip[k] = atip[nAgents]; astv[k] = astv[nAgents]; aoff[k] = aoff[nAgents]; aidle[k] = aidle[nAgents]; agoal[k] = agoal[nAgents]; arun[k] = arun[nAgents];
+  atip[k] = atip[nAgents]; astv[k] = astv[nAgents]; aoff[k] = aoff[nAgents]; aidle[k] = aidle[nAgents]; agoal[k] = agoal[nAgents]; arun[k] = arun[nAgents]; arx[k] = arx[nAgents]; ary[k] = ary[nAgents];
 }
 
 /* The idlest agent, by the same reading killWeakest uses, without the kill:
@@ -3933,8 +3897,6 @@ function diffuseTrail() {
         var skf = sk * STALK_W;
         if (v < skf) v = skf;   /* the stalk is a floor under the trail */
       }
-      var fr = freshF[i];
-      if (fr > 0) freshF[i] = fr < FRESH_EPS || wallM[i] ? 0 : fr * FRESH_HOLD;
       trail[i] = wallM[i] ? 0 : (v < 0.0016 ? 0 : v);
     }
   }
@@ -4776,7 +4738,7 @@ function step() {
       if (tv < TRAIL_MAX) trail[cell] = tv + dep > TRAIL_MAX ? TRAIL_MAX : tv + dep;
       if (tip) {
         var sk0 = stalkF[cell] + dep; stalkF[cell] = sk0 > TRAIL_MAX ? TRAIL_MAX : sk0;
-        if (arun[k] >= FRESH_RUN) { freshLight(cell); ovlLive = true; }
+        if (arun[k] >= FRESH_RUN) runMark(k);
       }
       /* The same number is the flux. What a cell's traffic delivers IS its
          deposit — that is what the constant is defined as — so the flow
@@ -4843,7 +4805,7 @@ function step() {
       if (occ[cell]) occ[cell]--;
       nAgents--;
       ax[k] = ax[nAgents]; ay[k] = ay[nAgents]; ah[k] = ah[nAgents];
-      atip[k] = atip[nAgents]; astv[k] = astv[nAgents]; aoff[k] = aoff[nAgents]; aidle[k] = aidle[nAgents]; agoal[k] = agoal[nAgents]; arun[k] = arun[nAgents];
+      atip[k] = atip[nAgents]; astv[k] = astv[nAgents]; aoff[k] = aoff[nAgents]; aidle[k] = aidle[nAgents]; agoal[k] = agoal[nAgents]; arun[k] = arun[nAgents]; arx[k] = arx[nAgents]; ary[k] = ary[nAgents];
       continue;
     }
 
@@ -4876,7 +4838,7 @@ function step() {
         if (occ[cell]) occ[cell]--;
         nAgents--;
         ax[k] = ax[nAgents]; ay[k] = ay[nAgents]; ah[k] = ah[nAgents];
-        atip[k] = atip[nAgents]; astv[k] = astv[nAgents]; aoff[k] = aoff[nAgents]; aidle[k] = aidle[nAgents]; agoal[k] = agoal[nAgents]; arun[k] = arun[nAgents];
+        atip[k] = atip[nAgents]; astv[k] = astv[nAgents]; aoff[k] = aoff[nAgents]; aidle[k] = aidle[nAgents]; agoal[k] = agoal[nAgents]; arun[k] = arun[nAgents]; arx[k] = arx[nAgents]; ary[k] = ary[nAgents];
         continue;
       }
     }
@@ -5389,8 +5351,6 @@ function paintOverlay() {
       var sv = slimeF[i];
       if (sv > 0.05 && !wallM[i]) { r += sv * MAT_ADD[0]; g += sv * MAT_ADD[1]; b += sv * MAT_ADD[2]; }
     }
-    var fr = freshF[i];
-    if (fr > FRESH_EPS) { var fk = fr * FRESH_K; r += fk * TINT[0]; g += fk * TINT[1]; b += fk * TINT[2]; }
     var c = cueF[i];
     if (c > 0.02) { r += c * CUE_ADD[0]; g += c * CUE_ADD[1]; b += c * CUE_ADD[2]; }
     var q = retF[i];
@@ -5405,8 +5365,7 @@ function paintOverlay() {
   ovlAny = any;
   if (any) ovlCtx.putImageData(ovlImg, 0, 0);
   /* a mat dish is live for as long as it runs; a cue is live until it has
-     faded to nothing, and the brush relights it; a runner's glow likewise,
-     relit by the next step a runner takes */
+     faded to nothing, and the brush relights it */
   if (!any && !mat) ovlLive = false;
 }
 
@@ -11394,6 +11353,93 @@ function strokeVeins(tc, sx, sy, mono) {
   ctx.restore();
 }
 
+/* ---- the runners' lit tracks ----
+   A runner's thread is laid bright and decays (STALK_W, STALK_HOLD) — and
+   what the eye should see of that is the runner's own path, lit, dimming
+   behind it as the branches come in along it. Drawn as LINES, the same ink
+   as the rest of the network, from where the runner actually went: each
+   runner that has been out FRESH_RUN steps drops a segment every RUN_STEP
+   cells into a ring, and every frame strokes the ring in RUN_BANDS age
+   bands, each a little dimmer, so a track is a line that fades from its
+   newest end.
+
+   An earlier version of this was removed (see "what used to be here: the
+   explorers' trails"): a record of every tip step, never erased, which ran
+   ahead of the drawn network as a pale scribble. This one differs in the
+   two ways that mattered. It fades, so it is the runner's last few seconds
+   and not its history; and only runners that have been out a while lay it,
+   so it is the long filaments and not every momentary tip at the edge of
+   the lace.
+
+   Drawn and nothing else: no pass reads it, no RNG, not hashed. */
+var FRESH_HALF = 1.5;   // seconds for a track to halve in brightness
+/* Steps a tip must have run before its track is lit: half a second. Most
+   tips are tips for a moment — on EXP-06/abc123 the median has run 8 to 20
+   steps and almost none reach 90 — forming and lapsing at the edge of the
+   lace, and lighting every one of them lit the lace all over rather than
+   the filaments that are going somewhere. Thirty is about the longest third
+   of them. */
+var FRESH_RUN  = 30;
+var RUN_STEP   = 0.75;  // cells between a track's points
+var RUN_LIFE   = FRESH_HALF * 4.5;   // seconds; under 5% by then
+var RUN_BANDS  = 6;
+var RUN_W      = 0.55;  // cells, the newest band; older bands narrow with it
+var RUN_MAX    = 8192;
+/* LAMP: the warm cream a lit crest walks to, so a fresh track reads as the
+   brightest thing on the thread rather than as another tone of it */
+var RUN_STYLE  = rgba(LAMP, '1');
+var runX0 = new Float32Array(RUN_MAX), runY0 = new Float32Array(RUN_MAX);
+var runX1 = new Float32Array(RUN_MAX), runY1 = new Float32Array(RUN_MAX);
+var runT  = new Float32Array(RUN_MAX);
+var runHead = 0, runN = 0;
+/* where each runner's track last put a point */
+var arx = new Float32Array(MAXA), ary = new Float32Array(MAXA);
+
+function runMark(k) {
+  var x = ax[k], y = ay[k];
+  if (arun[k] === FRESH_RUN) { arx[k] = x; ary[k] = y; return; }
+  var dx = x - arx[k], dy = y - ary[k];
+  if (dx * dx + dy * dy < RUN_STEP * RUN_STEP) return;
+  runX0[runHead] = arx[k]; runY0[runHead] = ary[k];
+  runX1[runHead] = x; runY1[runHead] = y;
+  runT[runHead] = S.simT;
+  runHead = (runHead + 1) % RUN_MAX;
+  if (runN < RUN_MAX) runN++;
+  arx[k] = x; ary[k] = y;
+}
+
+function strokeRuns(tc, sx, sy) {
+  if (!runN) return;
+  var now = S.simT, paths = [], b, i, j, live = 0;
+  for (b = 0; b < RUN_BANDS; b++) paths.push(null);
+  for (j = 0; j < runN; j++) {
+    i = (runHead - 1 - j + RUN_MAX) % RUN_MAX;
+    var age = now - runT[i];
+    if (age >= RUN_LIFE) break;      /* the ring is in time order */
+    if (age < 0) continue;
+    live++;
+    b = (age / RUN_LIFE * RUN_BANDS) | 0;
+    var pth = paths[b] || (paths[b] = new Path2D());
+    pth.moveTo(runX0[i], runY0[i]);
+    pth.lineTo(runX1[i], runY1[i]);
+  }
+  runN = live;                       /* what has aged out is gone */
+  tc.save();
+  tc.setTransform(sx, 0, 0, sy, 0, 0);
+  tc.lineCap = 'round';
+  tc.lineJoin = 'round';
+  tc.strokeStyle = RUN_STYLE;
+  for (b = RUN_BANDS - 1; b >= 0; b--) {
+    if (!paths[b]) continue;
+    var mid = (b + 0.5) / RUN_BANDS * RUN_LIFE;
+    var a = Math.pow(0.5, mid / FRESH_HALF);
+    tc.globalAlpha = a;
+    tc.lineWidth = RUN_W * (0.5 + 0.5 * a);
+    tc.stroke(paths[b]);
+  }
+  tc.restore();
+}
+
 /* The whiskers are the moving front and are drawn straight onto the frame,
    OUTSIDE the veil: a tip can turn 0.79 radians in a step, which swings the
    far end of a 2.6-cell whisker well clear of its own mask footprint, and
@@ -11746,6 +11792,7 @@ function render() {
      laid once per frame onto a frame that is cleared, so nothing
      accumulates */
   if (BODY && VEIN_GRAPH && vgc) ctx.drawImage(vgc, 0, 0);
+  strokeRuns(ctx, sx, sy);
   strokeWhiskers(ctx, sx, sy);
   ctx.save();
   ctx.setTransform(sx, 0, 0, sy, 0, 0);
@@ -13490,7 +13537,11 @@ function exitReplay() {
     if (FINAL_STATE.condF) condF.set(FINAL_STATE.condF);
     if (FINAL_STATE.scarF) scarF.set(FINAL_STATE.scarF);
     if (FINAL_STATE.stalkF) stalkF.set(FINAL_STATE.stalkF);
-    if (FINAL_STATE.freshF) freshF.set(FINAL_STATE.freshF);
+    if (FINAL_STATE.run) {
+      runX0.set(FINAL_STATE.run.x0); runY0.set(FINAL_STATE.run.y0);
+      runX1.set(FINAL_STATE.run.x1); runY1.set(FINAL_STATE.run.y1);
+      runT.set(FINAL_STATE.run.t); runHead = FINAL_STATE.run.head; runN = FINAL_STATE.run.n;
+    }
     if (FINAL_STATE.fedF) fedF.set(FINAL_STATE.fedF);
     if (FINAL_STATE.padF) padF.set(FINAL_STATE.padF);
     if (FINAL_STATE.bodyF) bodyF.set(FINAL_STATE.bodyF);
@@ -14227,10 +14278,12 @@ function showResult(won) {
        replay's threads, and the mass drawn on the verdict screen would be
        the wrong run's. Found by review of #83. */
     stalkF: new Float32Array(stalkF),
-    /* and the glow on the runners' fresh tracks: drawn on the verdict screen
-       like the rest of the overlay, so a replay left early must not leave
-       its own tracks lit over the finished dish. Found by review of #85. */
-    freshF: new Float32Array(freshF),
+    /* and the runners' lit tracks: drawn on the verdict screen, and aged
+       against the restored clock, so a replay left early must not leave its
+       own tracks lit over the finished dish. Found by review of #85. */
+    run: { x0: new Float32Array(runX0), y0: new Float32Array(runY0),
+           x1: new Float32Array(runX1), y1: new Float32Array(runY1),
+           t: new Float32Array(runT), head: runHead, n: runN },
     /* and the return signal with its shade, for the same reason as the
        conductivity: the harness reads them, and the finished plate's should
        be the finished plate's */
