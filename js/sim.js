@@ -8544,7 +8544,17 @@ function padOn(g, lv) {
   return b >= lv && b > stalkF[g] * STALK_W + PAD_STALK_EPS;
 }
 var PAD_D_REF   = 6;          /* cells of half-width a step costs one unit at */
-var PAD_B       = 18;         /* the budget, in those units */
+/* The budget, in those units. It was 18. Since SIM_V 18 a runner's thread
+   is laid at the stalk's full value and the plate holds more tissue round
+   the food, so the same budget walked twice as far: on EXP-01/efe8ba at
+   45 s the flakes' masses ran 2,280-3,020 cells and the drop's 13,388,
+   against 1,204-1,552 and 10,704 before. And bigger than before was not
+   wanted either — the masses were to sit tighter on the food than they
+   ever had, and leave the picture to the lines. At 5 the same plate draws
+   736-1,084 at the flakes and 2,588 at the drop: a cap on each flake, the
+   drop a small star where its trunks leave it. Swept with padTune({B})
+   at 18, 12, 8 and 5; chosen from the renders. */
+var PAD_B       = 5;
 var PAD_HOLD    = 0.43;       /* share of it held at full weight before the fade starts */
 var PAD_A       = 0.92;       /* the mass's alpha where the weight is one */
 /* The weight in whole steps rather than continuously, 0 for continuous. This
