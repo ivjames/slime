@@ -7735,7 +7735,17 @@ var TREE_GHOST_W = 0.5;       /* cells: a ghost's width, at most */
    Path2D built and stroked per sim step per frame, and a full-canvas
    composite every frame. Nothing in the simulation read it: no RNG draw,
    no field, no snapshot state the verdict depends on. */
-/* Sim-seconds between repaints while running, so it is a REAL cadence only
+/* Sim-seconds between repaints while running — 0 now: every rebuild repaints.
+   What follows is why it was 0.1, and it stopped being true with the tile
+   repaint (see paintTree), which costs only the tiles that changed. At 0.1
+   the branches repainted five times a real second at x1 while the tree grew
+   seven and a half passes a second (TREE_EVERY steps at 30 steps a second),
+   so each repaint showed one pass of growth or two, unevenly: the plate ran
+   at 60 fps and the network moved in visible jerks. Repainted every rebuild,
+   with each pass's new segments growing in across the pass (TREE_GROW_Q),
+   the tips advance every step instead.
+
+   Sim-seconds between repaints while running, so it is a REAL cadence only
    through LAPSE_REF: a tenth of a dish second is a fifth of a real one at ×1,
    which is the five-a-second this was set at when a dish second and a real one
    were the same length. Left at 0.2 the layer repainted 2.5 times a second and
@@ -7744,7 +7754,11 @@ var TREE_GHOST_W = 0.5;       /* cells: a ghost's width, at most */
    rather than simulated. Halving it costs nothing per REAL second, which is
    the budget that matters: the same number of paints, on a dish advancing at
    half the rate. */
-var TREE_REPAINT = 0.1;
+var TREE_REPAINT = 0;
+/* How finely a new segment grows in: a node placed by the latest growth
+   pass is drawn from its parent toward itself, by eighths of the way, over
+   TREE_EVERY steps — one eighth more each time the fraction crosses one. */
+var TREE_GROW_Q = 8;
 var TREE_WQ   = 4;            /* width quantisation, steps a cell */
 /* ---- anastomosis and flow ----
    A tip that reaches another vein FUSES with it: in the dish the fans
@@ -9132,7 +9146,16 @@ function treeSig(i, keys) {
   if (tstate[i]) { k = Math.round(tw[i] * TREE_WQ); if (k < 1) k = 1; if (k >= keys) k = keys - 1; }
   var jn = tjoin[i], j = 0;
   if (jn >= 0 && !wallM[(ty[jn] | 0) * GW + (tx[jn] | 0)] && treeClear(tx[i], ty[i], tx[jn], ty[jn])) j = tstate[i] && tstate[jn] ? 2 : 1;
-  return k * 8 + (tip ? 4 : 0) + j;
+  return (k * 8 + (tip ? 4 : 0) + j) * (TREE_GROW_Q + 1) + treeGrown(i);
+}
+/* how far node i's segment has grown in, 1..TREE_GROW_Q (all of it): a
+   node is new for the TREE_EVERY steps after the pass that placed it */
+function treeGrown(i) {
+  if (!tstate[i]) return TREE_GROW_Q;
+  var f = (S.simT - tborn[i]) / (TREE_EVERY * DT);
+  if (f >= 1) return TREE_GROW_Q;
+  var g = Math.ceil(f * TREE_GROW_Q);
+  return g < 1 ? 1 : g;
 }
 
 /* node i's segment's box in device pixels, padded for the widest stroke
@@ -9223,7 +9246,16 @@ function paintTree() {
     var g = tpar[p], x0, y0;
     if (g >= 0) { x0 = (tx[g] + tx[p]) * 0.5; y0 = (ty[g] + ty[p]) * 0.5; } else { x0 = tx[p]; y0 = ty[p]; }
     var x1 = (tx[p] + tx[i]) * 0.5, y1 = (ty[p] + ty[i]) * 0.5;
-    var sgi = tsig[i], tip = (sgi & 4) !== 0, path;
+    var sgq = tsig[i] % (TREE_GROW_Q + 1), sgi = (tsig[i] - sgq) / (TREE_GROW_Q + 1);
+    var tip = (sgi & 4) !== 0, path;
+    /* a segment still growing in reaches only part of the way to its node:
+       the node's drawn position slides out from the parent */
+    var nx = tx[i], ny = ty[i];
+    if (sgq < TREE_GROW_Q) {
+      var gf = sgq / TREE_GROW_Q;
+      nx = tx[p] + (tx[i] - tx[p]) * gf; ny = ty[p] + (ty[i] - ty[p]) * gf;
+      x1 = (tx[p] + nx) * 0.5; y1 = (ty[p] + ny) * 0.5;
+    }
     if (!tstate[i]) {
       if (!ghost) ghost = new Path2D();
       path = ghost;
@@ -9236,9 +9268,9 @@ function paintTree() {
     }
     path.moveTo(x0, y0);
     path.quadraticCurveTo(tx[p], ty[p], x1, y1);
-    if (tip) path.lineTo(tx[i], ty[i]);
+    if (tip) path.lineTo(nx, ny);
     /* the fusion: straight on to the vein this tip met */
-    var jf = sgi & 3;
+    var jf = sgq < TREE_GROW_Q ? 0 : sgi & 3;
     if (jf) {
       var jn = tjoin[i];
       var jp = jf === 2 ? path : (ghost || (ghost = new Path2D()));
