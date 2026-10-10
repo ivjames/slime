@@ -7991,6 +7991,7 @@ var tcov = new Uint8Array(GW * GH);
 var treeT = 0, treePaintT = -1e9, treeDirty = true;
 
 function treeReset() {
+  treeLines = null; treeGhost = null;   /* or the old dish's branches are stroked until the first repaint */
   tN = 0; treePassN = 0; treeT = S.simT; treePaintT = -1e9; treeDirty = true;
   tAt.fill(-1); tcov.fill(0);
   if (S.exp) {
@@ -9068,8 +9069,16 @@ var HIDE_MASS = false, HIDE_LINES = false;
 
 /* The picture: every node's segment to its parent, batched by quantised
    width, widest first so hairlines land on the trunks they leave.
-   Ghosts under everything, pale. Into vgc, which the composite lays
-   over the veil once a frame. */
+   Ghosts under everything, pale.
+
+   The paths are BUILT here, at TREE_REPAINT, and STROKED every frame by
+   strokeTreeLines, straight onto the frame in the same pass as the runners'
+   tracks and the whiskers — one layer of line ink for the whole network,
+   rather than the branches baked into a canvas a tenth of a second stale
+   with the moving front drawn over it from somewhere else. Only the
+   puddles are still painted into vgc here: a filled contour is the costly
+   half, and it does not move between repaints. */
+var treeLines = null, treeGhost = null, treeKeys = 0;
 function paintTree() {
   if (!veil || !veil.width) return;
   if (!vgc) { vgc = document.createElement('canvas'); vgctx = vgc.getContext('2d'); }
@@ -9117,29 +9126,38 @@ function paintTree() {
       jp.moveTo(tx[i], ty[i]); jp.lineTo(tx[jn], ty[jn]);
     }
   }
+  treeLines = paths; treeGhost = ghost; treeKeys = keys;
   vgctx.save();
   vgctx.setTransform(1, 0, 0, 1, 0, 0);
   vgctx.clearRect(0, 0, vgc.width, vgc.height);
   vgctx.setTransform(sx, 0, 0, sy, 0, 0);
-  vgctx.lineCap = 'round';
-  vgctx.lineJoin = 'round';
-  /* the puddles first, under everything */
+  /* the puddles, under every line */
   if (!HIDE_MASS) paintPuddles(vgctx, sx, sy);
-  if (ghost && !HIDE_LINES) {
-    vgctx.globalAlpha = TREE_GHOST_A;
-    vgctx.lineWidth = TREE_GHOST_W;
-    vgctx.strokeStyle = VEIN_BANDS[0].style;
-    vgctx.stroke(ghost);
-    vgctx.globalAlpha = 1;
-  }
-  for (k = HIDE_LINES ? 0 : keys - 1; k >= 1; k--) {
-    if (!paths[k]) continue;
-    var w2 = k / TREE_WQ;
-    vgctx.lineWidth = w2;
-    vgctx.strokeStyle = VEIN_BANDS[treeBand(w2)].style;
-    vgctx.stroke(paths[k]);
-  }
   vgctx.restore();
+}
+
+/* The branches, onto the frame: see paintTree. */
+function strokeTreeLines(tc, sx, sy) {
+  if (!treeLines || HIDE_LINES) return;
+  tc.save();
+  tc.setTransform(sx, 0, 0, sy, 0, 0);
+  tc.lineCap = 'round';
+  tc.lineJoin = 'round';
+  if (treeGhost) {
+    tc.globalAlpha = TREE_GHOST_A;
+    tc.lineWidth = TREE_GHOST_W;
+    tc.strokeStyle = VEIN_BANDS[0].style;
+    tc.stroke(treeGhost);
+    tc.globalAlpha = 1;
+  }
+  for (var k = treeKeys - 1; k >= 1; k--) {
+    if (!treeLines[k]) continue;
+    var w2 = k / TREE_WQ;
+    tc.lineWidth = w2;
+    tc.strokeStyle = VEIN_BANDS[treeBand(w2)].style;
+    tc.stroke(treeLines[k]);
+  }
+  tc.restore();
 }
 
 function snapshotTree(fs) {
@@ -11792,6 +11810,9 @@ function render() {
      laid once per frame onto a frame that is cleared, so nothing
      accumulates */
   if (BODY && VEIN_GRAPH && vgc) ctx.drawImage(vgc, 0, 0);
+  /* the line ink, in one pass: branches, then the runners' lit tracks along
+     them, then the whiskers at their ends */
+  if (BODY && VEIN_GRAPH && VEIN_TREE) strokeTreeLines(ctx, sx, sy);
   strokeRuns(ctx, sx, sy);
   strokeWhiskers(ctx, sx, sy);
   ctx.save();
