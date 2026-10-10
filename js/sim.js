@@ -9187,7 +9187,10 @@ function paintTree() {
   if (!veil || !veil.width) return;
   if (!vgc) { vgc = document.createElement('canvas'); vgctx = vgc.getContext('2d'); }
   if (!tgc) { tgc = document.createElement('canvas'); tgctx = tgc.getContext('2d'); }
-  var due = !S.running || S.simT - treePaintT >= TREE_REPAINT;
+  /* due once the dish has moved on since the last paint (TREE_REPAINT is 0:
+     every rebuild that follows a step), or always for a dish that is not
+     running; a rebuild with the clock standing still repaints nothing */
+  var due = !S.running || (S.simT !== treePaintT && S.simT - treePaintT >= TREE_REPAINT);
   if (vgc.width !== veil.width || vgc.height !== veil.height) { vgc.width = veil.width; vgc.height = veil.height; due = true; }
   if (tgc.width !== veil.width || tgc.height !== veil.height) { tgc.width = veil.width; tgc.height = veil.height; treeFull = true; due = true; }
   if (!due && !treeDirty) return;
