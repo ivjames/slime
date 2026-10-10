@@ -457,15 +457,34 @@ var TIP_LAY  = 3.0;      // trail a tip lays per step, as a multiple of DEPOSIT
 
    This moves every plate on every seed, which is why SIM_V goes up with it
    and why saved best times do not survive it. */
-var STALK_HOLD = 1;      // the stalk does not decay: a runner's thread is permanent
-/* The floor is a fraction of the stalk, not the stalk. At the full value a
-   runner's thread rendered as fat as a followed vein from the moment it was
-   laid, because the trail under it read 36 whether anything had followed or
-   not. At STALK_W the thread is a faint hairline until cytoplasm follows it
-   and lays trail of its own — the vein is what following makes — and a
-   thread nothing followed fades as the faint line it was. Connectivity is
-   unaffected: 36 x 0.3 is still five times CONN_T for a hundred cells. */
-var STALK_W    = 0.3;
+/* And it is no longer 1. A permanent thread fixed the defect above and
+   bought a plate the organism does not make: every hair a runner ever ran
+   stayed on the dish for the rest of the run, at the same faint weight,
+   whether anything ever followed it or not. A runner's thread is laid
+   BRIGHT and then decays, and the branches that follow it are what keep the
+   route — the vein is what following makes, and a thread nothing followed
+   goes.
+
+   So the floor is laid at the stalk's full value (STALK_W, below) and
+   halves every STALK_HALF seconds. What has to hold is the fix itself: the
+   tree follows into cells at BODY_LEVELS[TREE_LV] = 9, and the frontier
+   test stops a runner at TIP_TRAIL = 9, so the thread does both of its jobs
+   for as long as the floor reads over 9 — two half-lives from 36. At 15 s
+   that is thirty seconds, against the worst gap PR #82 measured of 24.8.
+   Then the thread is a hairline and goes, and a runner may cross that
+   ground again: the stopping rule now means "somewhere nothing has been
+   for half a minute". */
+var STALK_HALF = 15;     // seconds for a bare thread's floor to halve
+var STALK_HOLD = Math.pow(0.5, DT / STALK_HALF);          // per step
+/* The floor as a fraction of the stalk. It was 0.3, so that a thread nothing
+   had followed stayed a faint hairline — and with the thread permanent that
+   was the only way to keep the plate from filling with fat lines. Now that
+   the thread decays, it is the full value: a runner's thread is drawn as
+   bright as the trail it laid, and dims as it goes. That is the picture
+   wanted — the runner's track bright, fading behind it, and the branches
+   that follow it in holding the route. A floor of 36 is also what the
+   followers sense, so a fresh thread is a route they take. */
+var STALK_W    = 1.0;
 
 /* ---- branching ----
    New cytoplasm is not sprinkled near the food any more; it is spent FORKING
@@ -2396,6 +2415,11 @@ var inQ   = new Uint8Array(NCELL);
 var nodeDist = [];                     // per node: geodesic distance, built once
 var tmpF  = new Float32Array(NCELL);
 var stalkF = new Float32Array(NCELL);  // see STALK_HOLD
+/* How recently a runner crossed this cell, 1 the step it did and halving
+   every FRESH_HALF seconds after. Drawn and nothing else: the glow on a
+   runner's track (paintOverlay). No pass reads it and stateHash does not
+   hash it, so it moves no dish. */
+var freshF = new Float32Array(NCELL);
 var foodF = new Float32Array(NCELL);
 var statF = new Float32Array(NCELL);   // food*FOODW - hazard repel + wall penalty
 var cueF  = new Float32Array(NCELL);
@@ -2536,6 +2560,30 @@ var HAZ_ADD = [null, [38, 20, 9], [27, 12, 40], [30, 34, 40]];
 var CUE_ADD = [26, 24, 8];    // growth-cue haze, per unit of cueF
 var RET_ADD = [26, 6, 16];    // retract haze, per unit of retF
 var MAT_ADD = [7, 8, 11];     // slime mat, per unit of slimeF — ground only
+/* The glow on a runner's track, per unit of freshF, as a fraction of the
+   tissue colour: added onto the plate under the lines, so the newest stretch
+   of a thread is lit and the lit stretch shortens and dims behind the runner
+   as the branches come in along it. A second and a half to halve is about
+   twenty cells of lit track at a runner's speed, so it reads as the lit end
+   of each thread and not as a haze over the whole lace; cleared at FRESH_EPS, where it is
+   under two channels and no longer anything to see. */
+var FRESH_HALF = 1.5;
+var FRESH_HOLD = Math.pow(0.5, DT / FRESH_HALF);
+var FRESH_EPS  = 0.01;
+var FRESH_K    = 0.55;
+/* Lit as a soft spot three cells across rather than one cell: the layer is
+   the grid's own resolution scaled up to the canvas, and a track one cell
+   wide drew as a staircase of lit squares. Max, not add, so a runner sitting
+   still does not burn a hotter spot than one moving. */
+function freshAt(c, v) { if (freshF[c] < v) freshF[c] = v; }
+function freshLight(c) {
+  var x = c % GW, y = (c / GW) | 0;
+  if (freshF[c] < 1) freshF[c] = 1;
+  if (x > 0 && x < GW - 1 && y > 0 && y < GH - 1) {
+    freshAt(c - 1, 0.5); freshAt(c + 1, 0.5); freshAt(c - GW, 0.5); freshAt(c + GW, 0.5);
+    freshAt(c - GW - 1, 0.3); freshAt(c - GW + 1, 0.3); freshAt(c + GW - 1, 0.3); freshAt(c + GW + 1, 0.3);
+  }
+}
 var BRUSH_PEAK = 1.15;        // the brush cone's tip, the most cueF/retF holds
 
 /* Every ground the body's shaded rim can border, worst case: each hazard
@@ -2915,7 +2963,7 @@ function buildDish(e) {
   fieldDirty = true;
   dirtyFrames = REBUILD_EVERY;
   resetVeinTemporal();
-  trail.fill(0); tmpF.fill(0); stalkF.fill(0); foodF.fill(0);
+  trail.fill(0); tmpF.fill(0); stalkF.fill(0); freshF.fill(0); foodF.fill(0);
   cueF.fill(0); retF.fill(0); slimeF.fill(0); knotF.fill(0); traceF.fill(0);
   cueBoxNone();
   flowF.fill(0); condF.fill(0); scarF.fill(0);
@@ -3865,6 +3913,8 @@ function diffuseTrail() {
         var skf = sk * STALK_W;
         if (v < skf) v = skf;   /* the stalk is a floor under the trail */
       }
+      var fr = freshF[i];
+      if (fr > 0) freshF[i] = fr < FRESH_EPS || wallM[i] ? 0 : fr * FRESH_HOLD;
       trail[i] = wallM[i] ? 0 : (v < 0.0016 ? 0 : v);
     }
   }
@@ -4703,7 +4753,10 @@ function step() {
     if (dep > 0) {
       var tv = trail[cell];
       if (tv < TRAIL_MAX) trail[cell] = tv + dep > TRAIL_MAX ? TRAIL_MAX : tv + dep;
-      if (tip) { var sk0 = stalkF[cell] + dep; stalkF[cell] = sk0 > TRAIL_MAX ? TRAIL_MAX : sk0; }
+      if (tip) {
+        var sk0 = stalkF[cell] + dep; stalkF[cell] = sk0 > TRAIL_MAX ? TRAIL_MAX : sk0;
+        freshLight(cell); ovlLive = true;
+      }
       /* The same number is the flux. What a cell's traffic delivers IS its
          deposit — that is what the constant is defined as — so the flow
          accumulator is one add here rather than a second measurement of the
@@ -5315,6 +5368,8 @@ function paintOverlay() {
       var sv = slimeF[i];
       if (sv > 0.05 && !wallM[i]) { r += sv * MAT_ADD[0]; g += sv * MAT_ADD[1]; b += sv * MAT_ADD[2]; }
     }
+    var fr = freshF[i];
+    if (fr > FRESH_EPS) { var fk = fr * FRESH_K; r += fk * TINT[0]; g += fk * TINT[1]; b += fk * TINT[2]; }
     var c = cueF[i];
     if (c > 0.02) { r += c * CUE_ADD[0]; g += c * CUE_ADD[1]; b += c * CUE_ADD[2]; }
     var q = retF[i];
@@ -5329,7 +5384,8 @@ function paintOverlay() {
   ovlAny = any;
   if (any) ovlCtx.putImageData(ovlImg, 0, 0);
   /* a mat dish is live for as long as it runs; a cue is live until it has
-     faded to nothing, and the brush relights it */
+     faded to nothing, and the brush relights it; a runner's glow likewise,
+     relit by the next step a runner takes */
   if (!any && !mat) ovlLive = false;
 }
 
@@ -13114,8 +13170,15 @@ var GHOST_ENT = 9;
        Three finish later: EXP-12 +8%, EXP-16 +3%, and EXP-15 (hold six
        at once) +18%, with a tail of +36% on one seed in six, for the
        reason at the frontier test. Six are refine- or clock-bound and
-       cannot move. */
-var SIM_V = 17;   /* The plate a seed and tape produce is different, which is
+       cannot move.
+   18: the stalk decays again, from a brighter floor. STALK_W 0.3 -> 1 and
+       STALK_HOLD 1 -> a 15 s half-life, so a runner's thread is laid bright
+       and fades, and the route stays where branches follow it in. The
+       floor reads over 9 -- the tree's level and the frontier test's -- for
+       thirty seconds, which is what keeps 17's fix: the tree can still
+       follow a runner's path, and a runner still stops on ground crossed
+       that recently. Measured on the PR. */
+var SIM_V = 18;   /* The plate a seed and tape produce is different, which is
                      what this byte is the contract for. Measured across three
                      dishes and three seeds, every case is still won and not one
                      mark or score moves.
