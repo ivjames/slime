@@ -3185,7 +3185,7 @@ function inoculate(e) {
   occ.fill(0);
   var seen = new Uint8Array(GW * GH);
   var q = new Int32Array(GW * GH);
-  var qh = 0, qt = 0, want = Math.min(GW * GH, (n * INOC_OVER) | 0);
+  var qh = 0, qt = 0, want = Math.min(GW * GH, (Math.ceil(n / INOC_DENSITY) * INOC_OVER) | 0);
   var s = (e.inoc.y | 0) * GW + (e.inoc.x | 0);
   q[qt++] = s; seen[s] = 1;
   while (qh < qt && qt < want) {
@@ -3202,8 +3202,8 @@ function inoculate(e) {
   var icx = e.inoc.x, icy = e.inoc.y;
   var d2 = function (c) { var dx = (c % GW) + 0.5 - icx, dy = ((c / GW) | 0) + 0.5 - icy; return dx * dx + dy * dy; };
   order.sort(function (a, b) { var da = d2(a), db = d2(b); return da < db ? -1 : da > db ? 1 : a - b; });
-  for (var oi = 0; oi < order.length && nAgents < n; oi++) {
-    var ci = order[oi];
+  for (var oi = 0; oi < order.length * INOC_DENSITY && nAgents < n; oi++) {
+    var ci = order[(oi / INOC_DENSITY) | 0];
     var cx = ci % GW, cy = (ci / GW) | 0;
     if (cx < 1 || cy < 1 || cx >= GW - 1 || cy >= GH - 1 || wallM[ci]) continue;
     /* jitter clear of the cell edges so Float32 rounding cannot carry the
@@ -3211,8 +3211,8 @@ function inoculate(e) {
     ax[nAgents] = cx + 0.05 + rnd() * 0.9;
     ay[nAgents] = cy + 0.05 + rnd() * 0.9;
     var si = (ay[nAgents] | 0) * GW + (ax[nAgents] | 0);
-    if (!wallM[si] && !occ[si]) {
-      occ[si] = 1;
+    if (!wallM[si] && occ[si] < INOC_DENSITY) {
+      occ[si]++;
       ah[nAgents] = rnd() * Math.PI * 2;
       atip[nAgents] = 0;
       astv[nAgents] = 0; aoff[nAgents] = 0; aidle[nAgents] = 0; agoal[nAgents] = 0; arun[nAgents] = 0;
@@ -3225,6 +3225,17 @@ function inoculate(e) {
    in an open dish (a diamond of 2n cells holds the disc of n), with room
    for the cells a wall takes away */
 var INOC_OVER = 3;
+/* Agents per cell in the drop. It was one, so a 5,000-nucleus inoculum was
+   a disc some forty cells across from the first step — and the whole rim
+   of that disc was front at once: a few hundred tips left its edge
+   together while the tree was still a few spokes at the centre, and the
+   dish opened on a ring of runners with nothing joining them to where the
+   culture was put down. Stacked, the same biomass starts as a drop a
+   fraction of the width, and spreads: occ is a count, an agent may step
+   out of a shared cell and not into an occupied one, so the stack unpicks
+   from its edge outward and the front forms close to the centre and moves
+   out with the body. */
+var INOC_DENSITY = 6;
 
 /* Place a daughter at (nx, ny) heading nh, if that cell will take one. */
 /* `tip` says whether the daughter is being put at the FRONT or into the body,
@@ -13345,8 +13356,12 @@ var GHOST_ENT = 9;
        floor reads over 9 -- the tree's level and the frontier test's -- for
        two minutes, which is what keeps 17's fix: the tree can still
        follow a runner's path, and a runner still stops on ground crossed
-       that recently. Measured on the PR. */
-var SIM_V = 18;   /* The plate a seed and tape produce is different, which is
+       that recently. Measured on the PR.
+   19: the drop is stacked. INOC_DENSITY 1 -> 6 agents a cell, so the same
+       inoculum starts at about a sixth of the area and spreads, and the
+       first runners leave from near the centre instead of from the rim of
+       a forty-cell disc all at once. Changes every dish's opening. */
+var SIM_V = 19;   /* The plate a seed and tape produce is different, which is
                      what this byte is the contract for. Measured across three
                      dishes and three seeds, every case is still won and not one
                      mark or score moves.
