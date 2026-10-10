@@ -457,15 +457,41 @@ var TIP_LAY  = 3.0;      // trail a tip lays per step, as a multiple of DEPOSIT
 
    This moves every plate on every seed, which is why SIM_V goes up with it
    and why saved best times do not survive it. */
-var STALK_HOLD = 1;      // the stalk does not decay: a runner's thread is permanent
-/* The floor is a fraction of the stalk, not the stalk. At the full value a
-   runner's thread rendered as fat as a followed vein from the moment it was
-   laid, because the trail under it read 36 whether anything had followed or
-   not. At STALK_W the thread is a faint hairline until cytoplasm follows it
-   and lays trail of its own — the vein is what following makes — and a
-   thread nothing followed fades as the faint line it was. Connectivity is
-   unaffected: 36 x 0.3 is still five times CONN_T for a hundred cells. */
-var STALK_W    = 0.3;
+/* And it is no longer 1. A permanent thread fixed the defect above and
+   bought a plate the organism does not make: every hair a runner ever ran
+   stayed on the dish for the rest of the run, at the same faint weight,
+   whether anything ever followed it or not. A runner's thread is laid
+   BRIGHT and then decays, and the branches that follow it are what keep the
+   route — the vein is what following makes, and a thread nothing followed
+   goes.
+
+   So the floor is laid at the stalk's full value (STALK_W, below) and
+   halves every STALK_HALF seconds. What has to hold is the fix itself: the
+   tree follows into cells at BODY_LEVELS[TREE_LV] = 9, and the frontier
+   test stops a runner at TIP_TRAIL = 9, so the thread does both of its jobs
+   for as long as the floor reads over 9 — two half-lives from 36. At 60 s
+   that is two minutes, against the worst gap PR #82 measured of 24.8 s.
+   Then the thread is a hairline and goes, and a runner may cross that
+   ground again: the stopping rule now means "somewhere nothing has been
+   for two minutes".
+
+   Not shorter. 15 s was tried first: the thread did its two jobs for thirty
+   seconds and then let runners back onto the whole lace behind the front,
+   which re-explored it on a loop — at 45 s on EXP-01/efe8ba the plate was
+   lace from edge to edge and the flake masses twice main's. At 60 s the
+   ground the front has crossed stays crossed for most of a dish, and what
+   decays is what the culture has long since stopped using. */
+var STALK_HALF = 60;     // seconds for a bare thread's floor to halve
+var STALK_HOLD = Math.pow(0.5, DT / STALK_HALF);          // per step
+/* The floor as a fraction of the stalk. It was 0.3, so that a thread nothing
+   had followed stayed a faint hairline — and with the thread permanent that
+   was the only way to keep the plate from filling with fat lines. Now that
+   the thread decays, it is the full value: a runner's thread is drawn as
+   bright as the trail it laid, and dims as it goes. That is the picture
+   wanted — the runner's track bright, fading behind it, and the branches
+   that follow it in holding the route. A floor of 36 is also what the
+   followers sense, so a fresh thread is a route they take. */
+var STALK_W    = 1.0;
 
 /* ---- branching ----
    New cytoplasm is not sprinkled near the food any more; it is spent FORKING
@@ -2471,6 +2497,12 @@ var ah = new Float32Array(MAXA);
    dish into the trunk band and the front stops being drawn. Written where it
    is decided, read where it is needed. */
 var atip = new Uint8Array(MAXA);
+/* How many steps in a row this agent has been a tip. Drawn and nothing
+   else: only a runner that has been out for FRESH_RUN steps lights its
+   track (runStep), so the light marks the long filaments rather than
+   every agent that is a tip for a moment at the edge of the lace. Nothing
+   in the simulation reads it. */
+var arun = new Uint16Array(MAXA);
 /* How long this agent has been standing on nothing, in seconds. The one piece
    of per-agent state the adrift rule needs, and it has to be per-agent: the
    question is not whether a cell is thin — plenty of legitimate cells are —
@@ -2915,7 +2947,7 @@ function buildDish(e) {
   fieldDirty = true;
   dirtyFrames = REBUILD_EVERY;
   resetVeinTemporal();
-  trail.fill(0); tmpF.fill(0); stalkF.fill(0); foodF.fill(0);
+  trail.fill(0); tmpF.fill(0); stalkF.fill(0); foodF.fill(0); runN = 0; runQual.clear();
   cueF.fill(0); retF.fill(0); slimeF.fill(0); knotF.fill(0); traceF.fill(0);
   cueBoxNone();
   flowF.fill(0); condF.fill(0); scarF.fill(0);
@@ -2994,7 +3026,7 @@ function applyEvent(e, ev) {
            clock is reabsorbed early or late by up to ADRIFT_TIME on the
            strength of a wall appearing somewhere else in the dish. */
         ax[k] = ax[nAgents]; ay[k] = ay[nAgents]; ah[k] = ah[nAgents];
-        atip[k] = atip[nAgents]; astv[k] = astv[nAgents]; aoff[k] = aoff[nAgents]; aidle[k] = aidle[nAgents]; agoal[k] = agoal[nAgents];
+        atip[k] = atip[nAgents]; astv[k] = astv[nAgents]; aoff[k] = aoff[nAgents]; aidle[k] = aidle[nAgents]; agoal[k] = agoal[nAgents]; arun[k] = arun[nAgents]; arx[k] = arx[nAgents]; ary[k] = ary[nAgents]; arid[k] = arid[nAgents];
         continue;
       }
       k++;
@@ -3183,7 +3215,7 @@ function inoculate(e) {
       occ[si] = 1;
       ah[nAgents] = rnd() * Math.PI * 2;
       atip[nAgents] = 0;
-      astv[nAgents] = 0; aoff[nAgents] = 0; aidle[nAgents] = 0; agoal[nAgents] = 0;
+      astv[nAgents] = 0; aoff[nAgents] = 0; aidle[nAgents] = 0; agoal[nAgents] = 0; arun[nAgents] = 0;
       nAgents++;
     }
   }
@@ -3215,7 +3247,7 @@ function emit(nx, ny, nh, tip) {
   if (wallM[ci] || occ[ci]) return false;
   ax[nAgents] = Math.fround(nx); ay[nAgents] = Math.fround(ny); ah[nAgents] = nh;
   atip[nAgents] = tip ? 1 : 0;
-  astv[nAgents] = 0; aoff[nAgents] = 0; aidle[nAgents] = 0; agoal[nAgents] = 0;
+  astv[nAgents] = 0; aoff[nAgents] = 0; aidle[nAgents] = 0; agoal[nAgents] = 0; arun[nAgents] = 0;
   occ[ci]++;
   nAgents++;
   return true;
@@ -3349,7 +3381,7 @@ function drawHome(k, from) {
     occ[ci]++;
     ax[k] = Math.fround(nx); ay[k] = Math.fround(ny);
     ah[k] = rnd() * Math.PI * 2;
-    atip[k] = 0; astv[k] = 0; aoff[k] = 0; aidle[k] = 0; agoal[k] = 0;
+    atip[k] = 0; astv[k] = 0; aoff[k] = 0; aidle[k] = 0; agoal[k] = 0; arun[k] = 0;
     return true;
   }
   return false;
@@ -3573,7 +3605,7 @@ function drawFront(k) {
       occ[ci]++;
       ax[k] = Math.fround(nx); ay[k] = Math.fround(ny);
       ah[k] = ah[c];           /* arrives heading the way the front is going */
-      atip[k] = 0; astv[k] = 0; aoff[k] = 0; aidle[k] = 0; agoal[k] = 0;
+      atip[k] = 0; astv[k] = 0; aoff[k] = 0; aidle[k] = 0; agoal[k] = 0; arun[k] = 0;
       return true;
     }
   }
@@ -3603,7 +3635,7 @@ function killWeakest() {
   if (occ[ci]) occ[ci]--;          /* every removal path decrements */
   nAgents--;
   ax[k] = ax[nAgents]; ay[k] = ay[nAgents]; ah[k] = ah[nAgents];
-  atip[k] = atip[nAgents]; astv[k] = astv[nAgents]; aoff[k] = aoff[nAgents]; aidle[k] = aidle[nAgents]; agoal[k] = agoal[nAgents];
+  atip[k] = atip[nAgents]; astv[k] = astv[nAgents]; aoff[k] = aoff[nAgents]; aidle[k] = aidle[nAgents]; agoal[k] = agoal[nAgents]; arun[k] = arun[nAgents]; arx[k] = arx[nAgents]; ary[k] = ary[nAgents]; arid[k] = arid[nAgents];
 }
 
 /* The idlest agent, by the same reading killWeakest uses, without the kill:
@@ -3688,7 +3720,7 @@ function drawTube(k) {
   occ[best]++;
   ax[k] = Math.fround((best % GW) + 0.5); ay[k] = Math.fround(((best / GW) | 0) + 0.5);
   ah[k] = rnd() * Math.PI * 2;
-  atip[k] = 0; astv[k] = 0; aoff[k] = 0; aidle[k] = 0; agoal[k] = 0;
+  atip[k] = 0; astv[k] = 0; aoff[k] = 0; aidle[k] = 0; agoal[k] = 0; arun[k] = 0;
   return true;
 }
 
@@ -4443,6 +4475,13 @@ function step() {
     var feeding = fi >= 0 && !S.nodeDone[fi];
     if (feeding) tip = false;
     atip[k] = tip ? 1 : 0;
+    if (!tip) arun[k] = 0;
+    else {
+      if (arun[k] < 65535) arun[k]++;
+      /* the run's track: started on the step it qualifies, whatever that
+         step then deposits */
+      runStep(k);
+    }
     /* Settling reads further ahead. In the Jones model the sensor offset sets
        the scale of the network a population of agents settles into — a longer
        reach, a coarser net — and that, not a faster decay or a cull, is what
@@ -4703,7 +4742,9 @@ function step() {
     if (dep > 0) {
       var tv = trail[cell];
       if (tv < TRAIL_MAX) trail[cell] = tv + dep > TRAIL_MAX ? TRAIL_MAX : tv + dep;
-      if (tip) { var sk0 = stalkF[cell] + dep; stalkF[cell] = sk0 > TRAIL_MAX ? TRAIL_MAX : sk0; }
+      if (tip) {
+        var sk0 = stalkF[cell] + dep; stalkF[cell] = sk0 > TRAIL_MAX ? TRAIL_MAX : sk0;
+      }
       /* The same number is the flux. What a cell's traffic delivers IS its
          deposit — that is what the constant is defined as — so the flow
          accumulator is one add here rather than a second measurement of the
@@ -4769,7 +4810,7 @@ function step() {
       if (occ[cell]) occ[cell]--;
       nAgents--;
       ax[k] = ax[nAgents]; ay[k] = ay[nAgents]; ah[k] = ah[nAgents];
-      atip[k] = atip[nAgents]; astv[k] = astv[nAgents]; aoff[k] = aoff[nAgents]; aidle[k] = aidle[nAgents]; agoal[k] = agoal[nAgents];
+      atip[k] = atip[nAgents]; astv[k] = astv[nAgents]; aoff[k] = aoff[nAgents]; aidle[k] = aidle[nAgents]; agoal[k] = agoal[nAgents]; arun[k] = arun[nAgents]; arx[k] = arx[nAgents]; ary[k] = ary[nAgents]; arid[k] = arid[nAgents];
       continue;
     }
 
@@ -4802,7 +4843,7 @@ function step() {
         if (occ[cell]) occ[cell]--;
         nAgents--;
         ax[k] = ax[nAgents]; ay[k] = ay[nAgents]; ah[k] = ah[nAgents];
-        atip[k] = atip[nAgents]; astv[k] = astv[nAgents]; aoff[k] = aoff[nAgents]; aidle[k] = aidle[nAgents]; agoal[k] = agoal[nAgents];
+        atip[k] = atip[nAgents]; astv[k] = astv[nAgents]; aoff[k] = aoff[nAgents]; aidle[k] = aidle[nAgents]; agoal[k] = agoal[nAgents]; arun[k] = arun[nAgents]; arx[k] = arx[nAgents]; ary[k] = ary[nAgents]; arid[k] = arid[nAgents];
         continue;
       }
     }
@@ -5302,12 +5343,18 @@ function paintOverlay() {
   var d = ovlData, any = false, mat = SLIME_W > 0;
   for (var i = 0, p = 0; i < NCELL; i++, p += 4) {
     var r = 0, g = 0, b = 0;
+    /* The mat is NOT thinned by trail here, as the sheet painter thins it.
+       There the body is painted from the same field, so what the trail took
+       off the mat the tissue put back. Here the body is the vein lines,
+       which cover only their own stroke, and a runner's trail spreads well
+       past it while sitting under any visible tissue: thinning by trail cut
+       a dark halo out of the mat around every runner, so the front read as
+       a shadow on the old ground instead of as the bright edge it is. The
+       lines are drawn over this layer, so where there is tissue it is
+       covered anyway. */
     if (mat) {
       var sv = slimeF[i];
-      if (sv > 0.05 && !wallM[i]) {
-        var thin = 1 - (trail[i] > 8 ? 1 : trail[i] * 0.125);
-        if (thin > 0) { r += sv * MAT_ADD[0] * thin; g += sv * MAT_ADD[1] * thin; b += sv * MAT_ADD[2] * thin; }
-      }
+      if (sv > 0.05 && !wallM[i]) { r += sv * MAT_ADD[0]; g += sv * MAT_ADD[1]; b += sv * MAT_ADD[2]; }
     }
     var c = cueF[i];
     if (c > 0.02) { r += c * CUE_ADD[0]; g += c * CUE_ADD[1]; b += c * CUE_ADD[2]; }
@@ -11164,7 +11211,7 @@ function buildVeins() {
 function buildWhiskers() {
   var wp = new Path2D(), any = false;
   for (var k = 0; k < nAgents; k++) {
-    if (!atip[k]) continue;
+    if (!atip[k] || runLive(k)) continue;   /* a runner's whisker is the end of its chain: strokeFronts */
     var ax0 = ax[k], ay0 = ay[k], h = ah[k];
     /* A tip standing inside a piece that is drawn as its outline — the
        drop, before it has a vein — has no front to show: its whisker was
@@ -11309,6 +11356,178 @@ function strokeVeins(tc, sx, sy, mono) {
     if (veinPath[b][2]) ctx.stroke(veinPath[b][2]);
   }
   ctx.restore();
+}
+
+/* ---- the runners' lit tracks ----
+   A runner's thread is laid bright and decays (STALK_W, STALK_HOLD) — and
+   what the eye should see of that is ONE line per filament: the branch the
+   runner left from, the runner's own path, lit and dimming behind it, and
+   the whisker at its end, joined where they meet rather than three layers
+   that happen to overlap.
+
+   So a runner's path is kept as its own polyline. When a tip has been out
+   FRESH_RUN steps it is given a run id and drops a point every RUN_STEP
+   cells into a ring, tagged with that id. Every frame strokeFronts groups
+   the ring by id and draws each run as one chain:
+
+     - from the BRANCH: points the growth tree has already grown over
+       (tcov) are dropped from the old end, because the branch is drawn
+       there, and the chain starts at the tree node nearest its first
+       remaining point (treeNearest) — the vertex the branch is drawn
+       through, so the two meet on the same coordinate. Tree nodes never
+       move, so the cached branch canvas and this per-frame chain agree;
+     - along the TRACK, in RUN_BANDS age bands, each a little dimmer, so
+       the line fades from its newest end toward the branch;
+     - to the WHISKER: if the runner is still a tip, the chain ends at its
+       live position, and the last stretch is drawn as the whisker in the
+       whisker's own ink. Those runners are left out of buildWhiskers, so
+       the front is drawn once.
+
+   An earlier version of this was removed (see "what used to be here: the
+   explorers' trails"): a record of every tip step, never erased, which ran
+   ahead of the drawn network as a pale scribble. This one fades, starts
+   where the branch ends, and is laid only by runners that have been out a
+   while. Drawn and nothing else: no pass reads it, no RNG, not hashed. */
+var FRESH_HALF = 1.5;   // seconds for a track to halve in brightness
+/* Steps a tip must have run before its track is lit: half a second. Most
+   tips are tips for a moment — on EXP-06/abc123 the median has run 8 to 20
+   steps and almost none reach 90 — forming and lapsing at the edge of the
+   lace, and lighting every one of them lit the lace all over rather than
+   the filaments that are going somewhere. Thirty is about the longest third
+   of them. */
+var FRESH_RUN  = 30;
+var RUN_STEP   = TREE_STEP;  // cells between a track's points: the branches' own spacing, so the two smooth alike
+var RUN_LIFE   = FRESH_HALF * 4.5;   // seconds; under 5% by then
+var RUN_BANDS  = 6;
+var RUN_W      = 0.55;  // cells, the newest band; older bands narrow with it
+var RUN_ATTACH = 4;     // cells: how far a track's start may be from the node it joins
+var RUN_MAX    = 8192;
+/* LAMP: the warm cream a lit crest walks to, so a fresh track reads as the
+   brightest thing on the thread rather than as another tone of it */
+var RUN_STYLE  = rgba(LAMP, '1');
+var runX = new Float32Array(RUN_MAX), runY = new Float32Array(RUN_MAX);
+var runT = new Float32Array(RUN_MAX), runId = new Int32Array(RUN_MAX);
+var runHead = 0, runN = 0, runSerial = 0;
+/* runs whose runner has been out FRESH_RUN steps: only these are drawn */
+var runQual = new Set();
+/* per agent: its run's id, and where its track last put a point */
+var arid = new Int32Array(MAXA);
+var arx = new Float32Array(MAXA), ary = new Float32Array(MAXA);
+
+/* called from the tip update every step a tip is a tip, whatever it then
+   deposits. A run is recorded from its FIRST step as a tip, so its track
+   begins where the runner left the network — which is where the chain
+   joins the branch — and is drawn once it has run FRESH_RUN steps.
+   Recorded from the step it qualified instead, the track began half a
+   second out, beside the branch rather than at its end, and the join to
+   the nearest node drew as a hook at right angles to both. */
+function runStep(k) {
+  var n = arun[k];
+  if (n === FRESH_RUN) runQual.add(arid[k]);
+  if (n === 1) arid[k] = ++runSerial;
+  else {
+    var dx = ax[k] - arx[k], dy = ay[k] - ary[k];
+    if (dx * dx + dy * dy < RUN_STEP * RUN_STEP) return;
+  }
+  runX[runHead] = ax[k]; runY[runHead] = ay[k];
+  runT[runHead] = S.simT; runId[runHead] = arid[k];
+  runHead = (runHead + 1) % RUN_MAX;
+  if (runN < RUN_MAX) runN++;
+  arx[k] = ax[k]; ary[k] = ay[k];
+}
+
+/* is agent k a runner whose front strokeFronts draws? */
+function runLive(k) { return atip[k] && arun[k] >= FRESH_RUN; }
+
+function runBand(age) {
+  var b = (age / RUN_LIFE * RUN_BANDS) | 0;
+  return b < 0 ? 0 : b >= RUN_BANDS ? RUN_BANDS - 1 : b;
+}
+
+function strokeFronts(tc, sx, sy) {
+  if (!runN) return;
+  var now = S.simT, j, i, live = 0;
+  /* the ring, newest first, grouped by run */
+  var runs = new Map();
+  for (j = 0; j < runN; j++) {
+    i = (runHead - 1 - j + RUN_MAX) % RUN_MAX;
+    var age = now - runT[i];
+    if (age >= RUN_LIFE) break;      /* the ring is in time order */
+    live++;
+    if (age < 0 || !runQual.has(runId[i])) continue;
+    var l = runs.get(runId[i]);
+    if (!l) runs.set(runId[i], l = []);
+    l.push(i);
+  }
+  runN = live;                       /* what has aged out is gone */
+  /* which runs still have their runner out at the front */
+  var head = new Map();
+  for (var k = 0; k < nAgents; k++) if (runLive(k)) head.set(arid[k], k);
+  /* and the qualified set kept to what can still be drawn */
+  runQual.forEach(function (id) { if (!runs.has(id) && !head.has(id)) runQual.delete(id); });
+  if (!runs.size) return;
+
+  var bands = [], whisk = null, b;
+  for (b = 0; b < RUN_BANDS; b++) bands.push(null);
+  function seg(band, x0, y0, x1, y1) {
+    var p = bands[band] || (bands[band] = new Path2D());
+    p.moveTo(x0, y0); p.lineTo(x1, y1);
+  }
+  var cx = [], cy = [], cb = [];
+  runs.forEach(function (l, id) {
+    /* the chain's vertices, oldest first, less what the branch already
+       covers: the branch node it leaves from, the track, the live tip */
+    cx.length = cy.length = cb.length = 0;
+    var a = l.length - 1;
+    while (a > 0 && tcov[(runY[l[a]] | 0) * GW + (runX[l[a]] | 0)]) a--;
+    var b0 = runBand(now - runT[l[a]]);
+    var nd = treeNearest(runX[l[a]] | 0, runY[l[a]] | 0);
+    if (nd >= 0) {
+      var ndx = tx[nd] - runX[l[a]], ndy = ty[nd] - runY[l[a]];
+      if (ndx * ndx + ndy * ndy <= RUN_ATTACH * RUN_ATTACH) { cx.push(tx[nd]); cy.push(ty[nd]); cb.push(b0); }
+    }
+    for (var q = a; q >= 0; q--) { cx.push(runX[l[q]]); cy.push(runY[l[q]]); cb.push(runBand(now - runT[l[q]])); }
+    var hk = head.get(id), n = cx.length;
+    /* Smoothed the way paintTree smooths a branch: each vertex is a
+       control point and the line runs midpoint to midpoint through it, so
+       a runner that turned sharply between points draws a bend, not a
+       kink. The ends are the vertices themselves, so the chain still
+       leaves from the node and still reaches the last point. */
+    if (n >= 2) {
+      seg(cb[0], cx[0], cy[0], (cx[0] + cx[1]) * 0.5, (cy[0] + cy[1]) * 0.5);
+      for (var v = 1; v < n - 1; v++) {
+        var p2 = bands[cb[v]] || (bands[cb[v]] = new Path2D());
+        p2.moveTo((cx[v - 1] + cx[v]) * 0.5, (cy[v - 1] + cy[v]) * 0.5);
+        p2.quadraticCurveTo(cx[v], cy[v], (cx[v] + cx[v + 1]) * 0.5, (cy[v] + cy[v + 1]) * 0.5);
+      }
+      seg(cb[n - 1], (cx[n - 2] + cx[n - 1]) * 0.5, (cy[n - 2] + cy[n - 1]) * 0.5, cx[n - 1], cy[n - 1]);
+    }
+    /* to the whisker: from the last point to where the runner is now */
+    if (hk !== undefined && n) {
+      if (!whisk) whisk = new Path2D();
+      whisk.moveTo(cx[n - 1], cy[n - 1]); whisk.lineTo(ax[hk], ay[hk]);
+    }
+  });
+
+  tc.save();
+  tc.setTransform(sx, 0, 0, sy, 0, 0);
+  tc.lineCap = 'round';
+  tc.lineJoin = 'round';
+  tc.strokeStyle = RUN_STYLE;
+  for (b = RUN_BANDS - 1; b >= 0; b--) {
+    if (!bands[b]) continue;
+    var a2 = Math.pow(0.5, (b + 0.5) / RUN_BANDS * RUN_LIFE / FRESH_HALF);
+    tc.globalAlpha = a2;
+    tc.lineWidth = RUN_W * (0.5 + 0.5 * a2);
+    tc.stroke(bands[b]);
+  }
+  tc.globalAlpha = 1;
+  if (whisk) {
+    tc.lineWidth = TIP_W;
+    tc.strokeStyle = TIP_STYLE;
+    tc.stroke(whisk);
+  }
+  tc.restore();
 }
 
 /* The whiskers are the moving front and are drawn straight onto the frame,
@@ -11663,6 +11882,7 @@ function render() {
      laid once per frame onto a frame that is cleared, so nothing
      accumulates */
   if (BODY && VEIN_GRAPH && vgc) ctx.drawImage(vgc, 0, 0);
+  strokeFronts(ctx, sx, sy);
   strokeWhiskers(ctx, sx, sy);
   ctx.save();
   ctx.setTransform(sx, 0, 0, sy, 0, 0);
@@ -13108,8 +13328,15 @@ var GHOST_ENT = 9;
        Three finish later: EXP-12 +8%, EXP-16 +3%, and EXP-15 (hold six
        at once) +18%, with a tail of +36% on one seed in six, for the
        reason at the frontier test. Six are refine- or clock-bound and
-       cannot move. */
-var SIM_V = 17;   /* The plate a seed and tape produce is different, which is
+       cannot move.
+   18: the stalk decays again, from a brighter floor. STALK_W 0.3 -> 1 and
+       STALK_HOLD 1 -> a 60 s half-life, so a runner's thread is laid bright
+       and fades, and the route stays where branches follow it in. The
+       floor reads over 9 -- the tree's level and the frontier test's -- for
+       two minutes, which is what keeps 17's fix: the tree can still
+       follow a runner's path, and a runner still stops on ground crossed
+       that recently. Measured on the PR. */
+var SIM_V = 18;   /* The plate a seed and tape produce is different, which is
                      what this byte is the contract for. Measured across three
                      dishes and three seeds, every case is still won and not one
                      mark or score moves.
@@ -13400,6 +13627,13 @@ function exitReplay() {
     if (FINAL_STATE.condF) condF.set(FINAL_STATE.condF);
     if (FINAL_STATE.scarF) scarF.set(FINAL_STATE.scarF);
     if (FINAL_STATE.stalkF) stalkF.set(FINAL_STATE.stalkF);
+    if (FINAL_STATE.run) {
+      runX.set(FINAL_STATE.run.x); runY.set(FINAL_STATE.run.y);
+      runT.set(FINAL_STATE.run.t); runId.set(FINAL_STATE.run.id);
+      runHead = FINAL_STATE.run.head; runN = FINAL_STATE.run.n;
+      runQual = new Set(FINAL_STATE.run.qual);
+      arun.set(FINAL_STATE.run.arun); arid.set(FINAL_STATE.run.arid);
+    }
     if (FINAL_STATE.fedF) fedF.set(FINAL_STATE.fedF);
     if (FINAL_STATE.padF) padF.set(FINAL_STATE.padF);
     if (FINAL_STATE.bodyF) bodyF.set(FINAL_STATE.bodyF);
@@ -14136,6 +14370,13 @@ function showResult(won) {
        replay's threads, and the mass drawn on the verdict screen would be
        the wrong run's. Found by review of #83. */
     stalkF: new Float32Array(stalkF),
+    /* and the runners' lit tracks: drawn on the verdict screen, and aged
+       against the restored clock, so a replay left early must not leave its
+       own tracks lit over the finished dish. Found by review of #85. */
+    run: { x: new Float32Array(runX), y: new Float32Array(runY),
+           t: new Float32Array(runT), id: new Int32Array(runId),
+           head: runHead, n: runN, qual: Array.from(runQual),
+           arun: arun.slice(0, nAgents), arid: arid.slice(0, nAgents) },
     /* and the return signal with its shade, for the same reason as the
        conductivity: the harness reads them, and the finished plate's should
        be the finished plate's */
@@ -14624,6 +14865,9 @@ function init() {
     agents: function () { return nAgents; },
     /* how many of them are at the front — the population forkTip draws from */
     tips: function () { var c = 0; for (var k = 0; k < nAgents; k++) if (atip[k]) c++; return c; },
+    /* ...and how long each of them has been one, in steps: what FRESH_RUN
+       is set against */
+    tipRuns: function () { var q = []; for (var k = 0; k < nAgents; k++) if (atip[k]) q.push(arun[k]); return q; },
     /* the bridge layer as drawn: 1 where this rebuild routed a corridor.
        Differenced across rebuilds it answers whether the flashes of large
        regions are bridges — corridors qualify whole per rebuild, so they are
