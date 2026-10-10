@@ -10162,6 +10162,9 @@ var veinFresh = false;                // buildVeins ran since the last composite
 /* the accumulator and the ink hold nothing, so neither is folded or
    composited — see the empty-veil branch in render() */
 var veilBlank = false, inkBlank = false;
+/* the strongest share of a drawn stroke still in the accumulator: 1 after
+   a fold that drew, times veilDn for each fold since that drew nothing */
+var veilResid = 0;
 
 /* would strokeVeins' colour pass put anything into the veil? */
 function veilEmpty() {
@@ -11970,7 +11973,8 @@ function render() {
      pixels is 3.2 grid units, which is wider than the gaps between an
      objective's three bands and would close them into one blob */
   markCase = Math.min(MARK_CASE_PX / sx, MARK_CASE_MAX);
-  if (veinFresh && veilEmpty()) {
+  var vEmpty = veinFresh && veilEmpty();
+  if (vEmpty && (veilBlank || veilResid <= 0.004)) {
     /* Nothing for the veil this rebuild — which, with the tree drawing the
        branches into vgc, is every rebuild: the colour pass's bodies, tubes,
        outline, lobes and bands are all off or null under BODY + VEIN_TREE.
@@ -11979,7 +11983,14 @@ function render() {
        frame — about 11 ms of a 37 ms frame headless, for no pixels. So the
        graph is painted as strokeVeins would have, the accumulator is
        cleared once, and both the fold and its composite stand down until
-       the veil has something to hold again. */
+       the veil has something to hold again.
+
+       Only once what the accumulator already holds has faded, though
+       (veilResid): a configuration whose veil goes from drawn to empty
+       keeps folding until its last strokes have decayed by veilDn, as the
+       accumulator promises, rather than losing them in one rebuild. Under
+       the tree the veil is empty from the start and this is immediate.
+       Found by review of #88. */
     if (BODY) { if (VEIN_TREE) paintTree(); else if (VEIN_GRAPH) paintVeinGraph(); }
     if (!veilBlank) {
       vactx.setTransform(1, 0, 0, 1, 0, 0);
@@ -11991,6 +12002,8 @@ function render() {
   }
   if (veinFresh) {
     veilBlank = false;
+    /* how much of the last drawn veil survives this fold */
+    veilResid = vEmpty ? veilResid * veilDn : 1;
     /* Fresh wins wherever fresh drew; the decayed old survives only where it
        did not. Stated that way rather than as a per-pixel max because canvas
        has no max that includes alpha — 'lighten' blends colour but composes
