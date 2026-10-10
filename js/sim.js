@@ -5302,12 +5302,18 @@ function paintOverlay() {
   var d = ovlData, any = false, mat = SLIME_W > 0;
   for (var i = 0, p = 0; i < NCELL; i++, p += 4) {
     var r = 0, g = 0, b = 0;
+    /* The mat is NOT thinned by trail here, as the sheet painter thins it.
+       There the body is painted from the same field, so what the trail took
+       off the mat the tissue put back. Here the body is the vein lines,
+       which cover only their own stroke, and a runner's trail spreads well
+       past it while sitting under any visible tissue: thinning by trail cut
+       a dark halo out of the mat around every runner, so the front read as
+       a shadow on the old ground instead of as the bright edge it is. The
+       lines are drawn over this layer, so where there is tissue it is
+       covered anyway. */
     if (mat) {
       var sv = slimeF[i];
-      if (sv > 0.05 && !wallM[i]) {
-        var thin = 1 - (trail[i] > 8 ? 1 : trail[i] * 0.125);
-        if (thin > 0) { r += sv * MAT_ADD[0] * thin; g += sv * MAT_ADD[1] * thin; b += sv * MAT_ADD[2] * thin; }
-      }
+      if (sv > 0.05 && !wallM[i]) { r += sv * MAT_ADD[0]; g += sv * MAT_ADD[1]; b += sv * MAT_ADD[2]; }
     }
     var c = cueF[i];
     if (c > 0.02) { r += c * CUE_ADD[0]; g += c * CUE_ADD[1]; b += c * CUE_ADD[2]; }
