@@ -9179,7 +9179,10 @@ function paintTree() {
   var any = treeFull;
   for (i = 1; i < tN; i++) {
     var sg = HIDE_LINES ? -1 : treeSig(i, keys);
-    if (sg === tsig[i] && !treeFull) continue;
+    /* the signature records the fusion's live/ghost kind, not its target:
+       a join severed and re-made elsewhere between two paints reads the
+       same, so the target is compared too. Found by review of #88. */
+    if (sg === tsig[i] && tjoin[i] === tjDrawn[i] && !treeFull) continue;
     if (!treeFull) {
       /* where it was, and where it is: the same box but for the fusion line */
       if (tsig[i] !== -2) { treeBox(i, tjDrawn[i], sx, sy); tgcMark(); }
