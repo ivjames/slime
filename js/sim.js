@@ -469,12 +469,19 @@ var TIP_LAY  = 3.0;      // trail a tip lays per step, as a multiple of DEPOSIT
    halves every STALK_HALF seconds. What has to hold is the fix itself: the
    tree follows into cells at BODY_LEVELS[TREE_LV] = 9, and the frontier
    test stops a runner at TIP_TRAIL = 9, so the thread does both of its jobs
-   for as long as the floor reads over 9 — two half-lives from 36. At 15 s
-   that is thirty seconds, against the worst gap PR #82 measured of 24.8.
+   for as long as the floor reads over 9 — two half-lives from 36. At 60 s
+   that is two minutes, against the worst gap PR #82 measured of 24.8 s.
    Then the thread is a hairline and goes, and a runner may cross that
    ground again: the stopping rule now means "somewhere nothing has been
-   for half a minute". */
-var STALK_HALF = 15;     // seconds for a bare thread's floor to halve
+   for two minutes".
+
+   Not shorter. 15 s was tried first: the thread did its two jobs for thirty
+   seconds and then let runners back onto the whole lace behind the front,
+   which re-explored it on a loop — at 45 s on EXP-01/efe8ba the plate was
+   lace from edge to edge and the flake masses twice main's. At 60 s the
+   ground the front has crossed stays crossed for most of a dish, and what
+   decays is what the culture has long since stopped using. */
+var STALK_HALF = 60;     // seconds for a bare thread's floor to halve
 var STALK_HOLD = Math.pow(0.5, DT / STALK_HALF);          // per step
 /* The floor as a fraction of the stalk. It was 0.3, so that a thread nothing
    had followed stayed a faint hairline — and with the thread permanent that
@@ -2495,6 +2502,12 @@ var ah = new Float32Array(MAXA);
    dish into the trunk band and the front stops being drawn. Written where it
    is decided, read where it is needed. */
 var atip = new Uint8Array(MAXA);
+/* How many steps in a row this agent has been a tip. Drawn and nothing
+   else: only a runner that has been out for FRESH_RUN steps lights its
+   track (freshLight), so the glow marks the long filaments rather than
+   every agent that is a tip for a moment at the edge of the lace. Nothing
+   in the simulation reads it. */
+var arun = new Uint16Array(MAXA);
 /* How long this agent has been standing on nothing, in seconds. The one piece
    of per-agent state the adrift rule needs, and it has to be per-agent: the
    question is not whether a cell is thin — plenty of legitimate cells are —
@@ -2571,6 +2584,13 @@ var FRESH_HALF = 1.5;
 var FRESH_HOLD = Math.pow(0.5, DT / FRESH_HALF);
 var FRESH_EPS  = 0.01;
 var FRESH_K    = 0.55;
+/* Steps a tip must have run before its track is lit: half a second. Most
+   tips are tips for a moment — on EXP-06/abc123 the median has run 8 to 20
+   steps and almost none reach 90 — forming and lapsing at the edge of the
+   lace, and lighting every one of them drew a beaded haze over the lace
+   rather than a lit end on the filaments that are going somewhere. Thirty
+   is about the longest third of them. */
+var FRESH_RUN  = 30;
 /* Lit as a soft spot three cells across rather than one cell: the layer is
    the grid's own resolution scaled up to the canvas, and a track one cell
    wide drew as a staircase of lit squares. Max, not add, so a runner sitting
@@ -3042,7 +3062,7 @@ function applyEvent(e, ev) {
            clock is reabsorbed early or late by up to ADRIFT_TIME on the
            strength of a wall appearing somewhere else in the dish. */
         ax[k] = ax[nAgents]; ay[k] = ay[nAgents]; ah[k] = ah[nAgents];
-        atip[k] = atip[nAgents]; astv[k] = astv[nAgents]; aoff[k] = aoff[nAgents]; aidle[k] = aidle[nAgents]; agoal[k] = agoal[nAgents];
+        atip[k] = atip[nAgents]; astv[k] = astv[nAgents]; aoff[k] = aoff[nAgents]; aidle[k] = aidle[nAgents]; agoal[k] = agoal[nAgents]; arun[k] = arun[nAgents];
         continue;
       }
       k++;
@@ -3231,7 +3251,7 @@ function inoculate(e) {
       occ[si] = 1;
       ah[nAgents] = rnd() * Math.PI * 2;
       atip[nAgents] = 0;
-      astv[nAgents] = 0; aoff[nAgents] = 0; aidle[nAgents] = 0; agoal[nAgents] = 0;
+      astv[nAgents] = 0; aoff[nAgents] = 0; aidle[nAgents] = 0; agoal[nAgents] = 0; arun[nAgents] = 0;
       nAgents++;
     }
   }
@@ -3263,7 +3283,7 @@ function emit(nx, ny, nh, tip) {
   if (wallM[ci] || occ[ci]) return false;
   ax[nAgents] = Math.fround(nx); ay[nAgents] = Math.fround(ny); ah[nAgents] = nh;
   atip[nAgents] = tip ? 1 : 0;
-  astv[nAgents] = 0; aoff[nAgents] = 0; aidle[nAgents] = 0; agoal[nAgents] = 0;
+  astv[nAgents] = 0; aoff[nAgents] = 0; aidle[nAgents] = 0; agoal[nAgents] = 0; arun[nAgents] = 0;
   occ[ci]++;
   nAgents++;
   return true;
@@ -3397,7 +3417,7 @@ function drawHome(k, from) {
     occ[ci]++;
     ax[k] = Math.fround(nx); ay[k] = Math.fround(ny);
     ah[k] = rnd() * Math.PI * 2;
-    atip[k] = 0; astv[k] = 0; aoff[k] = 0; aidle[k] = 0; agoal[k] = 0;
+    atip[k] = 0; astv[k] = 0; aoff[k] = 0; aidle[k] = 0; agoal[k] = 0; arun[k] = 0;
     return true;
   }
   return false;
@@ -3621,7 +3641,7 @@ function drawFront(k) {
       occ[ci]++;
       ax[k] = Math.fround(nx); ay[k] = Math.fround(ny);
       ah[k] = ah[c];           /* arrives heading the way the front is going */
-      atip[k] = 0; astv[k] = 0; aoff[k] = 0; aidle[k] = 0; agoal[k] = 0;
+      atip[k] = 0; astv[k] = 0; aoff[k] = 0; aidle[k] = 0; agoal[k] = 0; arun[k] = 0;
       return true;
     }
   }
@@ -3651,7 +3671,7 @@ function killWeakest() {
   if (occ[ci]) occ[ci]--;          /* every removal path decrements */
   nAgents--;
   ax[k] = ax[nAgents]; ay[k] = ay[nAgents]; ah[k] = ah[nAgents];
-  atip[k] = atip[nAgents]; astv[k] = astv[nAgents]; aoff[k] = aoff[nAgents]; aidle[k] = aidle[nAgents]; agoal[k] = agoal[nAgents];
+  atip[k] = atip[nAgents]; astv[k] = astv[nAgents]; aoff[k] = aoff[nAgents]; aidle[k] = aidle[nAgents]; agoal[k] = agoal[nAgents]; arun[k] = arun[nAgents];
 }
 
 /* The idlest agent, by the same reading killWeakest uses, without the kill:
@@ -3736,7 +3756,7 @@ function drawTube(k) {
   occ[best]++;
   ax[k] = Math.fround((best % GW) + 0.5); ay[k] = Math.fround(((best / GW) | 0) + 0.5);
   ah[k] = rnd() * Math.PI * 2;
-  atip[k] = 0; astv[k] = 0; aoff[k] = 0; aidle[k] = 0; agoal[k] = 0;
+  atip[k] = 0; astv[k] = 0; aoff[k] = 0; aidle[k] = 0; agoal[k] = 0; arun[k] = 0;
   return true;
 }
 
@@ -4493,6 +4513,7 @@ function step() {
     var feeding = fi >= 0 && !S.nodeDone[fi];
     if (feeding) tip = false;
     atip[k] = tip ? 1 : 0;
+    if (!tip) arun[k] = 0; else if (arun[k] < 65535) arun[k]++;
     /* Settling reads further ahead. In the Jones model the sensor offset sets
        the scale of the network a population of agents settles into — a longer
        reach, a coarser net — and that, not a faster decay or a cull, is what
@@ -4755,7 +4776,7 @@ function step() {
       if (tv < TRAIL_MAX) trail[cell] = tv + dep > TRAIL_MAX ? TRAIL_MAX : tv + dep;
       if (tip) {
         var sk0 = stalkF[cell] + dep; stalkF[cell] = sk0 > TRAIL_MAX ? TRAIL_MAX : sk0;
-        freshLight(cell); ovlLive = true;
+        if (arun[k] >= FRESH_RUN) { freshLight(cell); ovlLive = true; }
       }
       /* The same number is the flux. What a cell's traffic delivers IS its
          deposit — that is what the constant is defined as — so the flow
@@ -4822,7 +4843,7 @@ function step() {
       if (occ[cell]) occ[cell]--;
       nAgents--;
       ax[k] = ax[nAgents]; ay[k] = ay[nAgents]; ah[k] = ah[nAgents];
-      atip[k] = atip[nAgents]; astv[k] = astv[nAgents]; aoff[k] = aoff[nAgents]; aidle[k] = aidle[nAgents]; agoal[k] = agoal[nAgents];
+      atip[k] = atip[nAgents]; astv[k] = astv[nAgents]; aoff[k] = aoff[nAgents]; aidle[k] = aidle[nAgents]; agoal[k] = agoal[nAgents]; arun[k] = arun[nAgents];
       continue;
     }
 
@@ -4855,7 +4876,7 @@ function step() {
         if (occ[cell]) occ[cell]--;
         nAgents--;
         ax[k] = ax[nAgents]; ay[k] = ay[nAgents]; ah[k] = ah[nAgents];
-        atip[k] = atip[nAgents]; astv[k] = astv[nAgents]; aoff[k] = aoff[nAgents]; aidle[k] = aidle[nAgents]; agoal[k] = agoal[nAgents];
+        atip[k] = atip[nAgents]; astv[k] = astv[nAgents]; aoff[k] = aoff[nAgents]; aidle[k] = aidle[nAgents]; agoal[k] = agoal[nAgents]; arun[k] = arun[nAgents];
         continue;
       }
     }
@@ -13172,10 +13193,10 @@ var GHOST_ENT = 9;
        reason at the frontier test. Six are refine- or clock-bound and
        cannot move.
    18: the stalk decays again, from a brighter floor. STALK_W 0.3 -> 1 and
-       STALK_HOLD 1 -> a 15 s half-life, so a runner's thread is laid bright
+       STALK_HOLD 1 -> a 60 s half-life, so a runner's thread is laid bright
        and fades, and the route stays where branches follow it in. The
        floor reads over 9 -- the tree's level and the frontier test's -- for
-       thirty seconds, which is what keeps 17's fix: the tree can still
+       two minutes, which is what keeps 17's fix: the tree can still
        follow a runner's path, and a runner still stops on ground crossed
        that recently. Measured on the PR. */
 var SIM_V = 18;   /* The plate a seed and tape produce is different, which is
@@ -14698,6 +14719,9 @@ function init() {
     agents: function () { return nAgents; },
     /* how many of them are at the front — the population forkTip draws from */
     tips: function () { var c = 0; for (var k = 0; k < nAgents; k++) if (atip[k]) c++; return c; },
+    /* ...and how long each of them has been one, in steps: what FRESH_RUN
+       is set against */
+    tipRuns: function () { var q = []; for (var k = 0; k < nAgents; k++) if (atip[k]) q.push(arun[k]); return q; },
     /* the bridge layer as drawn: 1 where this rebuild routed a corridor.
        Differenced across rebuilds it answers whether the flashes of large
        regions are bridges — corridors qualify whole per rebuild, so they are
