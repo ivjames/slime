@@ -4475,7 +4475,14 @@ function step() {
     var feeding = fi >= 0 && !S.nodeDone[fi];
     if (feeding) tip = false;
     atip[k] = tip ? 1 : 0;
-    if (!tip) arun[k] = 0; else if (arun[k] < 65535) arun[k]++;
+    if (!tip) arun[k] = 0;
+    else {
+      if (arun[k] < 65535) arun[k]++;
+      /* a track starts where the runner stood when it qualified: held to
+         its position every step until then, so the first segment never
+         reaches back to a stale point — however the threshold step went */
+      if (arun[k] <= FRESH_RUN) { arx[k] = ax[k]; ary[k] = ay[k]; }
+    }
     /* Settling reads further ahead. In the Jones model the sensor offset sets
        the scale of the network a population of agents settles into — a longer
        reach, a coarser net — and that, not a faster decay or a cull, is what
@@ -11397,7 +11404,6 @@ var arx = new Float32Array(MAXA), ary = new Float32Array(MAXA);
 
 function runMark(k) {
   var x = ax[k], y = ay[k];
-  if (arun[k] === FRESH_RUN) { arx[k] = x; ary[k] = y; return; }
   var dx = x - arx[k], dy = y - ary[k];
   if (dx * dx + dy * dy < RUN_STEP * RUN_STEP) return;
   runX0[runHead] = arx[k]; runY0[runHead] = ary[k];
