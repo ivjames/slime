@@ -7991,12 +7991,16 @@ var tgAny = new Uint8Array(TREE_MAX);
 var tPulled = new Int32Array(TREE_MAX), tPulledN = 0;
 /* the last-placed live node in each cell, -1 for none; and the cells
    already spent by a node's kill disc */
+/* how paintTree last drew each node, -2 never, and the fusion target it
+   drew it with — see paintTree */
+var tsig = new Int32Array(TREE_MAX);
+var tjDrawn = new Int32Array(TREE_MAX);
 var tAt = new Int32Array(GW * GH);
 var tcov = new Uint8Array(GW * GH);
 var treeT = 0, treePaintT = -1e9, treeDirty = true;
 
 function treeReset() {
-  tN = 0; treePassN = 0; treeT = S.simT; treePaintT = -1e9; treeDirty = true;
+  tN = 0; treePassN = 0; treeT = S.simT; treePaintT = -1e9; treeDirty = true; treeFull = true;
   tAt.fill(-1); tcov.fill(0);
   if (S.exp) {
     var ix = (S.exp.inoc.x | 0) + 0.5, iy = (S.exp.inoc.y | 0) + 0.5;
@@ -8011,6 +8015,7 @@ function treeAdd(x, y, parent) {
   tw[i] = TREE_W0; tleaf[i] = 1; tkids[i] = 0;
   tstate[i] = 1; tidle[i] = 0; tborn[i] = S.simT;
   tjoin[i] = -1; tcarry[i] = 0;
+  tsig[i] = -2;   /* never drawn: paintTree's first look at it marks its tiles */
   if (parent >= 0) { tkids[parent]++; tidle[parent] = 0; }
   treeCover(i);
   return i;
@@ -9083,42 +9088,135 @@ var HIDE_MASS = false, HIDE_LINES = false;
 
 /* The picture: every node's segment to its parent, batched by quantised
    width, widest first so hairlines land on the trunks they leave.
-   Ghosts under everything, pale. Into vgc, which the composite lays
-   over the veil once a frame. */
+   Ghosts under everything, pale.
+
+   Into two canvases. The puddles go into vgc, whole, every repaint: they
+   follow the tissue and change everywhere at once, and they are cheap
+   (about 3 ms a repaint headless). The branches go into tgc, and only
+   where they changed. A repaint used to re-stroke every segment of the
+   tree — about 46 ms headless at 1806x1118, on roughly a third of all
+   frames — when most of the tree draws exactly as it did last time: a
+   node never moves, and its segment looks different only when its
+   quantised width, its live/ghost state, whether it is a tip, its fusion
+   line or a wall under it changes.
+
+   So each node keeps the signature it was last drawn with (tsig), and a
+   repaint marks dirty the TGC_TILE-pixel tiles under every segment whose
+   signature moved, clears those tiles, and re-strokes, clipped to them,
+   every segment that crosses one — in the same order a whole repaint
+   uses, so the pixels in a repainted tile are the pixels a whole repaint
+   would have made there. Anything that can change the whole picture at
+   once — a reset or restore of the tree, a resize, the lines layer
+   toggled, a palette change — repaints it whole (treeFull). */
+var tgc = null, tgctx = null, treeFull = true, tgcHide = false, tgcStyle = '';
+var TGC_TILE = 64;                       /* device pixels */
+var tgcDirty = null, tgcTX = 0, tgcTY = 0;
+
+/* what node i's segment looks like now, as one number: -1 not drawn */
+function treeSig(i, keys) {
+  var p = tpar[i];
+  if (wallM[(ty[i] | 0) * GW + (tx[i] | 0)] || wallM[(ty[p] | 0) * GW + (tx[p] | 0)]) return -1;
+  var tip = tkids[i] === 0 || !tstate[i];
+  var k = 0;
+  if (tstate[i]) { k = Math.round(tw[i] * TREE_WQ); if (k < 1) k = 1; if (k >= keys) k = keys - 1; }
+  var jn = tjoin[i], j = 0;
+  if (jn >= 0 && !wallM[(ty[jn] | 0) * GW + (tx[jn] | 0)] && treeClear(tx[i], ty[i], tx[jn], ty[jn])) j = tstate[i] && tstate[jn] ? 2 : 1;
+  return k * 8 + (tip ? 4 : 0) + j;
+}
+
+/* node i's segment's box in device pixels, padded for the widest stroke
+   and its caps; jn, when >= 0, the fusion target whose line is included */
+var tbx0 = 0, tby0 = 0, tbx1 = 0, tby1 = 0;
+function treeBox(i, jn, sx, sy) {
+  var p = tpar[i], g = tpar[p];
+  var x0 = tx[i], y0 = ty[i], x1 = x0, y1 = y0;
+  function inc(x, y) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+  inc(tx[p], ty[p]);
+  if (g >= 0) inc((tx[g] + tx[p]) * 0.5, (ty[g] + ty[p]) * 0.5);
+  if (jn >= 0) inc(tx[jn], ty[jn]);
+  var pad = TREE_WMAX * 0.5 + 1;
+  tbx0 = (x0 - pad) * sx; tby0 = (y0 - pad) * sy; tbx1 = (x1 + pad) * sx; tby1 = (y1 + pad) * sy;
+}
+function tgcMark() {
+  var a = Math.max(0, (tbx0 / TGC_TILE) | 0), b = Math.min(tgcTX - 1, (tbx1 / TGC_TILE) | 0);
+  var c = Math.max(0, (tby0 / TGC_TILE) | 0), d = Math.min(tgcTY - 1, (tby1 / TGC_TILE) | 0);
+  for (var y = c; y <= d; y++) for (var x = a; x <= b; x++) tgcDirty[y * tgcTX + x] = 1;
+}
+function tgcHit() {
+  var a = Math.max(0, (tbx0 / TGC_TILE) | 0), b = Math.min(tgcTX - 1, (tbx1 / TGC_TILE) | 0);
+  var c = Math.max(0, (tby0 / TGC_TILE) | 0), d = Math.min(tgcTY - 1, (tby1 / TGC_TILE) | 0);
+  for (var y = c; y <= d; y++) for (var x = a; x <= b; x++) if (tgcDirty[y * tgcTX + x]) return true;
+  return false;
+}
+
 function paintTree() {
   if (!veil || !veil.width) return;
   if (!vgc) { vgc = document.createElement('canvas'); vgctx = vgc.getContext('2d'); }
+  if (!tgc) { tgc = document.createElement('canvas'); tgctx = tgc.getContext('2d'); }
   var due = !S.running || S.simT - treePaintT >= TREE_REPAINT;
   if (vgc.width !== veil.width || vgc.height !== veil.height) { vgc.width = veil.width; vgc.height = veil.height; due = true; }
+  if (tgc.width !== veil.width || tgc.height !== veil.height) { tgc.width = veil.width; tgc.height = veil.height; treeFull = true; due = true; }
   if (!due && !treeDirty) return;
   treePaintT = S.simT; treeDirty = false;
-  var sx = vgc.width / GW, sy = vgc.height / GH, i, p;
-  var keys = (TREE_WMAX * TREE_WQ | 0) + 2, paths = new Array(keys), ghost = null, k;
+  var sx = vgc.width / GW, sy = vgc.height / GH, i, p, k;
+
+  /* the puddles, whole */
+  vgctx.save();
+  vgctx.setTransform(1, 0, 0, 1, 0, 0);
+  vgctx.clearRect(0, 0, vgc.width, vgc.height);
+  vgctx.setTransform(sx, 0, 0, sy, 0, 0);
+  if (!HIDE_MASS) paintPuddles(vgctx, sx, sy);
+  vgctx.restore();
+
+  /* the branches, where they changed */
+  var keys = (TREE_WMAX * TREE_WQ | 0) + 2;
+  var style = '';
+  for (k = 0; k < VEIN_BANDS.length; k++) style += VEIN_BANDS[k].style + '|';
+  if (HIDE_LINES !== tgcHide || style !== tgcStyle) { treeFull = true; tgcHide = HIDE_LINES; tgcStyle = style; }
+  tgcTX = Math.ceil(tgc.width / TGC_TILE); tgcTY = Math.ceil(tgc.height / TGC_TILE);
+  if (!tgcDirty || tgcDirty.length !== tgcTX * tgcTY) tgcDirty = new Uint8Array(tgcTX * tgcTY);
+  if (treeFull) tgcDirty.fill(1); else tgcDirty.fill(0);
+  var any = treeFull;
+  for (i = 1; i < tN; i++) {
+    var sg = HIDE_LINES ? -1 : treeSig(i, keys);
+    if (sg === tsig[i] && !treeFull) continue;
+    if (!treeFull) {
+      /* where it was, and where it is: the same box but for the fusion line */
+      if (tsig[i] !== -2) { treeBox(i, tjDrawn[i], sx, sy); tgcMark(); }
+      treeBox(i, tjoin[i], sx, sy); tgcMark();
+      any = true;
+    }
+    tsig[i] = sg; tjDrawn[i] = tjoin[i];
+  }
+  treeFull = false;
+  if (!any) return;
+
+  var paths = new Array(keys), ghost = null;
   for (k = 0; k < keys; k++) paths[k] = null;
   for (i = 1; i < tN; i++) {
+    if (tsig[i] < 0) continue;
+    treeBox(i, tjoin[i], sx, sy);
+    if (!tgcHit()) continue;
     p = tpar[i];
     /* drawn from the midpoint of the parent's segment to the midpoint of
        this one, curving through the parent: the nodes are the control
        polygon and the line is its quadratic spline, so a chain of
        two-cell steps reads as one bending vein. The root and a branch
-       point's first segment start at the node itself. */
-    /* nothing is drawn under a wall, live or ghost: the graph is laid
-       over the walls, and a wall poured across a branch would otherwise
-       show the branch through it */
-    if (wallM[(ty[i] | 0) * GW + (tx[i] | 0)] || wallM[(ty[p] | 0) * GW + (tx[p] | 0)]) continue;
+       point's first segment start at the node itself. Nothing is drawn
+       under a wall, live or ghost (treeSig's -1): the graph is laid over
+       the walls, and a wall poured across a branch would otherwise show
+       the branch through it. */
     var g = tpar[p], x0, y0;
     if (g >= 0) { x0 = (tx[g] + tx[p]) * 0.5; y0 = (ty[g] + ty[p]) * 0.5; } else { x0 = tx[p]; y0 = ty[p]; }
     var x1 = (tx[p] + tx[i]) * 0.5, y1 = (ty[p] + ty[i]) * 0.5;
-    var tip = tkids[i] === 0 || !tstate[i];
-    var path;
+    var sgi = tsig[i], tip = (sgi & 4) !== 0, path;
     if (!tstate[i]) {
       if (!ghost) ghost = new Path2D();
       path = ghost;
     } else {
       /* a segment is as wide as its child end: the width steps down at
          every branch point rather than the trunk carrying its twig's width */
-      var w = tw[i];
-      k = Math.round(w * TREE_WQ); if (k < 1) k = 1; if (k >= keys) k = keys - 1;
+      k = sgi >> 3;
       if (!paths[k]) paths[k] = new Path2D();
       path = paths[k];
     }
@@ -9126,35 +9224,40 @@ function paintTree() {
     path.quadraticCurveTo(tx[p], ty[p], x1, y1);
     if (tip) path.lineTo(tx[i], ty[i]);
     /* the fusion: straight on to the vein this tip met */
-    var jn = tjoin[i];
-    if (jn >= 0 && !wallM[(ty[jn] | 0) * GW + (tx[jn] | 0)] && treeClear(tx[i], ty[i], tx[jn], ty[jn])) {
-      var jp = tstate[i] && tstate[jn] ? path : (ghost || (ghost = new Path2D()));
+    var jf = sgi & 3;
+    if (jf) {
+      var jn = tjoin[i];
+      var jp = jf === 2 ? path : (ghost || (ghost = new Path2D()));
       jp.moveTo(tx[i], ty[i]); jp.lineTo(tx[jn], ty[jn]);
     }
   }
-  vgctx.save();
-  vgctx.setTransform(1, 0, 0, 1, 0, 0);
-  vgctx.clearRect(0, 0, vgc.width, vgc.height);
-  vgctx.setTransform(sx, 0, 0, sy, 0, 0);
-  vgctx.lineCap = 'round';
-  vgctx.lineJoin = 'round';
-  /* the puddles first, under everything */
-  if (!HIDE_MASS) paintPuddles(vgctx, sx, sy);
-  if (ghost && !HIDE_LINES) {
-    vgctx.globalAlpha = TREE_GHOST_A;
-    vgctx.lineWidth = TREE_GHOST_W;
-    vgctx.strokeStyle = VEIN_BANDS[0].style;
-    vgctx.stroke(ghost);
-    vgctx.globalAlpha = 1;
+  tgctx.save();
+  tgctx.setTransform(1, 0, 0, 1, 0, 0);
+  var clip = new Path2D();
+  for (var ty2 = 0; ty2 < tgcTY; ty2++) for (var tx2 = 0; tx2 < tgcTX; tx2++) {
+    if (!tgcDirty[ty2 * tgcTX + tx2]) continue;
+    tgctx.clearRect(tx2 * TGC_TILE, ty2 * TGC_TILE, TGC_TILE, TGC_TILE);
+    clip.rect(tx2 * TGC_TILE, ty2 * TGC_TILE, TGC_TILE, TGC_TILE);
   }
-  for (k = HIDE_LINES ? 0 : keys - 1; k >= 1; k--) {
+  tgctx.clip(clip);
+  tgctx.setTransform(sx, 0, 0, sy, 0, 0);
+  tgctx.lineCap = 'round';
+  tgctx.lineJoin = 'round';
+  if (ghost) {
+    tgctx.globalAlpha = TREE_GHOST_A;
+    tgctx.lineWidth = TREE_GHOST_W;
+    tgctx.strokeStyle = VEIN_BANDS[0].style;
+    tgctx.stroke(ghost);
+    tgctx.globalAlpha = 1;
+  }
+  for (k = keys - 1; k >= 1; k--) {
     if (!paths[k]) continue;
     var w2 = k / TREE_WQ;
-    vgctx.lineWidth = w2;
-    vgctx.strokeStyle = VEIN_BANDS[treeBand(w2)].style;
-    vgctx.stroke(paths[k]);
+    tgctx.lineWidth = w2;
+    tgctx.strokeStyle = VEIN_BANDS[treeBand(w2)].style;
+    tgctx.stroke(paths[k]);
   }
-  vgctx.restore();
+  tgctx.restore();
 }
 
 function snapshotTree(fs) {
@@ -11943,6 +12046,7 @@ function render() {
      laid once per frame onto a frame that is cleared, so nothing
      accumulates */
   if (BODY && VEIN_GRAPH && vgc) ctx.drawImage(vgc, 0, 0);
+  if (BODY && VEIN_TREE && tgc) ctx.drawImage(tgc, 0, 0);
   strokeFronts(ctx, sx, sy);
   strokeWhiskers(ctx, sx, sy);
   ctx.save();
