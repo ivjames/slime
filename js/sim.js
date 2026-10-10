@@ -10056,6 +10056,35 @@ function inkFresh(tc, sx, sy) {
 var veilTmp = null, vtctx = null;
 var veilDn = 0;                       // decay folded in at the next composite
 var veinFresh = false;                // buildVeins ran since the last composite
+/* the accumulator and the ink hold nothing, so neither is folded or
+   composited — see the empty-veil branch in render() */
+var veilBlank = false, inkBlank = false;
+
+/* would strokeVeins' colour pass put anything into the veil? */
+function veilEmpty() {
+  var k;
+  if (BODY) {
+    if (BODY_FILL) for (k = 0; k < BODY_LEVELS.length; k++) if (bodyPath[k]) return false;
+    if (TUBES) for (k = 0; k < TUBE_KEYS; k++) if (tubePaths[k]) return false;
+    if (outlinePath) return false;
+  } else if (lobePath) return false;
+  for (k = 0; k < VEIN_BANDS.length; k++) if (veinPath[k]) return false;
+  return true;
+}
+
+/* The record, once a rebuild. Under BODY it is redrawn whole from recPath
+   and vRecPath, so when both are null it is empty and stays out of the
+   composite; the plain record accumulates and is always drawn. */
+function inkFold(sx, sy) {
+  if (BODY) {
+    var none = !recPath && !vRecPath;
+    if (!(none && inkBlank)) recordBody(ictx, sx, sy);
+    inkBlank = none;
+  } else {
+    inkFresh(ictx, sx, sy);
+    inkBlank = false;
+  }
+}
 var whiskPath = null;
 
 /* The four directions a vein can run ACROSS: the across unit vector, the
@@ -11838,7 +11867,27 @@ function render() {
      pixels is 3.2 grid units, which is wider than the gaps between an
      objective's three bands and would close them into one blob */
   markCase = Math.min(MARK_CASE_PX / sx, MARK_CASE_MAX);
+  if (veinFresh && veilEmpty()) {
+    /* Nothing for the veil this rebuild — which, with the tree drawing the
+       branches into vgc, is every rebuild: the colour pass's bodies, tubes,
+       outline, lobes and bands are all off or null under BODY + VEIN_TREE.
+       The fold below still cost three full-canvas blits and two clears a
+       rebuild, and compositing the empty accumulator a full-canvas blit a
+       frame — about 11 ms of a 37 ms frame headless, for no pixels. So the
+       graph is painted as strokeVeins would have, the accumulator is
+       cleared once, and both the fold and its composite stand down until
+       the veil has something to hold again. */
+    if (BODY) { if (VEIN_TREE) paintTree(); else if (VEIN_GRAPH) paintVeinGraph(); }
+    if (!veilBlank) {
+      vactx.setTransform(1, 0, 0, 1, 0, 0);
+      vactx.clearRect(0, 0, veilAcc.width, veilAcc.height);
+      veilBlank = true;
+    }
+    inkFold(sx, sy);
+    veinFresh = false;
+  }
   if (veinFresh) {
+    veilBlank = false;
     /* Fresh wins wherever fresh drew; the decayed old survives only where it
        did not. Stated that way rather than as a per-pixel max because canvas
        has no max that includes alpha — 'lighten' blends colour but composes
@@ -11852,7 +11901,7 @@ function render() {
     vlctx.setTransform(1, 0, 0, 1, 0, 0);
     vlctx.clearRect(0, 0, veil.width, veil.height);
     strokeVeins(vlctx, sx, sy, false);
-    if (BODY) recordBody(ictx, sx, sy); else inkFresh(ictx, sx, sy);
+    inkFold(sx, sy);
     vmctx.setTransform(1, 0, 0, 1, 0, 0);
     vmctx.clearRect(0, 0, veilMask.width, veilMask.height);
     strokeVeins(vmctx, sx, sy, true);
@@ -11883,11 +11932,13 @@ function render() {
   paintFood(ctx);
   ctx.restore();
 
-  ctx.globalAlpha = BODY && VEIN_GRAPH ? REC_A : INK_A;
-  ctx.drawImage(ink, 0, 0);
-  ctx.globalAlpha = 1;
+  if (!inkBlank) {
+    ctx.globalAlpha = BODY && VEIN_GRAPH ? REC_A : INK_A;
+    ctx.drawImage(ink, 0, 0);
+    ctx.globalAlpha = 1;
+  }
   if (!SHEET) paintWalls(ctx, cv.width / GW, cv.height / GH);
-  ctx.drawImage(veilAcc, 0, 0);
+  if (!veilBlank) ctx.drawImage(veilAcc, 0, 0);
   /* the pinned graph, whole, over the veil: opaque where it is drawn and
      laid once per frame onto a frame that is cleared, so nothing
      accumulates */
