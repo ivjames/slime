@@ -5276,6 +5276,23 @@ function updateShocks(e) {
    9. rendering
    ------------------------------------------------------------ */
 var cv = null, ctx = null, off = null, octx = null, img = null, imgData = null;
+/* The top canvas over the plate, and what the plate was last drawn from —
+   see the backdrop in render(). bgVer is bumped by every pass that changes
+   a cached layer the backdrop shows. */
+var cvTop = null, topCtx = null;
+var bgVer = 0, bgDrawn = -1, bgFood = '', bgWalls = null, bgHaz = null;
+
+/* the food dots as drawn, to an eighth of a device pixel: the backdrop is
+   redrawn when one of them changes size, not on every frame something is
+   being eaten */
+function foodSig(sx) {
+  var e = S.exp, out = '', i;
+  for (i = 0; i < e.nodes.length; i++) {
+    var prog = S.nodeDone[i] ? 1 : S.nodeProg[i];
+    out += Math.round(e.nodes[i].r * FOOD_DOT_R * Math.sqrt(1 - prog) * sx * 8) + ',';
+  }
+  return out + Math.round(originFrac(e) * 1000);
+}
 
 /* Does the picture need rebuilding, or can the last one be shown again?
    Everything expensive in the renderer — eight separable blurs over 109,200
@@ -5340,6 +5357,7 @@ var ovl = null, ovlCtx = null, ovlImg = null, ovlData = null;
 var ovlLive = false, ovlAny = false;
 
 function paintOverlay() {
+  bgVer++;
   var d = ovlData, any = false, mat = SLIME_W > 0;
   for (var i = 0, p = 0; i < NCELL; i++, p += 4) {
     var r = 0, g = 0, b = 0;
@@ -5417,6 +5435,8 @@ function profTick(now) {
 function initCanvas() {
   cv = $('cv');
   ctx = cv.getContext('2d', { alpha: false });
+  cvTop = $('cvTop');
+  topCtx = cvTop.getContext('2d');
   veil = document.createElement('canvas');
   vlctx = veil.getContext('2d');
   veilAcc = document.createElement('canvas');
@@ -5464,6 +5484,8 @@ function resizeCanvas() {
   }
   if (cv.width !== w || cv.height !== h) {
     cv.width = w; cv.height = h;
+    cvTop.width = w; cvTop.height = h;
+    bgVer++;
     /* Sizing clears them, which is right: an accumulator holding strokes at
        the old scale has nothing true to say at the new one. But a PAUSED dish
        will not rebuild — its frames re-composite the accumulator that was
@@ -6433,6 +6455,7 @@ function bridgeSettle() {
 }
 
 function paintField() {
+  bgVer++;
   var d = imgData;
   buildRidge();
   /* Fold this rebuild's fields into the temporal average BEFORE painting, so
@@ -9157,7 +9180,7 @@ function paintTree() {
   if (vgc.width !== veil.width || vgc.height !== veil.height) { vgc.width = veil.width; vgc.height = veil.height; due = true; }
   if (tgc.width !== veil.width || tgc.height !== veil.height) { tgc.width = veil.width; tgc.height = veil.height; treeFull = true; due = true; }
   if (!due && !treeDirty) return;
-  treePaintT = S.simT; treeDirty = false;
+  treePaintT = S.simT; treeDirty = false; bgVer++;
   var sx = vgc.width / GW, sy = vgc.height / GH, i, p, k;
 
   /* the puddles, whole */
@@ -9819,6 +9842,7 @@ function emitChain(bandPaths, rec) {
    painting. Called from the veil's colour pass, so the canvas it hands
    over is always the size of the one it goes into. */
 function paintVeinGraph() {
+  bgVer++;
   if (!veil || !veil.width) return;
   if (!vgc) { vgc = document.createElement('canvas'); vgctx = vgc.getContext('2d'); }
   /* A halted dish gets no later rebuild, so its last one must not be
@@ -10187,11 +10211,12 @@ function veilEmpty() {
 function inkFold(sx, sy) {
   if (BODY) {
     var none = !recPath && !vRecPath;
-    if (!(none && inkBlank)) recordBody(ictx, sx, sy);
+    if (!(none && inkBlank)) { recordBody(ictx, sx, sy); bgVer++; }
     inkBlank = none;
   } else {
     inkFresh(ictx, sx, sy);
     inkBlank = false;
+    bgVer++;
   }
 }
 var whiskPath = null;
@@ -11954,17 +11979,6 @@ function render() {
     fieldDirty = false;
   }
 
-  ctx.imageSmoothingEnabled = true;
-  if ('imageSmoothingQuality' in ctx) ctx.imageSmoothingQuality = 'high';
-  if (SHEET) ctx.drawImage(off, 0, 0, cv.width, cv.height);
-  else {
-    paintGround(ctx, cv.width / GW, cv.height / GH);
-    if (ovlAny) {
-      ctx.globalCompositeOperation = 'lighter';
-      ctx.drawImage(ovl, 0, 0, cv.width, cv.height);
-      ctx.globalCompositeOperation = 'source-over';
-    }
-  }
 
   /* The sheet is the field; the veins are lines drawn over it — through the
      veil accumulator, so what leaves the picture fades instead of vanishing.
@@ -12005,6 +12019,7 @@ function render() {
   }
   if (veinFresh) {
     veilBlank = false;
+    bgVer++;
     /* how much of the last drawn veil survives this fold */
     veilResid = vEmpty ? veilResid * veilDn : 1;
     /* Fresh wins wherever fresh drew; the decayed old survives only where it
@@ -12045,24 +12060,56 @@ function render() {
     veilTmp = spare;   vtctx = spareCtx;
     veinFresh = false;
   }
-  /* the food, under every layer that could be covering it — see paintFood */
-  ctx.save();
-  ctx.setTransform(sx, 0, 0, sy, 0, 0);
-  paintFood(ctx);
-  ctx.restore();
-
-  if (!inkBlank) {
-    ctx.globalAlpha = BODY && VEIN_GRAPH ? REC_A : INK_A;
-    ctx.drawImage(ink, 0, 0);
-    ctx.globalAlpha = 1;
+  /* ---- the backdrop: everything that holds still between repaints ----
+     Ground, haze, food, record, walls, veil, puddles and branches go onto
+     the plate canvas, cv, and only when one of them has changed: a repaint
+     of the tree, the puddles, the haze, the veil or the record (bgVer), a
+     wall or hazard swap, a food dot changing size, a resize, or a dish
+     that is not running (the verdict and replay-exit paths render by hand,
+     and the harness repaints through them). Everything that moves every
+     frame — the runners and whiskers, the shock wash, the instrument marks,
+     the brush ring — is drawn on cvTop, a transparent canvas stacked over
+     it and cleared each frame. The browser composites the two; the frame
+     no longer copies the cached canvases into the plate, which headless
+     was the largest single cost left in a frame. */
+  var fsig = foodSig(sx);
+  if (bgVer !== bgDrawn || fsig !== bgFood || S.walls !== bgWalls || S.hazards !== bgHaz || !S.running) {
+    bgDrawn = bgVer; bgFood = fsig; bgWalls = S.walls; bgHaz = S.hazards;
+    ctx.imageSmoothingEnabled = true;
+    if ('imageSmoothingQuality' in ctx) ctx.imageSmoothingQuality = 'high';
+    if (SHEET) ctx.drawImage(off, 0, 0, cv.width, cv.height);
+    else {
+      paintGround(ctx, sx, sy);
+      if (ovlAny) {
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.drawImage(ovl, 0, 0, cv.width, cv.height);
+        ctx.globalCompositeOperation = 'source-over';
+      }
+    }
+    /* the food, under every layer that could be covering it — see paintFood */
+    ctx.save();
+    ctx.setTransform(sx, 0, 0, sy, 0, 0);
+    paintFood(ctx);
+    ctx.restore();
+    if (!inkBlank) {
+      ctx.globalAlpha = BODY && VEIN_GRAPH ? REC_A : INK_A;
+      ctx.drawImage(ink, 0, 0);
+      ctx.globalAlpha = 1;
+    }
+    if (!SHEET) paintWalls(ctx, sx, sy);
+    if (!veilBlank) ctx.drawImage(veilAcc, 0, 0);
+    /* the pinned graph, whole, over the veil: opaque where it is drawn and
+       laid once per frame onto a frame that is cleared, so nothing
+       accumulates */
+    if (BODY && VEIN_GRAPH && vgc) ctx.drawImage(vgc, 0, 0);
+    if (BODY && VEIN_TREE && tgc) ctx.drawImage(tgc, 0, 0);
   }
-  if (!SHEET) paintWalls(ctx, cv.width / GW, cv.height / GH);
-  if (!veilBlank) ctx.drawImage(veilAcc, 0, 0);
-  /* the pinned graph, whole, over the veil: opaque where it is drawn and
-     laid once per frame onto a frame that is cleared, so nothing
-     accumulates */
-  if (BODY && VEIN_GRAPH && vgc) ctx.drawImage(vgc, 0, 0);
-  if (BODY && VEIN_TREE && tgc) ctx.drawImage(tgc, 0, 0);
+
+  /* ---- the top: what moves every frame ---- */
+  var tc0 = ctx;
+  ctx = topCtx;
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(0, 0, cvTop.width, cvTop.height);
   strokeFronts(ctx, sx, sy);
   strokeWhiskers(ctx, sx, sy);
   ctx.save();
@@ -12135,6 +12182,7 @@ function render() {
   }
 
   ctx.restore();
+  ctx = tc0;
 }
 
 /* ------------------------------------------------------------

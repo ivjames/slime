@@ -241,6 +241,10 @@ body.touch .keys-touch{display:grid}
    drag across it still scrolls the page on iOS. */
 #stage canvas{display:block;width:100%;height:auto;touch-action:none;
   -webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+/* The plate is two canvases: #cv holds what stands still between repaints,
+   #cvTop over it what moves every frame (see the backdrop in render()). The
+   top one takes no input — the stage listens for the brush. */
+#stage #cvTop{position:absolute;left:0;top:0;width:100%;height:100%;pointer-events:none}
 /* ---------- the console ---------- */
 /* Every readout the run has, in one panel UNDER the dish: the code line and
    the clock, the objective, the meters, the depot list and the note.
@@ -725,6 +729,7 @@ body.touch .dish{min-height:132px}
       <!-- the plate holds the culture and nothing else -->
       <div id="stage">
         <canvas id="cv"></canvas>
+        <canvas id="cvTop" aria-hidden="true"></canvas>
         <div id="pauseveil">Culture held</div>
       </div>
 
